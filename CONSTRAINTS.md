@@ -56,6 +56,9 @@ ruff check . && ruff format --check . && mypy app
 | C-06 | 2026-10-01 | D3 补测时发现 TestM1ChainInfo 整类用例从未被执行（D2 覆盖率虚高） | `@respx.mock` 用作**类装饰器**会导致 pytest 收集不到该类任何用例（静默丢失，非报错） | 禁止类级 `@respx.mock`，一律方法级装饰；每阶段提交前用 `pytest --collect-only -q` 核对用例总数与文件内 `def test_` 数一致 |
 | C-07 | 2026-10-01 | ABI 由 json.dumps 生成，文件中残留 `true/false` 字面量导致模块不可导入 | 生成 Python 数据文件不能用 JSON 序列化器直出 | 生成式资产（ABI 等）必须生成后立即 `importlib` 冒烟验证 |
 | C-08 | 2026-10-01 | `Web3.to_hex(str)` / `Web3.to_bytes(hexstr=str)` 在运行时抛 TypeError（mypy 亦报） | web3 转换函数不接受裸 str | hex 串一律经 `core/rpc.hex_to_bytes`/`HexBytes()` 包装，模块禁止直接 `Web3.to_hex(字符串)` |
+| C-09 | 2026-10-01 | D4 给 storage JSON 边界函数大量 ANN401 | redis/duckdb 封装天然透传任意 JSON | pyproject per-file-ignores 增加 `app/storage/**` 豁免 ANN401（JSON 序列化边界 Any 是正确类型） |
+| C-10 | 2026-10-01 | unit 测试把 indexer 水位写进了持久 data/botchain.duckdb，且同步 TestClient 消费 SSE 全流挂满 300s | 测试 fixture 未隔离 app.state.store；TestClient.get 会等 StreamingResponse 整流结束 | unit 一律用 tmp_path DuckStore 替换 app.state.store（fixture 已内置）；SSE 端点只做路由存在性断言，全流验证放 live/脚本 |
+| C-11 | 2026-10-01 | rm 删除 duckdb 主库后 WAL 残留，新进程重放 WAL 恢复了旧数据（status 出现脏水位） | DuckDB 的 WAL 与主库分离 | 清理 duckdb 必须主库+wal 成对删除；测试断言涉及库状态时先确认隔离 |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；

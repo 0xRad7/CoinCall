@@ -114,6 +114,7 @@ def make_fake_w3() -> MagicMock:
     w3.eth.wait_for_transaction_receipt.return_value = make_fake_receipt()
     w3.eth.get_transaction_receipt.return_value = make_fake_receipt()
     w3.eth.estimate_gas.return_value = 21000
+    w3.eth.get_logs.return_value = []
     w3.eth.contract.return_value = make_fake_contract()
     w3.is_connected.return_value = True
     w3.to_checksum_side_effect = None

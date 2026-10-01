@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import redis
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
@@ -11,6 +12,7 @@ from app import __version__
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
 from app.core.explorer import ExplorerClient
+from app.core.idempotency import IdempotencyStore
 from app.core.keystore import Keystore
 from app.core.log import TraceIdMiddleware, get_logger, setup_logging
 from app.core.rpc import make_http_client, make_web3, resolve_proxy
@@ -23,9 +25,12 @@ from app.modules import (
     erc4337,
     erc8004,
     faucet,
+    indexer,
     tokens,
     transactions,
 )
+from app.storage.duckdb import DuckStore
+from app.storage.redis_store import RedisStore
 
 logger = get_logger(__name__)
 
@@ -66,6 +71,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.faucet = make_http_client(
         spec.faucet_api_url, proxy=resolve_proxy(spec.faucet_api_url, settings.proxy)
     )
+    app.state.store = DuckStore(settings.duckdb_path, network=spec.network.value)
+    app.state.indexer = indexer.IndexerService(w3=app.state.w3, store=app.state.store, chain=spec)
+    redis_client = None
+    if settings.redis_url:
+        redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    app.state.redis = RedisStore(redis_client) if redis_client else None
+    app.state.idempotency = IdempotencyStore(app.state.redis)
+    logger.info(
+        "storage ready",
+        extra={"duckdb": settings.duckdb_path, "redis": bool(redis_client)},
+    )
     keystore_secret = (
         settings.bot_chain_keystore_secret.get_secret_value()
         if settings.bot_chain_keystore_secret
@@ -83,6 +99,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     explorer_http.close()
     app.state.bundler.close()
     app.state.faucet.close()
+    app.state.store.close()
+    if redis_client is not None:
+        redis_client.close()
     logger.info("lifespan shutdown")
 
 
@@ -111,6 +130,7 @@ def create_app() -> FastAPI:
         erc8004.router,
         bdex.router,
         faucet.router,
+        indexer.router,
     ):
         app.include_router(module_router, prefix="/api/v1")
 

@@ -429,3 +429,17 @@ class TestM10Faucet:
         ).json()
         assert body["claimed"] is False
         assert body["manual_url"].startswith("https://faucet.bohr.life")
+
+
+class TestM9Indexer:
+    def test_indexer_status(self, client: TestClient) -> None:
+        body = client.get(f"{API}/indexer/status").json()
+        assert body["network"] == "testnet"
+        assert body["counts"]["blocks"] == 0  # lifespan 建的空库
+
+    def test_sync_logs_smoke_with_fake_w3(self, client: TestClient) -> None:
+        r = client.post(f"{API}/indexer/sync/logs", json={"window": 1})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["stream"] == "logs"
+        assert body["synced_blocks"] >= 1  # 空 watermark 时 =window；有水位时含 64 块 reorg 回扫

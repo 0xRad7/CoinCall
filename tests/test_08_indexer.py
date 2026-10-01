@@ -1,11 +1,11 @@
 """live：Indexer 数据面（02 篇 test_08 矩阵）：Blockscout v2 分页 + getLogs 窗口 + 真实入库。"""
 
 import pytest
-from app.modules.indexer import IndexerService
-from app.storage.duckdb import DuckStore
 
 from app.core.abis.erc20 import TRANSFER_TOPIC
 from app.core.chains import get_chain
+from app.modules.indexer import IndexerService
+from app.storage.duckdb import DuckStore
 
 pytestmark = pytest.mark.live
 

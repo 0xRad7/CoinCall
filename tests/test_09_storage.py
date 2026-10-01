@@ -1,10 +1,11 @@
 """unit：DuckDB/Redis/幂等（02 篇 test_09 矩阵，全离线：tmp 库 + fakeredis）。"""
 
 import pytest
+from fakeredis import FakeRedis
+
 from app.core.idempotency import IdempotencyStore
 from app.storage.duckdb import DuckStore
 from app.storage.redis_store import RedisStore
-from fakeredis import FakeRedis
 
 pytestmark = pytest.mark.unit
 

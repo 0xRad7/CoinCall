@@ -54,6 +54,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "ANN", "PLR2004", "S105", "S106"]  # C-02 断言字面量；C-06 代币域 token_* 字段名触发 S105 误报
 "app/web/**" = ["E501"]           # 单文件 playground 页放宽行长
+"app/storage/**" = ["ANN401"]     # JSON 序列化边界，Any 是正确类型（C-09）
 
 [tool.mypy]
 python_version = "3.11"
