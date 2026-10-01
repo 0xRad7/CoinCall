@@ -15,7 +15,7 @@
 | A3 | 合约地址/端点**只存在于 `app/core/chains.py`**，禁止在任何其他文件硬编码地址或 RPC URL | code review + grep 检查 |
 | A4 | 写接口一律 `dry_run=true` 默认返回未签名预览；真实发送需显式 `dry_run=false`；私钥只从环境变量 `BOT_CHAIN_TEST_PRIVATE_KEY` 读取（仅允许测试网私钥），接口/日志永不回显 | `core/tx.py` + `core/log.py` |
 | A5 | 测试先行：每个模块先写测试再写实现；`needs_funds` 用例无私钥时显式 skip（附领水指引 `https://faucet.bohr.life/basic`），skip 不算红 | `tests/` + 三级 marker |
-| A6 | gas 恒定 20 gwei（baseFee=0）、出块约 1 秒、公共 RPC 无 debug/trace 方法——禁止以太坊式动态费用与深度追踪 | `core/tx.py` |
+| A6 | gas 恒定 20 gwei（baseFee=0）、出块约 1 秒、公共 RPC 无 debug/trace 方法——禁止以太坊式动态费用与深度追踪；链为 POA（extraData 277B），web3 实例必须经 `make_web3` 工厂装配 POA 中间件（C-04） | `core/rpc.py` |
 | A7 | 服务运行期网络访问仅限 `*.bohr.life` 域与 faucet 探测；不主动访问 `botchain.ai` 主网域（除非显式主网模式+代理） | `core/rpc.py` |
 | A8 | 不改动 `bot_chain_scripts/`、`BOT_CHAIN_REPORT.md`、`submission/`、`docs/`；蓝图与真实链行为冲突时以实测为准并记入偏差清单 | `RESULTS.md` 偏差节 |
 
@@ -49,6 +49,10 @@ ruff check . && ruff format --check . && mypy app
 | 编号 | 日期 | 违反事实 | 根因 | 新增/强化约束 |
 |---|---|---|---|---|
 | C-01 | 2026-10-01 | 首次提交消息 `chore: 初始化工程…` 被环境级 commit-msg 钩子拒绝 | 本机存在全局提交分型校验（typed-commit-discipline），要求 `type(scope): 描述`，scope 必填 | §B.8 强化：所有提交消息必须为 `type(scope): 描述` 形式（scope 必填，如 `feat(m5)`、`test(d1)`、`chore(build)`） |
+| C-02 | 2026-10-01 | 首轮 ruff 报 199 项：中文全角标点（RUF001/002/003 ×176）与测试断言字面量（PLR2004 ×8）大量误报 | 任务钉死的 ruff 配置未考虑中文文档项目与测试语义：全角标点是中文文档正确写法；测试里 HTTP 状态码/链 ID 字面量即规格本身 | pyproject 增加 ignore RUF001/002/003 与 tests 豁免 PLR2004（带注释引用本条）；其余问题一律修代码不放宽 |
+| C-03 | 2026-10-01 | `ExceptionRetryConfiguration(retries=2)` 抛 pydantic ValidationError（errors 字段拒绝 None） | web3 7.16 的该类 `__init__` 默认 errors=None 与 pydantic is-instance 校验冲突，必须显式传 errors=(ConnectionError, HTTPError, Timeout) | 凡遇第三方库"默认参数即崩"的行为，先查库内默认构造处照抄，再沉淀；禁止绕过（如捕获后吞掉） |
+| C-04 | 2026-10-01 | D1 live 首跑 3 用例失败：`get_block` 抛 ExtraDataLengthError（extraData 277B） | **BOT Chain 实为 POA 链**，块头 extraData 超以太坊上限 32B；尽调脚本走裸 make_request 未暴露此问题 | 铁律 A6 补充：POA 适配（ExtraDataToPOAMiddleware）是 make_web3 的固定装配，任何新建 web3 实例必须走 make_web3 工厂，禁止直接 Web3(HTTPProvider(...)) |
+| C-05 | 2026-10-01 | `make_request("debug_traceTransaction")` 未抛 Web3RPCError，用例 DID NOT RAISE 失败 | web3 7.16 make_request 对 JSON-RPC error 返回 `{"error": ...}` 字典，异常仅在高层 API 抛 | 对"预期错误"的断言必须同时接受「返回 error 字典」与「抛异常」两种形态（core 层封装时同样按此处理） |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；
