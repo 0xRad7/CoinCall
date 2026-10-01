@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 静态检查门：每次提交强制执行（依据 CONSTRAINTS.md §C）
+# 只跑秒级静态三连；pytest 覆盖率门在阶段收尾单独执行
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[pre-commit] ruff check ."
+uv run ruff check .
+echo "[pre-commit] ruff format --check ."
+uv run ruff format --check .
+if [ -d app ]; then
+  echo "[pre-commit] mypy app"
+  uv run mypy app
+fi
+echo "[pre-commit] 静态检查通过"
