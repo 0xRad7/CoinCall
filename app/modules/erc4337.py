@@ -10,16 +10,18 @@ from web3 import Web3
 from app.core.abis.erc4337 import SIMPLE_ACCOUNT_FACTORY_ABI
 from app.core.bundler import (
     BundlerClient,
+    _probe_userop_nonce,
     account_has_code,
     build_and_send_user_op,
     build_user_operation,
     predict_account_address,
     sign_user_operation,
 )
+from app.core.config import Settings
 from app.core.deps import BundlerDep, ChainDep, SettingsDep, TxServiceDep, Web3Dep
 from app.core.errors import ServiceError
 from app.core.rpc import contract_at, hex_to_bytes
-from app.core.tx import TxPreview, TxReceiptSummary, wei_from_decimal
+from app.core.tx import TxPreview, TxReceiptSummary, TxService, wei_from_decimal
 
 router = APIRouter(prefix="/aa", tags=["M5 aa"])
 
@@ -203,13 +205,20 @@ def aa_userop_status(op_hash: str, bundler: BundlerDep) -> UserOpHashView:
     )
 
 
+def _owner_key_or_raise(owner: str, settings: Settings, tx_service: TxService) -> str:
+    """estimate/探测签名需要 owner 的私钥：keystore 代管账户或 env 出资账户。"""
+    del settings  # 签名者统一经 TxService.resolve_signer（keystore/env 双支持）
+    return tx_service.resolve_signer(owner).key.hex()
+
+
 @router.post("/userop/estimate")
-def aa_userop_estimate(
+def aa_userop_estimate(  # noqa: PLR0917  # FastAPI 依赖注入多参
     request: UserOpEstimateRequest,
     w3: Web3Dep,
     chain: ChainDep,
     settings: SettingsDep,
     bundler: BundlerDep,
+    tx_service: TxServiceDep,
 ) -> dict[str, Any]:
     owner = _resolve_owner(request.owner, settings)
     user_op = build_user_operation(
@@ -221,10 +230,13 @@ def aa_userop_estimate(
         value_wei=int(request.value_wei),
         calldata=hex_to_bytes(request.calldata),
     )
+    client = BundlerClient(bundler)
     try:
-        est = BundlerClient(bundler).estimate_user_operation_gas(
-            user_op, chain.contracts.entry_point
+        # 本链 nonce 独立计数（C-19）：先探测正确 nonce 再取估值
+        user_op["nonce"] = _probe_userop_nonce(
+            w3, client, chain, user_op, _owner_key_or_raise(owner, settings, tx_service)
         )
+        est = client.estimate_user_operation_gas(user_op, chain.contracts.entry_point)
     except Exception as exc:  # estimate 失败返回错误详情而非 5xx
         return {"error": str(exc)[:200]}
     return {"estimate": est}
@@ -234,29 +246,25 @@ def aa_userop_estimate(
     "/execute",
     description="一步式 build+sign+send+等回执（demo 主力）；dry_run=true 默认仅预览",
 )
-def aa_execute(
+def aa_execute(  # noqa: PLR0917  # FastAPI 依赖注入多参（与 PLR0913 同理）
     request: ExecuteRequest,
     w3: Web3Dep,
     chain: ChainDep,
     settings: SettingsDep,
     bundler: BundlerDep,
+    tx_service: TxServiceDep,
 ) -> dict[str, Any]:
-    if not settings.funded_key:
-        msg = "未配置 BOT_CHAIN_TEST_PRIVATE_KEY，无法签名 UserOperation"
-        raise ServiceError(msg, code="no_signer")
     owner = _resolve_owner(request.owner, settings)
-    key = settings.funded_key if Account.from_key(settings.funded_key).address == owner else None
-    if key is None:
-        msg = f"owner={owner} 无可用签名私钥"
-        raise ServiceError(msg, code="no_signer")
+    signer = tx_service.resolve_signer(owner)  # keystore 代管账户或 env 出资账户
     return build_and_send_user_op(
         w3=w3,
         bundler=BundlerClient(bundler),
         chain=chain,
-        owner_key=key,
+        owner_key=signer.key.hex(),
         salt=request.salt,
         target=Web3.to_checksum_address(request.target),
         value_wei=int(request.value_wei),
         calldata=hex_to_bytes(request.calldata),
         dry_run=request.dry_run,
+        tx_service=tx_service,
     )

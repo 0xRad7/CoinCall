@@ -68,6 +68,20 @@ ENTRY_POINT_EVENTS_ABI: list[dict] = [
 # EntryPoint v0.7 视图：UserOp 哈希（签名依赖）
 ENTRY_POINT_ABI: list[dict] = [
     {
+        "name": "depositFor",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [{"name": "account", "type": "address"}],
+        "outputs": [],
+    },
+    {
+        "name": "balanceOf",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "account", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
         "name": "getUserOpHash",
         "type": "function",
         "stateMutability": "view",
@@ -90,5 +104,5 @@ ENTRY_POINT_ABI: list[dict] = [
             }
         ],
         "outputs": [{"name": "", "type": "bytes32"}],
-    }
+    },
 ]

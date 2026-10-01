@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+from app.core.errors import ServiceError
 from app.core.tx import TxPreview, TxReceiptSummary
 
 CHAIN_ID = 968
@@ -154,6 +155,7 @@ def make_fake_tx_service() -> MagicMock:
         )
 
     service.execute.side_effect = _execute
+    service.resolve_signer.side_effect = ServiceError("no signer (fake)")
     return service
 
 

@@ -62,6 +62,12 @@ ruff check . && ruff format --check . && mypy app
 | C-12 | 2026-10-01 | demo/CLI 脚本被 T20(print)/PLR0915/PLR2004 全量拦截 | 任务钉死配置按服务代码口径，未覆盖脚本语义 | pyproject per-file-ignores 增加 `scripts/**`（CLI 输出/剧本步骤/断言字面量即剧本本身） |
 | C-13 | 2026-10-01 | G5 步骤 7 失败：dry_run 预览对无余额账户做 estimateGas 报 insufficient funds | 预览路径复用了发送路径的 gas 估值，隐式依赖账户状态 | dry_run 的语义=不依赖链上状态：estimate 失败时回退保守默认 gas（MIN_GAS×margin），仅真实发送严格 estimate |
 | C-14 | 2026-10-01 | 服务进程持有 data/botchain.duckdb 期间 unit 全套 44 errors（lifespan 建库锁冲突） | DuckDB 单文件单写者，跨进程互斥 | 跑 unit/测试前确认无本服务进程占用 DUCKDB_PATH；部署上 api 与 indexer 必须同进程（04 篇设计依据） |
+| C-15 | 2026-10-02 | 首次加载真实 .env 即崩：BOT_CHAIN_ALLOW_MAINNET=（空串）pydantic bool 解析失败 | .env 样例的空值形态未做归一 | config 层 field_validator：空串 bool 一律归 False |
+| C-16 | 2026-10-02 | bundler 拒收 v0.7 packed 字段（accountGasLimits/gasFees bytes32）报 must be a big number | bundler.bohr.life 的 RPC 校验要求离散字段形态（verificationGasLimit/callGasLimit/maxFeePerGas/maxPriorityFeePerGas） | UserOp 的 RPC 形态用离散字段；packed bytes32 仅用于 getUserOpHash 的 eth_call |
+| C-17 | 2026-10-02 | 4337 上链全链路受阻：bundler 对 initCode 模拟报 AA20（EOA 直调 factory 正常）；eth_sendUserOperation 接受 UserOp 后不出 bundle（30s+ 不上链，debug_* 方法关闭） | bundler.bohr.life 基础设施限制 | 两步式建户（普通交易 createAccount）；上链验收以 estimate 模拟为口径并显式 skip 记偏差 #17 |
+| C-18 | 2026-10-02 | EntryPoint.depositFor 在本链真实 revert（selector 正确、gas 充足） | 该 EntryPoint 为自制实现，depositFor 不可用 | 入金走 SimpleAccount.receive()（普通转账即 addDeposit 入 EntryPoint） |
+| C-19 | 2026-10-02 | AA25 invalid account nonce：本链 EntryPoint 无 getNonce 视图、nonce 独立于账户 tx-nonce（CREATE2 出生合约 tx-nonce=1 而 UserOp nonce 从 0 计） | 自制 EntryPoint 的 nonce 语义与标准不符 | 发送前用 estimate 扫描探测正确 nonce（_probe_userop_nonce，仅 RPC 模拟不花 gas） |
+| C-20 | 2026-10-02 | 本轮多次 heredoc 脚本做文本替换静默失败（ruff format 改排版后锚点不匹配），造成半套补丁上线的连环 debug | 盲字符串替换无命中校验且 assert 失败时不写盘的认知偏差 | 对格式化工具处理过的文件：先 Read 再 Edit 工具级替换；脚本替换必须 assert 且失败即停 |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；

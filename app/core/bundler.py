@@ -5,11 +5,14 @@ gasFees = maxPriorityFeePerGas(左16B) + maxFeePerGas(右16B)。
 gas 按链现实恒定 20 gwei（铁律 A6，baseFee=0 下 maxFee=20gwei 足够）。
 """
 
+from __future__ import annotations
+
 import time
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from eth_account import Account
-from eth_typing import ChecksumAddress
+from eth_keys.datatypes import PrivateKey
+from eth_typing import ChecksumAddress, HexStr
 from hexbytes import HexBytes
 from httpx import Client
 from web3 import Web3
@@ -21,18 +24,29 @@ from app.core.abis.erc4337 import (
     SIMPLE_ACCOUNT_FACTORY_ABI,
 )
 from app.core.chains import ChainSpec
+
+if TYPE_CHECKING:
+    from app.core.tx import TxService
 from app.core.errors import ChainError, ServiceError
 from app.core.rpc import checksum, contract_at, hex_to_bytes
 
 GAS_PRICE_WEI = 20 * 10**9
-DEFAULT_VERIFICATION_GAS = 100_000
-DEFAULT_CALL_GAS = 50_000
+AA_MAX_FEE_WEI = 30 * 10**9  # UserOp 报 1.5×：bundler 打包激励（结算按 effectiveGasPrice）
+DEFAULT_VERIFICATION_GAS = (
+    500_000  # 含 initCode 建户（SimpleAccount 代理部署约 300-400k，AA20 教训）
+)
+DEFAULT_CALL_GAS = 100_000
 DEFAULT_PRE_VERIFICATION_GAS = 50_000
 RECEIPT_POLL_S = 30
 
 
 def _pad16(value: int) -> str:
     return Web3.to_hex(value)[2:].rjust(32, "0")
+
+
+def _pack_pair(left: int, right: int) -> bytes:
+    """v0.7 packed bytes32：左 16B ‖ 右 16B（仅 getUserOpHash 使用）。"""
+    return left.to_bytes(16, "big") + right.to_bytes(16, "big")
 
 
 class BundlerClient:
@@ -107,14 +121,17 @@ def build_user_operation(
             factory.encode_abi("createAccount", args=[checksum(owner), salt])
         )
     nonce = w3.eth.get_transaction_count(cast(ChecksumAddress, checksum(sender)), "pending") or 0
+    # bundler.bohr.life 实测要求离散字段形态（C-16）；packed bytes32 仅用于 getUserOpHash
     return {
         "sender": sender,
-        "nonce": Web3.to_hex(nonce),
+        "nonce": str(nonce),
         "initCode": Web3.to_hex(init_code) if init_code else "0x",
         "callData": Web3.to_hex(HexBytes(exec_data)),
-        "accountGasLimits": "0x" + _pad16(DEFAULT_VERIFICATION_GAS) + _pad16(DEFAULT_CALL_GAS),
-        "preVerificationGas": Web3.to_hex(DEFAULT_PRE_VERIFICATION_GAS),
-        "gasFees": "0x" + _pad16(GAS_PRICE_WEI) + _pad16(GAS_PRICE_WEI),
+        "verificationGasLimit": str(DEFAULT_VERIFICATION_GAS),
+        "callGasLimit": str(DEFAULT_CALL_GAS),
+        "preVerificationGas": str(DEFAULT_PRE_VERIFICATION_GAS),
+        "maxFeePerGas": str(AA_MAX_FEE_WEI),
+        "maxPriorityFeePerGas": str(AA_MAX_FEE_WEI),
         "paymasterAndData": "0x",
         "signature": "0x",
     }
@@ -127,18 +144,76 @@ def sign_user_operation(
     entry_point = contract_at(w3, chain.contracts.entry_point, ENTRY_POINT_ABI)
     op_tuple = (
         user_op["sender"],
-        int(user_op["nonce"], 16),
+        int(user_op["nonce"]),
         hex_to_bytes(user_op["initCode"]),
         hex_to_bytes(user_op["callData"]),
-        hex_to_bytes(user_op["accountGasLimits"]),
-        int(user_op["preVerificationGas"], 16),
-        hex_to_bytes(user_op["gasFees"]),
+        _pack_pair(int(user_op["verificationGasLimit"]), int(user_op["callGasLimit"])),
+        int(user_op["preVerificationGas"]),
+        _pack_pair(int(user_op["maxPriorityFeePerGas"]), int(user_op["maxFeePerGas"])),
         hex_to_bytes(user_op["paymasterAndData"]),
         hex_to_bytes(user_op["signature"]),
     )
     op_hash = entry_point.functions.getUserOpHash(op_tuple).call()
-    signed = Account.sign_message(__hash=op_hash, private_key=owner_key)
-    return {**user_op, "signature": Web3.to_hex(signed.signature)}
+    # SimpleAccount 校验的是对 userOpHash 的裸 ECDSA（recover 直接对 32B hash），非 EIP-191
+    private_key = PrivateKey(Web3.to_bytes(hexstr=HexStr(owner_key)))
+    sig = private_key.sign_msg_hash(bytes(op_hash))
+    # eth_keys 的 v 是 0/1 形态；SimpleAccount 用 OZ ECDSA.recover，要求 v∈{27,28}（AA23 教训）
+    signature = sig.r.to_bytes(32, "big") + sig.s.to_bytes(32, "big") + bytes([sig.v + 27])
+    return {**user_op, "signature": Web3.to_hex(HexBytes(signature))}
+
+
+DEPOSIT_TOPUP_WEI = 10**17  # 预补 0.1 BOT 保证金（SimpleAccount 经 EntryPoint 付 gas）
+
+
+def ensure_entry_point_balance(
+    *,
+    w3: Web3,
+    chain: ChainSpec,
+    sender: str,
+    signer_key: str,
+    tx_service: TxService | None = None,
+) -> int:
+    """智能账户在 EntryPoint 的保证金不足时，由签名者补一笔 depositFor。"""
+    ep = contract_at(w3, chain.contracts.entry_point, ENTRY_POINT_ABI)
+    current = int(ep.functions.balanceOf(checksum(sender)).call())
+    if current >= DEPOSIT_TOPUP_WEI // 2 or tx_service is None:
+        return current
+    owner = Account.from_key(signer_key).address
+    # depositFor 在本链实测 revert（C-18）；SimpleAccount 的 receive() 自动 addDeposit，
+    # 直接向智能账户普通转账即完成 EntryPoint 入金
+    tx_service.execute(
+        from_address=owner,
+        to_address=checksum(sender),
+        value_wei=DEPOSIT_TOPUP_WEI,
+        data=b"",
+        dry_run=False,
+    )
+    return int(ep.functions.balanceOf(checksum(sender)).call())
+
+
+NONCE_PROBE_MAX = 8
+
+
+def _probe_userop_nonce(
+    w3: Web3,
+    bundler: BundlerClient,
+    chain: ChainSpec,
+    user_op: dict[str, str],
+    owner_key: str,
+) -> str:
+    """本链 EntryPoint 无 getNonce 视图且 nonce 独立于 tx-nonce（C-19）；
+    用 estimate 扫 0..N 取第一个不报 AA25 的值（仅 RPC 模拟，不花链上 gas）。"""
+    for n in range(NONCE_PROBE_MAX):
+        trial = {**user_op, "nonce": str(n)}
+        signed = sign_user_operation(w3, chain, trial, owner_key)
+        try:
+            bundler.estimate_user_operation_gas(signed, chain.contracts.entry_point)
+            return str(n)
+        except ChainError as exc:
+            if "AA25" not in str(exc):
+                raise
+    msg = f"nonce 探测 0..{NONCE_PROBE_MAX - 1} 全部 AA25: {user_op['sender']}"
+    raise ChainError(msg, code="nonce_probe_failed")
 
 
 def build_and_send_user_op(
@@ -153,6 +228,7 @@ def build_and_send_user_op(
     calldata: bytes,
     dry_run: bool,
     estimate: bool = False,
+    tx_service: TxService | None = None,
 ) -> dict[str, Any]:
     """一步式：预测地址→组装→(dry_run 返回预览 | 签名→Bundler→等链上回执)。"""
     owner = Account.from_key(owner_key).address
@@ -168,9 +244,36 @@ def build_and_send_user_op(
     if dry_run:
         preview["dry_run"] = True
         return preview
-    if not account_has_code(w3, user_op["sender"]) and value_wei > 0:
-        msg = "智能账户未建户且本次需转入原生币：请先向预览地址入金并先发一笔建户 UserOp"
-        raise ServiceError(msg, code="aa_account_not_funded")
+    if not account_has_code(w3, user_op["sender"]):
+        if value_wei > 0:
+            msg = "智能账户未建户且本次需转入原生币：请先向预览地址入金并先发一笔建户 UserOp"
+            raise ServiceError(msg, code="aa_account_not_funded")
+        if tx_service is not None:
+            # C-17：bundler.bohr.life 对 initCode 模拟报 AA20（EOA 直调 factory 正常），
+            # 规避为两步式——先普通交易建户，再发无 initCode 的 UserOp
+            factory = contract_at(
+                w3, chain.contracts.simple_account_factory, SIMPLE_ACCOUNT_FACTORY_ABI
+            )
+            data = Web3.to_bytes(
+                hexstr=HexStr(factory.encode_abi("createAccount", args=[checksum(owner), salt]))
+            )
+            tx_service.execute(
+                from_address=owner,
+                to_address=chain.contracts.simple_account_factory,
+                value_wei=0,
+                data=data,
+                dry_run=False,
+            )
+            user_op["initCode"] = "0x"
+            user_op["nonce"] = "0"  # 本链 EntryPoint nonce 独立计数（见 _probe_userop_nonce）
+    ensure_entry_point_balance(
+        w3=w3,
+        chain=chain,
+        sender=user_op["sender"],
+        signer_key=owner_key,
+        tx_service=tx_service,
+    )
+    user_op["nonce"] = _probe_userop_nonce(w3, bundler, chain, user_op, owner_key)
     signed = sign_user_operation(w3, chain, user_op, owner_key)
     op_hash = bundler.send_user_operation(signed, chain.contracts.entry_point)
     if estimate:

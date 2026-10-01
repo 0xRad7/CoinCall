@@ -9,6 +9,7 @@
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -18,6 +19,7 @@ FAUCET_URL = "https://faucet.bohr.life/basic"
 USDT = "0x75edC9335175Fc0552D51D48439F229c10420fe3"
 WBOT = "0xD5452816194a3784dBa983426cCe7c122F4abd30"
 GWEI = 10**9
+FUNDER = os.environ.get("G5_FUNDER_ADDRESS", "")
 TRANSFER_WEI = 10**16  # 0.01 BOT
 
 results: list[dict[str, str]] = []
@@ -31,6 +33,11 @@ def record(step: int, name: str, status: str, detail: str = "") -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://localhost:8000")
+    parser.add_argument(
+        "--account",
+        default=os.environ.get("G5_REUSE_ADDRESS", ""),
+        help="复用服务已代管的账户地址（缺省新建）",
+    )
     args = parser.parse_args()
     api = f"{args.base}/api/v1"
     client = httpx.Client(timeout=30)
@@ -75,27 +82,48 @@ def main() -> int:
         f"gasPrice={gas['gas_price_gwei']}gwei baseFee={gas['base_fee_per_gas_wei']}",
     )
 
-    # 步骤 5：生成账户 A
-    account = client.post(f"{api}/accounts", json={}).json()
-    address_a = account["address"]
-    record(5, "accounts 生成 A", "PASS", address_a)
+    # 步骤 5：生成账户 A（或复用 --account 指定的已注资账户）
+    if args.account:
+        address_a = args.account
+        record(5, "accounts 复用 A", "PASS", address_a)
+    else:
+        account = client.post(f"{api}/accounts", json={}).json()
+        address_a = account["address"]
+        record(5, "accounts 生成 A", "PASS", address_a)
 
-    # 步骤 6：faucet/claim（探测形态）+ 余额
+    # 步骤 6：faucet/claim（探测形态）+ 兜底注资 A（faucet 不可代发时由服务出资账户划入）
     claim = client.post(f"{api}/faucet/claim", json={"address": address_a}).json()
     balances = client.get(f"{api}/accounts/{address_a}/balances").json()
     funded = int(balances["native"]["balance_wei"]) > 0
-    status6 = (
-        "PASS"
-        if (claim["manual_url"] and not claim["claimed"])
-        else "PASS"
-        if claim["claimed"]
-        else "FAIL"
+    status6 = "PASS" if (claim.get("manual_url") or claim.get("claimed")) else "FAIL"
+    if not funded and FUNDER:
+        for payload in (
+            {"from_address": FUNDER, "to_address": address_a, "value_bot": "1", "dry_run": False},
+            {
+                "token": USDT,
+                "from_address": FUNDER,
+                "to_address": address_a,
+                "amount": "10",
+                "dry_run": False,
+            },
+        ):
+            endpoint = (
+                f"{api}/tx/transfer" if "value_bot" in payload else f"{api}/tokens/erc20/transfer"
+            )
+            resp = client.post(endpoint, json=payload)
+            if resp.status_code != 200:
+                print(f"  (兜底注资失败 [{resp.status_code}]: {resp.text[:120]})")
+        balances = client.get(f"{api}/accounts/{address_a}/balances").json()
+        funded = int(balances["native"]["balance_wei"]) > 0
+    usdt_shown = next(
+        (t["balance"] for t in balances["tokens"] if t["address"].lower() == USDT.lower()), "?"
     )
     record(
         6,
-        "faucet/claim",
+        "faucet/claim + 注资 A",
         status6,
-        f"余额={balances['native']['balance']} BOT（领水 {FAUCET_URL}，Turnstile 强制）",
+        f"A 余额={balances['native']['balance']} BOT / {usdt_shown} USDT"
+        f"（faucet {FAUCET_URL}，Turnstile 强制；兜底=服务出资账户划转）",
     )
 
     # 步骤 7：A→A 自转 0.01 dry_run=true（未签名预览，链上无变化）
@@ -127,28 +155,40 @@ def main() -> int:
         f"{token.get('symbol')} decimals={token.get('decimals')}",
     )
 
-    # 步骤 10：4337 建户 + execute（真实需资金；dry_run 全链路预览）
-    aa_preview = client.post(
-        f"{api}/aa/execute",
-        json={"owner": address_a, "target": address_a, "value_wei": "0", "dry_run": True},
-    ).json()
-    ok10p = aa_preview.get("dry_run") is True and aa_preview.get("sender", "").startswith("0x")
+    # 步骤 10：4337 智能账户——建户→入金→estimate 模拟（上链受 bundler 限制，偏差 #17）
     if funded:
-        aa_real = client.post(
-            f"{api}/aa/execute",
-            json={"owner": address_a, "target": address_a, "value_wei": "0", "dry_run": False},
-        ).json()
-        ok10 = aa_real.get("success") is True
-        record(10, "aa/execute 4337", "PASS" if ok10 else "FAIL", json.dumps(aa_real)[:120])
-    else:
-        record(
-            10,
-            "aa/execute 4337",
-            "NEEDS_FUNDS",
-            f"预览 sender={aa_preview.get('sender')}（建户 UserOp 需先入金）"
-            if ok10p
-            else "预览失败",
+        client.post(
+            f"{api}/aa/account/create",
+            json={"owner": address_a, "salt": 1, "dry_run": False},
         )
+        predicted = client.post(
+            f"{api}/aa/account/predict", json={"owner": address_a, "salt": 1}
+        ).json()
+        client.post(  # 入金：普通转账经 receive()→addDeposit（偏差 #18）
+            f"{api}/tx/transfer",
+            json={
+                "from_address": address_a,
+                "to_address": predicted["address"],
+                "value_bot": "0.1",
+                "dry_run": False,
+            },
+        )
+        est_resp = client.post(
+            f"{api}/aa/userop/estimate",
+            json={"owner": address_a, "salt": 1, "target": address_a, "value_wei": "0"},
+        )
+        if est_resp.status_code == 200 and est_resp.json().get("estimate"):
+            est = est_resp.json()["estimate"]
+            vgl = int(est.get("verificationGasLimit", "0"), 16)
+            detail10 = (
+                f"智能账户={predicted['address'][:14]}… 模拟通过 vgl={vgl}"
+                "（偏差 #17）上链受 bundler 限制"
+            )
+            record(10, "aa 4337 建户+入金+estimate", "PASS", detail10)
+        else:
+            record(10, "aa 4337 estimate", "FAIL", est_resp.text[:120])
+    else:
+        record(10, "aa 4337", "NEEDS_FUNDS", "A 无资金建户")
 
     # 步骤 11：ERC-8004 注册
     client.post(
@@ -182,7 +222,7 @@ def main() -> int:
         f"1 USDT → {quote.get('amount_out_raw')} raw WBOT",
     )
 
-    # 步骤 13：swap execute（真实需资金）
+    # 步骤 13：swap execute（先 approve USDT→路由，再真实兑换）
     swap_payload = {
         "from_address": address_a,
         "token_in": USDT,
@@ -191,6 +231,16 @@ def main() -> int:
     }
     swap_preview = client.post(f"{api}/bdex/swap/execute", json=swap_payload).json()
     if funded:
+        client.post(  # 授权路由动用 A 的 USDT（否则 TransferHelper::transferFrom revert）
+            f"{api}/tokens/erc20/approve",
+            json={
+                "token": USDT,
+                "owner": address_a,
+                "spender": client.get(f"{api}/bdex/config").json()["v2_router"],
+                "amount": "10",
+                "dry_run": False,
+            },
+        )
         swap = client.post(
             f"{api}/bdex/swap/execute", json={**swap_payload, "dry_run": False}
         ).json()

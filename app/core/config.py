@@ -7,7 +7,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.chains import CHAINS, ChainSpec
@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     bot_chain_api_key: SecretStr | None = None
     proxy: str | None = None
     indexer_autostart: bool = False
+
+    @field_validator("bot_chain_allow_mainnet", "indexer_autostart", mode="before")
+    @classmethod
+    def _empty_bool_is_false(cls, v: object) -> object:
+        # C-15：.env 样例的空值形态（KEY=）应视为 False，而非 pydantic bool 解析错误
+        return False if isinstance(v, str) and not v.strip() else v
+
     log_level: str = "INFO"
 
     @property

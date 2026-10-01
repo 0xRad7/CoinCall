@@ -297,12 +297,15 @@ class TestM5Aa:
         )
         assert r.status_code == 200
         op = r.json()["user_operation"]
-        assert op["sender"] and op["gasFees"].startswith("0x")
+        assert (
+            op["sender"] and op["maxFeePerGas"] == "30000000000"
+        )  # 离散字段（C-16），1.5× 链价激励
 
-    def test_aa_execute_without_key_422(self, client: TestClient) -> None:
+    def test_aa_execute_without_signer_422(self, client: TestClient) -> None:
+        """owner 无可用签名者（fake resolve_signer 抛 ServiceError）→ 422 no_signer。"""
         r = client.post(
             f"{API}/aa/execute",
-            json={"target": ACCOUNT_B, "value_wei": "0", "dry_run": False},
+            json={"owner": ACCOUNT_B, "target": ACCOUNT_B, "value_wei": "0", "dry_run": False},
         )
         assert r.status_code == 422
         assert r.json()["error"] == "service_error"

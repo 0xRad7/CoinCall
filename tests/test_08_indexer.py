@@ -41,7 +41,9 @@ class TestGetLogs:
         )
         assert isinstance(logs, list)  # 窗口可用即通过（近空链可能为空）
         for log in logs[:5]:
-            assert log["topics"][0].hex() == TRANSFER_TOPIC
+            assert (
+                f"0x{log['topics'][0].hex()}" == TRANSFER_TOPIC
+            )  # POA 中间件下 HexBytes.hex() 无 0x 前缀
 
 
 class TestIndexerSyncLive:
