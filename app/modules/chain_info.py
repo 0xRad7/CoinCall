@@ -1,7 +1,6 @@
 """M1 链信息：info/gas/stats/blocks/health。"""
 
 import time
-from typing import cast
 
 from fastapi import APIRouter
 from hexbytes import HexBytes
@@ -126,11 +125,11 @@ def block_detail(w3: Web3Dep, number: int) -> BlockDetail:
         msg = f"取块失败: {number} ({exc})"
         raise ChainError(msg) from exc
     txs = raw.get("transactions", [])
-    hashes = [t if isinstance(t, str) else Web3.to_hex(cast(HexBytes, t)) for t in txs]
+    hashes = [t if isinstance(t, str) else _hex_of(t) for t in txs]
     return BlockDetail(
         number=int(raw["number"]),
-        hash=Web3.to_hex(cast(HexBytes, raw["hash"])),
-        parent_hash=Web3.to_hex(cast(HexBytes, raw["parentHash"])),
+        hash=_hex_of(raw["hash"]),
+        parent_hash=_hex_of(raw["parentHash"]),
         timestamp=int(raw["timestamp"]),
         tx_count=len(hashes),
         tx_hashes=hashes,
@@ -197,6 +196,11 @@ def _probe_explorer(client: Client) -> ChannelHealth:
     except Exception as exc:  # 探活必须吞掉一切异常转为红灯
         ok, detail = False, str(exc)[:120]
     return ChannelHealth(ok=ok, latency_ms=_ms_since(started), detail=detail)
+
+
+def _hex_of(value: object) -> str:
+    """块哈希字段（HexBytes|TxData 并集）→ 0x 串。"""
+    return Web3.to_hex(HexBytes(value))  # type: ignore[arg-type]  # 运行时均为 hex 字节串
 
 
 def _ms_since(started: float) -> int:

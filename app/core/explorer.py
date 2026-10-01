@@ -13,6 +13,12 @@ class ExplorerClient:
     def __init__(self, http: Client) -> None:
         self._http = http
 
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:  # noqa: ANN401  # 透传任意 JSON
+        return self._get(path, params)
+
+    def close(self) -> None:
+        self._http.close()
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:  # noqa: ANN401  # 透传任意 JSON
         try:
             resp = self._http.get(path, params=params)

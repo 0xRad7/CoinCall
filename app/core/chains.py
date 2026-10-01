@@ -58,6 +58,7 @@ class ChainSpec(BaseModel):
     explorer_url: str
     explorer_api: str
     faucet_url: str
+    faucet_api_url: str  # api-faucet 直连端点（探测结论，Turnstile 强制）
     contracts: ChainContracts
 
 
@@ -79,6 +80,7 @@ CHAINS: dict[str, ChainSpec] = {
         explorer_url="https://scan.bohr.life",
         explorer_api="https://scan.bohr.life/api/v2",
         faucet_url="https://faucet.bohr.life/basic",
+        faucet_api_url="https://api-faucet.bohr.life/botchain/api/v1/faucet",
         contracts=ChainContracts(
             **SHARED_CONTRACTS,
             identity_registry="0xec8fFbC3c9A34AdDCbB3A14F91db2bd26A8b99c0",
@@ -98,6 +100,7 @@ CHAINS: dict[str, ChainSpec] = {
         explorer_url="https://scan.botchain.ai",
         explorer_api="https://scan.botchain.ai/api/v2",
         faucet_url="https://faucet.botchain.ai/basic",
+        faucet_api_url="https://api-faucet.botchain.ai/botchain/api/v1/faucet",
         contracts=ChainContracts(
             **SHARED_CONTRACTS,
             identity_registry="0xB43Edfb9C7609cF645e932B2fF20f26F0d4488dE",

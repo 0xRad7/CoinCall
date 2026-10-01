@@ -52,7 +52,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "ANN", "PLR2004"]  # 测试允许 assert、放宽注解；断言字面量即规格（C-02）
+"tests/**" = ["S101", "ANN", "PLR2004", "S105"]  # C-02 断言字面量；C-06 代币域 token_* 字段名触发 S105 误报
 "app/web/**" = ["E501"]           # 单文件 playground 页放宽行长
 
 [tool.mypy]

@@ -3,8 +3,11 @@
 代理分流（铁律 A7）：*.bohr.life 直连；botchain.ai 域仅在显式配置 PROXY 时走代理。
 """
 
+from collections.abc import Sequence
+from typing import Any, cast
 from urllib.parse import urlsplit
 
+from eth_typing import ChecksumAddress, HexStr
 from httpx import Client, HTTPTransport, Timeout
 from requests import HTTPError, Session
 from requests import Timeout as RequestsTimeout
@@ -14,6 +17,7 @@ from web3.providers import HTTPProvider
 from web3.providers.rpc.utils import ExceptionRetryConfiguration
 
 from app.core.chains import ChainSpec
+from app.core.errors import ServiceError
 
 # python-urllib 默认 UA 会被部分 WAF 拒绝（BOT_CHAIN_REPORT 实测），保留伪装 UA
 DEFAULT_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -78,3 +82,24 @@ def make_http_client(base_url: str, *, proxy: str | None = None) -> Client:
         transport=transport,
         follow_redirects=True,
     )
+
+
+def checksum(address: str) -> str:
+    """地址规范化为 checksum；非法输入抛 ServiceError（422）。"""
+    try:
+        return Web3.to_checksum_address(address)
+    except ValueError as exc:
+        msg = f"非法地址: {address!r}"
+        raise ServiceError(msg, code="bad_address") from exc
+
+
+def contract_at(w3: Web3, address: str, abi: Sequence[dict[str, Any]]) -> Any:  # noqa: ANN401  # web3 Contract 动态类型
+    """统一合约句柄构造（类型收口 + 地址校验）。"""
+    return w3.eth.contract(
+        address=cast(ChecksumAddress, checksum(address)), abi=cast(Any, list(abi))
+    )
+
+
+def hex_to_bytes(value: str) -> bytes:
+    """0x 十六进制串 → bytes。"""
+    return Web3.to_bytes(hexstr=HexStr(value))

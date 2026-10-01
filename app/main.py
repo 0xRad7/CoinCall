@@ -15,7 +15,17 @@ from app.core.keystore import Keystore
 from app.core.log import TraceIdMiddleware, get_logger, setup_logging
 from app.core.rpc import make_http_client, make_web3, resolve_proxy
 from app.core.tx import TxService
-from app.modules import accounts, chain_info, contracts, tokens, transactions
+from app.modules import (
+    accounts,
+    bdex,
+    chain_info,
+    contracts,
+    erc4337,
+    erc8004,
+    faucet,
+    tokens,
+    transactions,
+)
 
 logger = get_logger(__name__)
 
@@ -53,6 +63,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.bundler = make_http_client(
         spec.bundler_url, proxy=resolve_proxy(spec.bundler_url, settings.proxy)
     )
+    app.state.faucet = make_http_client(
+        spec.faucet_api_url, proxy=resolve_proxy(spec.faucet_api_url, settings.proxy)
+    )
     keystore_secret = (
         settings.bot_chain_keystore_secret.get_secret_value()
         if settings.bot_chain_keystore_secret
@@ -69,6 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     explorer_http.close()
     app.state.bundler.close()
+    app.state.faucet.close()
     logger.info("lifespan shutdown")
 
 
@@ -93,6 +107,10 @@ def create_app() -> FastAPI:
         transactions.router,
         tokens.router,
         contracts.router,
+        erc4337.router,
+        erc8004.router,
+        bdex.router,
+        faucet.router,
     ):
         app.include_router(module_router, prefix="/api/v1")
 
