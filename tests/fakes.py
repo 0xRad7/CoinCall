@@ -79,6 +79,17 @@ def make_fake_contract() -> MagicMock:
             "approve": _fn(True),
             "ownerOf": _fn(ACCOUNT_A),
             "tokenURI": _fn("ipfs://t/1"),
+            "getAgentWallet": _fn(ACCOUNT_B),
+            "getPair": _fn(ACCOUNT_B),
+            "token0": _fn(USDT),
+            "token1": _fn(WBOT),
+            "getReserves": _fn((10**18, 10**9, 0)),
+            "getAmountsOut": _fn([10**6, 5 * 10**17]),
+            "getAddress": _fn(ACCOUNT_A),
+            "createAccount": _fn(ACCOUNT_A),
+            "getUserOpHash": _fn(b"\xab" * 32),
+            "getSummary": _fn((0, 0, 0, 0)),
+            "getAgentValidations": _fn([]),
         }
     )
     contract.encode_abi.return_value = "0x" + "ee" * 8
@@ -93,7 +104,9 @@ def make_fake_w3() -> MagicMock:
     w3.eth.chain_id = CHAIN_ID
     w3.client_version = "Geth/v1.5.13-fake"
     w3.eth.block_number = BLOCK_NUMBER
-    w3.eth.get_block.return_value = make_fake_block()
+    w3.eth.get_block.side_effect = lambda n=None, **_: make_fake_block(
+        n if isinstance(n, int) and n >= 0 else BLOCK_NUMBER
+    )
     w3.eth.get_balance.return_value = 10**18
     w3.eth.get_transaction_count.return_value = 0
     w3.eth.gas_price = 20 * 10**9

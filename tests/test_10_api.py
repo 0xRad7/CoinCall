@@ -56,7 +56,6 @@ def make_fake_explorer_client() -> httpx.Client:
     return httpx.Client(base_url="https://scan.bohr.life/api/v2")
 
 
-@respx.mock
 class TestM1ChainInfo:
     def test_chain_info(self, client: TestClient) -> None:
         r = client.get(f"{API}/chain/info")
@@ -97,6 +96,7 @@ class TestM1ChainInfo:
         assert body["number"] == 123
         assert "tx_hashes" in body
 
+    @respx.mock
     def test_chain_health_all_green(self, client: TestClient) -> None:
         respx.post("https://bundler.bohr.life/rpc/").mock(
             return_value=Response(200, json={"jsonrpc": "2.0", "id": 1, "result": "0x3c8"})
@@ -267,3 +267,165 @@ class TestM8Contracts:
         decoded = r.json()["decoded"]
         assert decoded["function"] == "balanceOf(address)"
         assert decoded["args"]["a"].lower() == ACCOUNT_A.lower()
+
+
+class TestM5Aa:
+    @respx.mock
+    def test_aa_config(self, client: TestClient) -> None:
+        respx.post("https://bundler.bohr.life/rpc/").mock(
+            return_value=Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": ["0x0000000071727de22e5e9d8baf0edac6f37da032"],
+                },
+            )
+        )
+        body = client.get(f"{API}/aa/config").json()
+        assert body["entry_point"].lower() == "0x0000000071727de22e5e9d8baf0edac6f37da032"
+        assert body["supported_entry_points"]
+
+    def test_aa_predict(self, client: TestClient) -> None:
+        body = client.post(f"{API}/aa/account/predict", json={"owner": ACCOUNT_A, "salt": 0}).json()
+        assert body["address"] == ACCOUNT_A  # fake factory.getAddress 返回 ACCOUNT_A
+
+    def test_aa_userop_build(self, client: TestClient) -> None:
+        r = client.post(
+            f"{API}/aa/userop/build",
+            json={"owner": ACCOUNT_A, "target": ACCOUNT_B, "value_wei": "0"},
+        )
+        assert r.status_code == 200
+        op = r.json()["user_operation"]
+        assert op["sender"] and op["gasFees"].startswith("0x")
+
+    def test_aa_execute_without_key_422(self, client: TestClient) -> None:
+        r = client.post(
+            f"{API}/aa/execute",
+            json={"target": ACCOUNT_B, "value_wei": "0", "dry_run": False},
+        )
+        assert r.status_code == 422
+        assert r.json()["error"] == "service_error"
+
+    @respx.mock
+    def test_aa_userop_status_not_found(self, client: TestClient) -> None:
+        respx.post("https://bundler.bohr.life/rpc/").mock(
+            return_value=Response(200, json={"jsonrpc": "2.0", "id": 1, "result": None})
+        )
+        body = client.get(f"{API}/aa/userop/0x{'ab' * 32}").json()
+        assert body["found"] is False
+
+
+class TestM6AgentIdentity:
+    def test_contracts_view(self, client: TestClient) -> None:
+        body = client.get(f"{API}/agent-identity/contracts").json()
+        assert body["identity_registry"]["address"].startswith("0x")
+
+    def test_identity_aggregate_view(self, client: TestClient) -> None:
+        body = client.get(f"{API}/agent-identity/5").json()
+        assert body["token_id"] == 5
+        assert body["owner"] == ACCOUNT_A
+
+    def test_register_dry_run_default(self, client: TestClient) -> None:
+        r = client.post(
+            f"{API}/agent-identity/register",
+            json={"owner": ACCOUNT_A, "agent_uri": "https://x/y"},
+        )
+        assert r.status_code == 200
+        assert r.json()["dry_run"] is True
+
+    @respx.mock
+    def test_registry_page(self, client: TestClient) -> None:
+        respx.get(
+            "https://scan.bohr.life/api/v2/tokens/0xec8fFbC3c9A34AdDCbB3A14F91db2bd26A8b99c0/transfers"
+        ).mock(
+            return_value=Response(
+                200,
+                json={
+                    "items": [{"total": {"value": "3"}, "tx_hash": "0x1"}],
+                    "next_page_params": None,
+                },
+            )
+        )
+        body = client.get(f"{API}/agent-identity/registry").json()
+        assert body["items"][0]["token_id"] == "3"
+
+    def test_reputation_and_validations(self, client: TestClient) -> None:
+        assert client.get(f"{API}/agent-identity/5/reputation").status_code == 200
+        assert client.get(f"{API}/agent-identity/5/validations").status_code == 200
+
+
+class TestM7Bdex:
+    def test_config(self, client: TestClient) -> None:
+        body = client.get(f"{API}/bdex/config").json()
+        assert body["v2_router"].startswith("0x")
+
+    def test_pairs(self, client: TestClient) -> None:
+        body = client.get(f"{API}/bdex/pairs").json()
+        assert body[0]["token0"] == USDT
+
+    def test_quote(self, client: TestClient) -> None:
+        body = client.post(
+            f"{API}/bdex/quote",
+            json={
+                "token_in": USDT,
+                "token_out": "0xD5452816194a3784dBa983426cCe7c122F4abd30",
+                "amount_in": "1",
+            },
+        ).json()
+        assert body["amount_in_raw"] == "1000000"
+        assert body["amount_out_raw"] == "500000000000000000"
+
+    def test_swap_build_and_dry_run(self, client: TestClient) -> None:
+        payload = {
+            "from_address": ACCOUNT_A,
+            "token_in": USDT,
+            "token_out": "0xD5452816194a3784dBa983426cCe7c122F4abd30",
+            "amount_in": "1",
+        }
+        assert client.post(f"{API}/bdex/swap/build", json=payload).status_code == 200
+        r = client.post(f"{API}/bdex/swap/execute", json=payload)
+        assert r.status_code == 200
+        assert r.json()["dry_run"] is True
+
+    def test_pool_volume(self, client: TestClient) -> None:
+        body = client.get(f"{API}/bdex/pool/{ACCOUNT_B}/volume").json()
+        assert body["swap_count"] == 0
+
+
+class TestM10Faucet:
+    @respx.mock
+    def test_status(self, client: TestClient) -> None:
+        respx.get("https://api-faucet.bohr.life/botchain/api/v1/faucet/info").mock(
+            return_value=Response(
+                200,
+                json={
+                    "code": 0,
+                    "message": "success",
+                    "data": {
+                        "chain_name": "BOT Chain Testnet",
+                        "assets": [
+                            {
+                                "token_symbol": "BOT",
+                                "token_type": "native",
+                                "claim_amount": "10",
+                                "cooldown_hours": 0.1667,
+                                "enabled": True,
+                                "token_address": "",
+                            },
+                        ],
+                    },
+                },
+            )
+        )
+        body = client.get(f"{API}/faucet/status").json()
+        assert body["available"] is True
+        assert body["automatable"] is False
+        assert body["assets"][0]["token_symbol"] == "BOT"
+
+    def test_claim_without_token_returns_manual_hint(self, client: TestClient) -> None:
+        body = client.post(
+            f"{API}/faucet/claim", json={"address": ACCOUNT_A, "dry_run": False}
+        ).json()
+        assert body["claimed"] is False
+        assert body["manual_url"].startswith("https://faucet.bohr.life")

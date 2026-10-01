@@ -9,6 +9,7 @@ import pytest
 
 from app.core.chains import ChainSpec
 from app.core.config import Settings, get_settings
+from app.core.explorer import ExplorerClient
 from app.core.rpc import make_http_client, make_web3, resolve_proxy
 
 FAUCET_URL = "https://faucet.bohr.life/basic"
@@ -33,10 +34,11 @@ def w3(chain: ChainSpec, settings: Settings):
 @pytest.fixture(scope="session")
 def explorer(chain: ChainSpec, settings: Settings):
     """Blockscout /api/v2 客户端（免 key）。"""
-    client = make_http_client(
+    http = make_http_client(
         chain.explorer_api,
         proxy=resolve_proxy(chain.explorer_api, settings.proxy),
     )
+    client = ExplorerClient(http)
     yield client
     client.close()
 

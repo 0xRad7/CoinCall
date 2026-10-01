@@ -38,16 +38,13 @@ def test_rpc_balance_matches_blockscout(w3, explorer) -> None:
     """交叉验证：最新块矿工地址的 RPC 余额 == Blockscout coin_balance（wei）。"""
     block = w3.eth.get_block("latest")
     miner = block["miner"]
-    resp = explorer.get(f"/addresses/{miner}")
-    assert resp.status_code == 200
-    coin_balance = resp.json().get("coin_balance") or 0
+    data = explorer.get(f"/addresses/{miner}")
+    coin_balance = data.get("coin_balance") or 0
     assert w3.eth.get_balance(miner) == int(coin_balance)
 
 
 def test_blockscout_stats_shape(explorer) -> None:
     """/api/v2/stats 免 key 可用且关键字段在位（M1 /chain/stats 的数据源前提）。"""
-    resp = explorer.get("/stats")
-    assert resp.status_code == 200
-    stats = resp.json()
+    stats = explorer.get("/stats")
     for field in ("total_transactions", "total_addresses", "transactions_today"):
         assert field in stats, f"stats 缺字段 {field}"
