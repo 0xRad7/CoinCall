@@ -28,7 +28,7 @@
 5. **结构**：web3/httpx 客户端经 FastAPI lifespan 构建与释放，依赖一律 `Depends` 注入；`modules/M*` 之间**禁止横向 import**，公共逻辑下沉 `core/`；单文件超过 ~400 行考虑拆分。
 6. **日志**：结构化输出 + `trace_id` 贯穿请求/链调用；`private_key`、`Authorization`、`api_key` 类字段强制脱敏（`core/log.py` 统一实现）。
 7. **测试质量**：unit 测试禁止真实网络（RPC/HTTP 全 mock，经 `dependency_overrides` / respx / fakeredis）；marker 已注册且 `--strict-markers` 生效；覆盖率门 `pytest -m unit --cov=app --cov-fail-under=80`。
-8. **提交纪律**：Conventional Commits（feat/test/chore/docs 分型），实现与测试提交分离，一次提交一个意图；每阶段收尾打 tag（d0…d5）。
+8. **提交纪律**：Conventional Commits 且**必须带 scope**——`type(scope): 描述`，type ∈ feat|fix|refactor|test|docs|chore|perf|build|ci（环境 commit-msg 钩子机械校验，见 C-01）；实现与测试提交分离，一次提交一个意图；每阶段收尾打 tag（d0…d5）。
 9. **写接口横切**：接受 `Idempotency-Key` 头防重放（Redis 或内存降级）；`dry_run=false` 且无私钥可用时报错不降级为 dry_run。
 
 ## §C 静态检查门（每轮代码编写强制）
@@ -48,7 +48,7 @@ ruff check . && ruff format --check . && mypy app
 
 | 编号 | 日期 | 违反事实 | 根因 | 新增/强化约束 |
 |---|---|---|---|---|
-| （暂无——首个违规发生时在此追加） | | | | |
+| C-01 | 2026-10-01 | 首次提交消息 `chore: 初始化工程…` 被环境级 commit-msg 钩子拒绝 | 本机存在全局提交分型校验（typed-commit-discipline），要求 `type(scope): 描述`，scope 必填 | §B.8 强化：所有提交消息必须为 `type(scope): 描述` 形式（scope 必填，如 `feat(m5)`、`test(d1)`、`chore(build)`） |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；
