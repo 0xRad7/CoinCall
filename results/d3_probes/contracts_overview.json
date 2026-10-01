@@ -1,0 +1,56 @@
+{
+ "ReputationRegistry": {
+  "proxy": "0xD4084c9397adca7fD0c24617681a2eA4C286402A",
+  "impl": "0x706634b5c419b5992fb8dc88da2ab36823d0fe90",
+  "impl_name": "ReputationRegistryUpgradeable",
+  "verified": true,
+  "functions": [
+   "UPGRADE_INTERFACE_VERSION()",
+   "appendResponse(uint256,address,uint64,string,bytes32)",
+   "getClients(uint256)",
+   "getIdentityRegistry()",
+   "getLastIndex(uint256,address)",
+   "getResponseCount(uint256,address,uint64,address[])",
+   "getSummary(uint256,address[],string,string)",
+   "getVersion()",
+   "giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)",
+   "initialize(address)",
+   "owner()",
+   "proxiableUUID()",
+   "readAllFeedback(uint256,address[],string,string,bool)",
+   "readFeedback(uint256,address,uint64)",
+   "renounceOwnership()",
+   "revokeFeedback(uint256,uint64)",
+   "transferOwnership(address)",
+   "upgradeToAndCall(address,bytes)"
+  ]
+ },
+ "ValidationRegistry": {
+  "proxy": "0x0ff64E68C0e5fB2c57E6B3e1D7F3c65FBD0eEA33",
+  "impl": "0xeed5f847b22074bb753ad0356072b15f73c28048",
+  "impl_name": "ValidationRegistryUpgradeable",
+  "verified": true,
+  "functions": [
+   "UPGRADE_INTERFACE_VERSION()",
+   "getAgentValidations(uint256)",
+   "getIdentityRegistry()",
+   "getSummary(uint256,address[],string)",
+   "getValidationStatus(bytes32)",
+   "getValidatorRequests(address)",
+   "getVersion()",
+   "initialize(address)",
+   "owner()",
+   "proxiableUUID()",
+   "renounceOwnership()",
+   "transferOwnership(address)",
+   "upgradeToAndCall(address,bytes)",
+   "validationRequest(address,uint256,string,bytes32)",
+   "validationResponse(bytes32,uint8,string,bytes32,string)"
+  ]
+ },
+ "IdentityRegistry": {
+  "proxy": "0xec8fFbC3c9A34AdDCbB3A14F91db2bd26A8b99c0",
+  "impl": "0xdb74b629fe35cab514edc310dc9ad0ff68a1eb7c",
+  "impl_name": "IdentityRegistryUpgradeable"
+ }
+}
