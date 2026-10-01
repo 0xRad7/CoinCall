@@ -13,6 +13,8 @@ from eth_utils import function_abi_to_4byte_selector
 from fastapi.testclient import TestClient
 from httpx import Response
 
+from app.core.bundler import _find_user_op_event, _submit_via_handle_ops, _to_int
+from app.core.chains import get_chain
 from app.core.deps import (
     get_request_explorer,
     get_request_keystore,
@@ -20,6 +22,7 @@ from app.core.deps import (
     get_request_web3,
 )
 from app.core.explorer import ExplorerClient
+from app.core.tx import TxReceiptSummary
 from app.main import create_app
 from tests.fakes import (
     ACCOUNT_A,
@@ -446,3 +449,53 @@ class TestM9Indexer:
         body = r.json()
         assert body["stream"] == "logs"
         assert body["synced_blocks"] >= 1  # 空 watermark 时 =window；有水位时含 64 块 reorg 回扫
+
+
+class TestHandleOpsFallback:
+    """bundler 不打包时的 handleOps 自提交兜底（C-22）。"""
+
+    SIGNED: ClassVar[dict] = {
+        "sender": ACCOUNT_A,
+        "nonce": "0",
+        "initCode": "0x",
+        "callData": "0x" + "cd" * 8,
+        "verificationGasLimit": "500000",
+        "callGasLimit": "100000",
+        "preVerificationGas": "50000",
+        "maxFeePerGas": "30000000000",
+        "maxPriorityFeePerGas": "30000000000",
+        "paymasterAndData": "0x",
+        "signature": "0x" + "ab" * 65,
+    }
+
+    def test_to_int_hex_and_decimal(self) -> None:
+        assert _to_int("0x214e5") == 136421  # bundler 回执 hex 字符串
+        assert _to_int(136421) == 136421
+        assert _to_int("136421") == 136421
+        assert _to_int(None) == 0
+
+    def test_submit_via_handle_ops_shape(self) -> None:
+        fake_w3 = make_fake_w3()
+        fake_tx = make_fake_tx_service()
+        fake_tx.execute.return_value = TxReceiptSummary(
+            dry_run=False,
+            tx_hash=TX_HASH,
+            status=1,
+            block_number=25_000_000,
+            gas_used=136421,
+            effective_gas_price_wei=20 * 10**9,
+            from_address=ACCOUNT_A,
+            to_address=ACCOUNT_B,
+        )
+        chain = get_chain("testnet")
+        out = _submit_via_handle_ops(
+            fake_w3, chain, self.SIGNED, ACCOUNT_A, "0x" + "44" * 32, fake_tx, "0xop", {}
+        )
+        assert out["submitted_via"] == "handle_ops_self_submit"
+        assert out["transaction_hash"] == TX_HASH
+        fake_tx.execute.assert_called_once()  # 真实发送路径被调用
+
+    def test_find_user_op_event_missing_logs_false(self) -> None:
+        fake_w3 = make_fake_w3()
+        receipt = fake_w3.eth.get_transaction_receipt(TX_HASH)
+        assert _find_user_op_event(fake_w3, get_chain("testnet"), receipt) is False
