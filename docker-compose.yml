@@ -1,0 +1,22 @@
+services:
+  redis:
+    image: redis:7-alpine
+    # 04 篇：运行时协调数据全可丢弃，无持久化
+    command: ["redis-server", "--appendonly", "no"]
+    ports: ["6379:6379"]
+
+  api:
+    build: .
+    environment:
+      BOT_CHAIN_NETWORK: testnet
+      REDIS_URL: redis://redis:6379/0
+      DUCKDB_PATH: /app/data/botchain.duckdb
+      # 出资私钥（仅测试网）：从 .env 注入，切勿写进文件
+      BOT_CHAIN_TEST_PRIVATE_KEY: ${BOT_CHAIN_TEST_PRIVATE_KEY:-}
+      BOT_CHAIN_KEYSTORE_SECRET: ${BOT_CHAIN_KEYSTORE_SECRET:-}
+    volumes:
+      - ./data:/app/data # botchain.duckdb + keystore
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis

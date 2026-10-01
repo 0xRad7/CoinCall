@@ -111,7 +111,7 @@ class TxService:
         calldata = data if isinstance(data, bytes) else Web3.to_bytes(hexstr=HexStr(data))
         with self._lock_for(from_addr):
             nonce = self._w3.eth.get_transaction_count(from_addr, "pending")
-            estimated = gas or self._estimate(from_addr, to_address, value_wei, calldata)
+            estimated = gas or self._estimate(from_addr, to_address, value_wei, calldata, dry_run)
             tx: dict[str, Any] = {
                 "from": from_addr,
                 "to": to_address,
@@ -132,16 +132,26 @@ class TxService:
             return self._sign_send_wait(from_addr, tx)
 
     # ---- 内部 -------------------------------------------------------------
-    def _estimate(self, from_addr: str, to_address: str | None, value_wei: int, data: bytes) -> int:
+    def _estimate(
+        self,
+        from_addr: str,
+        to_address: str | None,
+        value_wei: int,
+        data: bytes,
+        dry_run: bool = False,
+    ) -> int:
         try:
             call_cfg = cast(
                 TxParams,
                 {"from": from_addr, "to": to_address, "value": value_wei, "data": data},
             )
             estimate = self._w3.eth.estimate_gas(call_cfg)
-        except ContractLogicError as exc:
-            raise TxRevertedError(f"estimateGas revert: {exc}") from exc
-        except Web3RPCError as exc:
+        except (ContractLogicError, Web3RPCError) as exc:
+            if dry_run:
+                # C-13：dry_run 预览不依赖账户状态（无余额也会 estimate 失败），回退保守默认
+                return int(MIN_GAS * GAS_MARGIN_RATIO)
+            if isinstance(exc, ContractLogicError):
+                raise TxRevertedError(f"estimateGas revert: {exc}") from exc
             raise ChainError(f"estimateGas RPC 失败: {exc}") from exc
         return max(MIN_GAS, int(estimate * GAS_MARGIN_RATIO))
 

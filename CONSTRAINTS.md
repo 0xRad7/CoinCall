@@ -59,6 +59,9 @@ ruff check . && ruff format --check . && mypy app
 | C-09 | 2026-10-01 | D4 给 storage JSON 边界函数大量 ANN401 | redis/duckdb 封装天然透传任意 JSON | pyproject per-file-ignores 增加 `app/storage/**` 豁免 ANN401（JSON 序列化边界 Any 是正确类型） |
 | C-10 | 2026-10-01 | unit 测试把 indexer 水位写进了持久 data/botchain.duckdb，且同步 TestClient 消费 SSE 全流挂满 300s | 测试 fixture 未隔离 app.state.store；TestClient.get 会等 StreamingResponse 整流结束 | unit 一律用 tmp_path DuckStore 替换 app.state.store（fixture 已内置）；SSE 端点只做路由存在性断言，全流验证放 live/脚本 |
 | C-11 | 2026-10-01 | rm 删除 duckdb 主库后 WAL 残留，新进程重放 WAL 恢复了旧数据（status 出现脏水位） | DuckDB 的 WAL 与主库分离 | 清理 duckdb 必须主库+wal 成对删除；测试断言涉及库状态时先确认隔离 |
+| C-12 | 2026-10-01 | demo/CLI 脚本被 T20(print)/PLR0915/PLR2004 全量拦截 | 任务钉死配置按服务代码口径，未覆盖脚本语义 | pyproject per-file-ignores 增加 `scripts/**`（CLI 输出/剧本步骤/断言字面量即剧本本身） |
+| C-13 | 2026-10-01 | G5 步骤 7 失败：dry_run 预览对无余额账户做 estimateGas 报 insufficient funds | 预览路径复用了发送路径的 gas 估值，隐式依赖账户状态 | dry_run 的语义=不依赖链上状态：estimate 失败时回退保守默认 gas（MIN_GAS×margin），仅真实发送严格 estimate |
+| C-14 | 2026-10-01 | 服务进程持有 data/botchain.duckdb 期间 unit 全套 44 errors（lifespan 建库锁冲突） | DuckDB 单文件单写者，跨进程互斥 | 跑 unit/测试前确认无本服务进程占用 DUCKDB_PATH；部署上 api 与 indexer 必须同进程（04 篇设计依据） |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；
