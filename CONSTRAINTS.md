@@ -53,6 +53,9 @@ ruff check . && ruff format --check . && mypy app
 | C-03 | 2026-10-01 | `ExceptionRetryConfiguration(retries=2)` 抛 pydantic ValidationError（errors 字段拒绝 None） | web3 7.16 的该类 `__init__` 默认 errors=None 与 pydantic is-instance 校验冲突，必须显式传 errors=(ConnectionError, HTTPError, Timeout) | 凡遇第三方库"默认参数即崩"的行为，先查库内默认构造处照抄，再沉淀；禁止绕过（如捕获后吞掉） |
 | C-04 | 2026-10-01 | D1 live 首跑 3 用例失败：`get_block` 抛 ExtraDataLengthError（extraData 277B） | **BOT Chain 实为 POA 链**，块头 extraData 超以太坊上限 32B；尽调脚本走裸 make_request 未暴露此问题 | 铁律 A6 补充：POA 适配（ExtraDataToPOAMiddleware）是 make_web3 的固定装配，任何新建 web3 实例必须走 make_web3 工厂，禁止直接 Web3(HTTPProvider(...)) |
 | C-05 | 2026-10-01 | `make_request("debug_traceTransaction")` 未抛 Web3RPCError，用例 DID NOT RAISE 失败 | web3 7.16 make_request 对 JSON-RPC error 返回 `{"error": ...}` 字典，异常仅在高层 API 抛 | 对"预期错误"的断言必须同时接受「返回 error 字典」与「抛异常」两种形态（core 层封装时同样按此处理） |
+| C-06 | 2026-10-01 | D3 补测时发现 TestM1ChainInfo 整类用例从未被执行（D2 覆盖率虚高） | `@respx.mock` 用作**类装饰器**会导致 pytest 收集不到该类任何用例（静默丢失，非报错） | 禁止类级 `@respx.mock`，一律方法级装饰；每阶段提交前用 `pytest --collect-only -q` 核对用例总数与文件内 `def test_` 数一致 |
+| C-07 | 2026-10-01 | ABI 由 json.dumps 生成，文件中残留 `true/false` 字面量导致模块不可导入 | 生成 Python 数据文件不能用 JSON 序列化器直出 | 生成式资产（ABI 等）必须生成后立即 `importlib` 冒烟验证 |
+| C-08 | 2026-10-01 | `Web3.to_hex(str)` / `Web3.to_bytes(hexstr=str)` 在运行时抛 TypeError（mypy 亦报） | web3 转换函数不接受裸 str | hex 串一律经 `core/rpc.hex_to_bytes`/`HexBytes()` 包装，模块禁止直接 `Web3.to_hex(字符串)` |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；
