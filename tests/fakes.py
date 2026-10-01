@@ -44,14 +44,47 @@ def make_fake_receipt(status: int = 1, to: str = ACCOUNT_B) -> dict[str, Any]:
     }
 
 
+class FakeFunctions:
+    """已知方法返回预配置 mock；未知方法 AttributeError（对齐 hasattr 语义）。"""
+
+    def __init__(self, results: dict) -> None:
+        self._results = results
+
+    def __getattr__(self, name):
+        if name in self._results:
+            return self._results[name]
+        raise AttributeError(name)
+
+
+def _fn(value):
+    """形状对齐 web3 惯用法 functions.<m>(args).call() / .build_transaction()。"""
+    inner = MagicMock()
+    inner.call.return_value = value
+    inner.build_transaction.return_value = {"data": "0x" + "cd" * 8}
+    return MagicMock(return_value=inner)
+
+
 def make_fake_contract() -> MagicMock:
     """合约桩：functions.<m>(*args).call()/build_transaction() 可用。"""
     contract = MagicMock()
-    fn = MagicMock()
-    fn.call.return_value = 0
-    fn.build_transaction.return_value = {"data": "0x" + "cd" * 8}
-    contract.functions = MagicMock(return_value=fn)
-    contract.functions.__getattr__ = lambda self, name: fn  # type: ignore[method-assign]
+    contract.functions = FakeFunctions(
+        {
+            "symbol": _fn("USDT"),
+            "name": _fn("TestToken"),
+            "decimals": _fn(6),
+            "totalSupply": _fn(10**12),
+            "balanceOf": _fn(0),
+            "allowance": _fn(0),
+            "transfer": _fn(True),
+            "approve": _fn(True),
+            "ownerOf": _fn(ACCOUNT_A),
+            "tokenURI": _fn("ipfs://t/1"),
+        }
+    )
+    contract.encode_abi.return_value = "0x" + "ee" * 8
+    ctor_result = MagicMock()
+    ctor_result.build_transaction.return_value = {"data": "0x" + "60" * 4}
+    contract.constructor = MagicMock(return_value=ctor_result)
     return contract
 
 
@@ -91,16 +124,22 @@ def make_fake_tx_service() -> MagicMock:
         estimated_gas=21000,
         total_cost_wei=21000 * 20 * 10**9,
     )
-    service.execute.return_value = TxReceiptSummary(
-        dry_run=False,
-        tx_hash=TX_HASH,
-        status=1,
-        block_number=BLOCK_NUMBER,
-        gas_used=21000,
-        effective_gas_price_wei=20 * 10**9,
-        from_address=ACCOUNT_A,
-        to_address=ACCOUNT_B,
-    )
+
+    def _execute(*args, dry_run=True, **kwargs):  # 测试桩
+        if dry_run:
+            return service.preview.return_value
+        return TxReceiptSummary(
+            dry_run=False,
+            tx_hash=TX_HASH,
+            status=1,
+            block_number=BLOCK_NUMBER,
+            gas_used=21000,
+            effective_gas_price_wei=20 * 10**9,
+            from_address=ACCOUNT_A,
+            to_address=ACCOUNT_B,
+        )
+
+    service.execute.side_effect = _execute
     return service
 
 
@@ -108,9 +147,9 @@ def make_fake_keystore() -> MagicMock:
     keystore = MagicMock()
     keystore.create.return_value = SimpleNamespace(
         address=ACCOUNT_A,
-        private_key="0x" + "33" * 32,
         persisted=True,
         created_at="2026-10-01T00:00:00Z",
     )
     keystore.get.return_value = None
+    keystore.reveal.return_value = "0x" + "33" * 32
     return keystore

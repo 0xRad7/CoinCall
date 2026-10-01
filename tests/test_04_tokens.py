@@ -1,12 +1,12 @@
 """live + needs_funds：代币 ERC20/721（02 篇 test_04 矩阵）。"""
 
 import pytest
-from app.core.abis import ERC20_ABI, ERC721_ABI
-from app.core.tx import TxService, wei_from_decimal
 from eth_account import Account
-from web3.exceptions import Web3ContractError
+from web3.exceptions import ContractLogicError
 
+from app.core.abis import ERC20_ABI, ERC721_ABI
 from app.core.chains import get_chain
+from app.core.tx import TxService, wei_from_decimal
 
 pytestmark = pytest.mark.live
 
@@ -31,15 +31,17 @@ class TestTokenLive:
         assert wbot.functions.totalSupply().call() > 0
 
     def test_identity_registry_is_erc721_agent(self, w3) -> None:
-        """IdentityRegistry 是 ERC-721，name=AGENT（ERC-8004 身份前提）。"""
+        """IdentityRegistry 是 ERC-721：实测 name=AgentIdentity、symbol=AGENT
+        （蓝图 02 篇写 name=AGENT，以 2026-10-01 实测为准，记入偏差清单）。"""
         reg = w3.eth.contract(address=IDENTITY, abi=ERC721_ABI)
-        assert reg.functions.name().call() == "AGENT"
+        assert reg.functions.name().call() == "AgentIdentity"
+        assert reg.functions.symbol().call() == "AGENT"
 
     def test_owner_of_nonexistent_token_reverts(self, w3) -> None:
         """反例：不存在 tokenId 的 ownerOf 应 revert（错误码定型）。"""
         reg = w3.eth.contract(address=IDENTITY, abi=ERC721_ABI)
 
-        with pytest.raises(Web3ContractError):
+        with pytest.raises(ContractLogicError):
             reg.functions.ownerOf(999_999_999).call()
 
     def test_balance_of_any_address(self, w3) -> None:

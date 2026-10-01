@@ -4,10 +4,13 @@
 errors 三段错误模型映射 / log 脱敏与 trace_id / main 应用骨架。
 """
 
+import httpx
 import pytest
+import respx
 from eth_account import Account
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from web3 import Web3
 
 from app.core.chains import CHAINS, get_chain
@@ -19,11 +22,18 @@ from app.core.errors import (
     TxRevertedError,
     install_error_handlers,
 )
+from app.core.explorer import ExplorerClient
+from app.core.keystore import Keystore
 from app.core.log import REDACTED, TraceIdMiddleware, current_trace_id, redact
 from app.core.rpc import make_http_client, make_web3, resolve_proxy
 from app.main import create_app
+from tests.fakes import ACCOUNT_A, ACCOUNT_B, USDT
 
 pytestmark = pytest.mark.unit
+
+KS_MATERIAL_RIGHT = "ks-material-right"  # 测试口令（非真实秘密）
+KS_MATERIAL_WRONG = "ks-material-wrong"  # 测试口令（非真实秘密）
+EXPLORER_BASE = "https://scan.bohr.life/api/v2"
 
 TESTNET = "testnet"
 MAINNET = "mainnet"
@@ -106,7 +116,7 @@ class TestConfig:
 
 class TestRpc:
     def test_http_client_carries_ua_header(self) -> None:
-        client = make_http_client("https://scan.bohr.life/api/v2")
+        client = make_http_client(EXPLORER_BASE)
         try:
             assert client.headers["User-Agent"].startswith("Mozilla/5.0")
         finally:
@@ -227,3 +237,69 @@ class TestAppSkeleton:
     def test_new_account_shape_matches_web3(self) -> None:
         acct = Account.create()
         assert acct.address == Web3.to_checksum_address(acct.address)
+
+
+class TestKeystore:
+    def test_create_and_sign_roundtrip(self, tmp_path) -> None:
+
+        ks = Keystore(tmp_path, secret=KS_MATERIAL_RIGHT)
+        acct = ks.create()
+        assert ks.get(acct.address) is not None
+        assert ks.get(acct.address).address == acct.address
+        assert ks.reveal(acct.address).startswith("0x")
+
+    def test_persisted_file_written(self, tmp_path) -> None:
+
+        ks = Keystore(tmp_path, secret=KS_MATERIAL_RIGHT)
+        acct = ks.create()
+        assert acct.persisted is True
+        assert (tmp_path / f"{acct.address}.json").exists()
+        content = (tmp_path / f"{acct.address}.json").read_text(encoding="utf-8")
+        assert acct.address in content
+        assert "private" not in content.lower() or "ciphertext" in content
+
+    def test_ephemeral_mode_not_persisted(self, tmp_path) -> None:
+
+        ks = Keystore(tmp_path, secret=None)
+        acct = ks.create()
+        assert acct.persisted is False
+        assert not (tmp_path / f"{acct.address}.json").exists()
+
+    def test_unknown_address_returns_none(self, tmp_path) -> None:
+
+        ks = Keystore(tmp_path, secret=KS_MATERIAL_RIGHT)
+        assert ks.get(ACCOUNT_B) is None
+
+    def test_wrong_secret_raises(self, tmp_path) -> None:
+
+        Keystore(tmp_path, secret=KS_MATERIAL_RIGHT).create()
+        with pytest.raises(ServiceError):
+            Keystore(tmp_path, secret=KS_MATERIAL_WRONG).get(
+                next(iter(tmp_path.glob("*.json"))).stem
+            )
+
+
+class TestExplorer:
+    def test_stats_and_passthrough(self) -> None:
+        with respx.mock:
+            base = EXPLORER_BASE
+            respx.get(f"{base}/stats").mock(return_value=Response(200, json={"a": 1}))
+            respx.get(f"{base}/addresses/{ACCOUNT_A}/transactions").mock(
+                return_value=Response(200, json={"items": [{"hash": "0x1"}]})
+            )
+            respx.get(f"{base}/tokens/{USDT}/holders").mock(
+                return_value=Response(200, json={"items": [], "next_page_params": {"k": "v"}})
+            )
+            client = ExplorerClient(httpx.Client(base_url=base))
+            assert client.stats() == {"a": 1}
+            assert client.address_transactions(ACCOUNT_A)["items"]
+            assert client.token_holders(USDT)["next_page_params"] == {"k": "v"}
+            client._http.close()
+
+    def test_http_error_maps_to_chain_error(self) -> None:
+        with respx.mock:
+            respx.get(f"{EXPLORER_BASE}/stats").mock(return_value=Response(500, text="boom"))
+            client = ExplorerClient(httpx.Client(base_url=EXPLORER_BASE))
+            with pytest.raises(ChainError):
+                client.stats()
+            client._http.close()

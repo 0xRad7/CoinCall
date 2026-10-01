@@ -8,13 +8,18 @@ from typing import ClassVar
 import httpx
 import pytest
 import respx
+from eth_abi import encode as abi_encode
+from eth_utils import function_abi_to_4byte_selector
 from fastapi.testclient import TestClient
 from httpx import Response
 
 from app.core.deps import (
     get_request_explorer,
+    get_request_keystore,
+    get_request_tx,
     get_request_web3,
 )
+from app.core.explorer import ExplorerClient
 from app.main import create_app
 from tests.fakes import (
     ACCOUNT_A,
@@ -22,6 +27,8 @@ from tests.fakes import (
     CHAIN_ID,
     TX_HASH,
     USDT,
+    make_fake_keystore,
+    make_fake_tx_service,
     make_fake_w3,
 )
 
@@ -35,7 +42,11 @@ def client() -> TestClient:
     app = create_app()
     fake_w3 = make_fake_w3()
     app.dependency_overrides[get_request_web3] = lambda: fake_w3
-    app.dependency_overrides[get_request_explorer] = make_fake_explorer_client
+    app.dependency_overrides[get_request_explorer] = lambda: ExplorerClient(
+        make_fake_explorer_client()
+    )
+    app.dependency_overrides[get_request_keystore] = make_fake_keystore
+    app.dependency_overrides[get_request_tx] = make_fake_tx_service
     with TestClient(app) as tc:
         yield tc
 
@@ -246,9 +257,13 @@ class TestM8Contracts:
         assert r.json()["dry_run"] is True
 
     def test_decode_calldata(self, client: TestClient) -> None:
+        selector = function_abi_to_4byte_selector(self.ABI[0]).hex()
+        payload = abi_encode(["address"], [ACCOUNT_A]).hex()
         r = client.post(
             f"{API}/contracts/decode",
-            json={"abi": self.ABI, "calldata": "0x" + "cd" * 8},
+            json={"abi": self.ABI, "calldata": f"0x{selector}{payload}"},
         )
         assert r.status_code == 200
-        assert "decoded" in r.json()
+        decoded = r.json()["decoded"]
+        assert decoded["function"] == "balanceOf(address)"
+        assert decoded["args"]["a"].lower() == ACCOUNT_A.lower()

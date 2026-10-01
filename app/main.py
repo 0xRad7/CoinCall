@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -9,8 +10,12 @@ from fastapi.responses import RedirectResponse
 from app import __version__
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers
+from app.core.explorer import ExplorerClient
+from app.core.keystore import Keystore
 from app.core.log import TraceIdMiddleware, get_logger, setup_logging
 from app.core.rpc import make_http_client, make_web3, resolve_proxy
+from app.core.tx import TxService
+from app.modules import accounts, chain_info, contracts, tokens, transactions
 
 logger = get_logger(__name__)
 
@@ -40,18 +45,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.chain = spec
     app.state.w3 = make_web3(spec, proxy=settings.proxy)
-    app.state.explorer = make_http_client(
+    explorer_http = make_http_client(
         spec.explorer_api, proxy=resolve_proxy(spec.explorer_api, settings.proxy)
     )
+    app.state.explorer_http = explorer_http
+    app.state.explorer_api = ExplorerClient(explorer_http)
     app.state.bundler = make_http_client(
         spec.bundler_url, proxy=resolve_proxy(spec.bundler_url, settings.proxy)
+    )
+    keystore_secret = (
+        settings.bot_chain_keystore_secret.get_secret_value()
+        if settings.bot_chain_keystore_secret
+        else None
+    )
+    app.state.keystore = Keystore(Path("data/keystore"), keystore_secret)
+    app.state.tx = TxService(
+        w3=app.state.w3, funder_key=settings.funded_key, keystore=app.state.keystore
     )
     logger.info(
         "lifespan startup",
         extra={"network": spec.network.value, "chain_id": spec.chain_id, "rpc": spec.rpc_url},
     )
     yield
-    app.state.explorer.close()
+    explorer_http.close()
     app.state.bundler.close()
     logger.info("lifespan shutdown")
 
@@ -70,6 +86,15 @@ def create_app() -> FastAPI:
     )
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)
+
+    for module_router in (
+        chain_info.router,
+        accounts.router,
+        transactions.router,
+        tokens.router,
+        contracts.router,
+    ):
+        app.include_router(module_router, prefix="/api/v1")
 
     @app.get("/", tags=["meta"])
     def root() -> dict[str, str]:

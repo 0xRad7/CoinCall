@@ -5,10 +5,10 @@ needs_funds 部分：真实 968 转账（显式 skip 当无私钥）。
 """
 
 import pytest
-from app.core.tx import GAS_PRICE_WEI, TxService, wei_from_decimal
 from eth_account import Account
 
 from app.core.errors import ServiceError, TxRevertedError
+from app.core.tx import GAS_PRICE_WEI, TxService, wei_from_decimal
 from tests.fakes import (
     ACCOUNT_A,
     ACCOUNT_B,
@@ -23,6 +23,8 @@ TRANSFER_VALUE_WEI = 10**15
 
 
 class TestTxServiceUnit:
+    pytestmark = pytest.mark.unit
+
     def test_dry_run_preview_never_sends(self) -> None:
         w3 = make_fake_w3()
         svc = TxService(w3=w3, funder_key=FUND_KEY)
@@ -81,6 +83,8 @@ class TestTxServiceUnit:
 
 
 class TestRawTxEncoding:
+    pytestmark = pytest.mark.unit
+
     def test_signed_tx_recoverable_and_legacy(self) -> None:
         """离线签名向量：签名可恢复出原地址、legacy(type0)、链 ID 968、20 gwei。"""
         acct = Account.from_key(FUND_KEY)
@@ -102,6 +106,8 @@ class TestRawTxEncoding:
 
 
 class TestWeiConversion:
+    pytestmark = pytest.mark.unit
+
     def test_wei_from_decimal_18(self) -> None:
         assert wei_from_decimal("1.5", 18) == 1_500_000_000_000_000_000
 
