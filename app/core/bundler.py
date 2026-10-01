@@ -11,7 +11,7 @@ import time
 from typing import TYPE_CHECKING, Any, cast
 
 from eth_account import Account
-from eth_keys.datatypes import PrivateKey
+from eth_account.messages import encode_defunct
 from eth_typing import ChecksumAddress, HexStr
 from hexbytes import HexBytes
 from httpx import Client
@@ -20,6 +20,7 @@ from web3.exceptions import Web3Exception
 
 from app.core.abis.erc4337 import (
     ENTRY_POINT_ABI,
+    ENTRY_POINT_EVENTS_ABI,
     SIMPLE_ACCOUNT_EXECUTE_ABI,
     SIMPLE_ACCOUNT_FACTORY_ABI,
 )
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from app.core.tx import TxService
 from app.core.errors import ChainError, ServiceError
 from app.core.rpc import checksum, contract_at, hex_to_bytes
+from app.core.tx import TxReceiptSummary
 
 GAS_PRICE_WEI = 20 * 10**9
 AA_MAX_FEE_WEI = 30 * 10**9  # UserOp 报 1.5×：bundler 打包激励（结算按 effectiveGasPrice）
@@ -42,6 +44,14 @@ RECEIPT_POLL_S = 30
 
 def _pad16(value: int) -> str:
     return Web3.to_hex(value)[2:].rjust(32, "0")
+
+
+def _to_int(value: object) -> int:
+    """bundler 回执的数值可能是十进制或 0x 十六进制字符串。"""
+    if isinstance(value, int):
+        return value
+    text = str(value or 0)
+    return int(text, 16) if text.startswith("0x") else int(text)
 
 
 def _pack_pair(left: int, right: int) -> bytes:
@@ -155,11 +165,10 @@ def sign_user_operation(
     )
     op_hash = entry_point.functions.getUserOpHash(op_tuple).call()
     # SimpleAccount 校验的是对 userOpHash 的裸 ECDSA（recover 直接对 32B hash），非 EIP-191
-    private_key = PrivateKey(Web3.to_bytes(hexstr=HexStr(owner_key)))
-    sig = private_key.sign_msg_hash(bytes(op_hash))
-    # eth_keys 的 v 是 0/1 形态；SimpleAccount 用 OZ ECDSA.recover，要求 v∈{27,28}（AA23 教训）
-    signature = sig.r.to_bytes(32, "big") + sig.s.to_bytes(32, "big") + bytes([sig.v + 27])
-    return {**user_op, "signature": Web3.to_hex(HexBytes(signature))}
+    # C-21：SimpleAccount 校验前先 toEthSignedMessageHash(userOpHash)（源码实证），
+    # 因此签名必须是 EIP-191 personal_sign 语义（eth_account 自动产出 v∈{27,28} 的 65B 签名）
+    signed = Account.sign_message(encode_defunct(primitive=bytes(op_hash)), private_key=owner_key)
+    return {**user_op, "signature": Web3.to_hex(HexBytes(bytes(signed.signature)))}
 
 
 DEPOSIT_TOPUP_WEI = 10**17  # 预补 0.1 BOT 保证金（SimpleAccount 经 EntryPoint 付 gas）
@@ -288,10 +297,13 @@ def build_and_send_user_op(
     while receipt is None and time.time() < deadline:
         time.sleep(1.0)
         receipt = bundler.get_user_operation_receipt(op_hash)
+    if receipt is None and tx_service is not None:
+        # C-22：bundler 收单不打包（偏差 #17）→ 自提交 EntryPoint.handleOps 兜底上链
+        return _submit_via_handle_ops(w3, chain, signed, owner, owner_key, tx_service, op_hash, est)
     if receipt is None:
         msg = f"UserOp 未在 {RECEIPT_POLL_S}s 内上链: {op_hash}"
         raise ChainError(msg, code="userop_timeout")
-    total_gas = int(receipt.get("actualGasUsed", 0))
+    total_gas = _to_int(receipt.get("actualGasUsed", 0))
     return {
         "dry_run": False,
         "user_op_hash": op_hash,
@@ -303,3 +315,95 @@ def build_and_send_user_op(
         if est
         else 0,
     }
+
+
+HANDLE_OPS_ABI: list[dict[str, Any]] = [
+    {
+        "name": "handleOps",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {
+                "name": "ops",
+                "type": "tuple[]",
+                "components": [
+                    {"name": "sender", "type": "address"},
+                    {"name": "nonce", "type": "uint256"},
+                    {"name": "initCode", "type": "bytes"},
+                    {"name": "callData", "type": "bytes"},
+                    {"name": "accountGasLimits", "type": "bytes32"},
+                    {"name": "preVerificationGas", "type": "uint256"},
+                    {"name": "gasFees", "type": "bytes32"},
+                    {"name": "paymasterAndData", "type": "bytes"},
+                    {"name": "signature", "type": "bytes"},
+                ],
+            },
+            {"name": "beneficiary", "type": "address"},
+        ],
+        "outputs": [],
+    }
+]
+
+
+def _submit_via_handle_ops(  # noqa: PLR0917  # 打包上链参数集
+    w3: Web3,
+    chain: ChainSpec,
+    signed: dict[str, str],
+    owner: str,
+    owner_key: str,
+    tx_service: TxService,
+    op_hash: str,
+    est: dict[str, Any],
+) -> dict[str, Any]:
+    """bundler 不出 bundle 时的兜底：把已签名 UserOp 直接经 handleOps 打包上链。"""
+    ep = contract_at(w3, chain.contracts.entry_point, HANDLE_OPS_ABI)
+    packed_op = (
+        signed["sender"],
+        int(signed["nonce"]),
+        hex_to_bytes(signed["initCode"]),
+        hex_to_bytes(signed["callData"]),
+        _pack_pair(int(signed["verificationGasLimit"]), int(signed["callGasLimit"])),
+        int(signed["preVerificationGas"]),
+        _pack_pair(int(signed["maxPriorityFeePerGas"]), int(signed["maxFeePerGas"])),
+        hex_to_bytes(signed["paymasterAndData"]),
+        hex_to_bytes(signed["signature"]),
+    )
+    data = Web3.to_bytes(
+        hexstr=HexStr(ep.encode_abi("handleOps", args=[[packed_op], checksum(owner)]))
+    )
+    outcome = tx_service.execute(
+        from_address=owner,
+        to_address=chain.contracts.entry_point,
+        value_wei=0,
+        data=data,
+        dry_run=False,
+        gas=2_000_000,
+    )
+    if not isinstance(outcome, TxReceiptSummary):
+        msg = "handleOps 自提交意外返回预览（dry_run 配置错误）"
+        raise ChainError(msg, code="handleops_preview")
+    receipt = w3.eth.get_transaction_receipt(HexBytes(outcome.tx_hash))
+    success = _find_user_op_event(w3, chain, receipt)
+    return {
+        "dry_run": False,
+        "user_op_hash": op_hash,
+        "sender": signed["sender"],
+        "success": success,
+        "transaction_hash": outcome.tx_hash,
+        "gas_used": outcome.gas_used,
+        "estimated_gas": int(est.get("callGasLimit", 0)) + int(est.get("verificationGasLimit", 0))
+        if est
+        else 0,
+        "submitted_via": "handle_ops_self_submit",  # bundler 不打包的兜底路径（偏差 #17）
+    }
+
+
+def _find_user_op_event(w3: Web3, chain: ChainSpec, receipt: Any) -> bool:  # noqa: ANN401  # web3 回执动态类型
+    """回执中找 UserOperationEvent(success) 判定 UserOp 执行结果。"""
+    try:
+        ep = contract_at(w3, chain.contracts.entry_point, ENTRY_POINT_EVENTS_ABI)
+        for event in ep.events.UserOperationEvent().process_receipt(receipt):
+            return bool(event.args.success)
+    except Exception:  # 事件缺失按失败处理并交给上层断言
+        return False
+    return False

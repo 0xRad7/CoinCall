@@ -68,6 +68,8 @@ ruff check . && ruff format --check . && mypy app
 | C-18 | 2026-10-02 | EntryPoint.depositFor 在本链真实 revert（selector 正确、gas 充足） | 该 EntryPoint 为自制实现，depositFor 不可用 | 入金走 SimpleAccount.receive()（普通转账即 addDeposit 入 EntryPoint） |
 | C-19 | 2026-10-02 | AA25 invalid account nonce：本链 EntryPoint 无 getNonce 视图、nonce 独立于账户 tx-nonce（CREATE2 出生合约 tx-nonce=1 而 UserOp nonce 从 0 计） | 自制 EntryPoint 的 nonce 语义与标准不符 | 发送前用 estimate 扫描探测正确 nonce（_probe_userop_nonce，仅 RPC 模拟不花 gas） |
 | C-20 | 2026-10-02 | 本轮多次 heredoc 脚本做文本替换静默失败（ruff format 改排版后锚点不匹配），造成半套补丁上线的连环 debug | 盲字符串替换无命中校验且 assert 失败时不写盘的认知偏差 | 对格式化工具处理过的文件：先 Read 再 Edit 工具级替换；脚本替换必须 assert 且失败即停 |
+| C-21 | 2026-10-02 | 4337 AA24 签名错误连破三轮（裸 hash v+27/标准公式/视图 hash 全失败），最终经 SimpleAccount 实现合约源码实证破解 | SimpleAccount 校验前先 toEthSignedMessageHash(userOpHash)——签名必须是 EIP-191 personal_sign 语义 | AA 账户实现的签名语义以实现合约源码为准（本链 SimpleAccount=0xDE15Ab…）；encode_defunct 签名 |
+| C-22 | 2026-10-02 | bundler 收单不打包导致 4337 无法上链 | 官方 bundler 基础设施限制 | send 超时自动降级 EntryPoint.handleOps 自提交（_submit_via_handle_ops）——UserOp 照常真实上链；bundler 回执数值兼容 0x hex 字符串 |
 
 沉淀规则：
 - 触发条件：静态检查被钩子拦截、阶段质量门红、bug 修复、实测链行为与编码假设不符、code review 发现的规范违反；

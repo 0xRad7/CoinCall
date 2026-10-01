@@ -155,14 +155,14 @@ def main() -> int:
         f"{token.get('symbol')} decimals={token.get('decimals')}",
     )
 
-    # 步骤 10：4337 智能账户——建户→入金→estimate 模拟（上链受 bundler 限制，偏差 #17）
+    # 步骤 10：4337 智能账户全链路——建户→入金→UserOp 真实上链（handleOps 兜底，偏差 #17）
     if funded:
         client.post(
             f"{api}/aa/account/create",
-            json={"owner": address_a, "salt": 1, "dry_run": False},
+            json={"owner": address_a, "salt": 2, "dry_run": False},
         )
         predicted = client.post(
-            f"{api}/aa/account/predict", json={"owner": address_a, "salt": 1}
+            f"{api}/aa/account/predict", json={"owner": address_a, "salt": 2}
         ).json()
         client.post(  # 入金：普通转账经 receive()→addDeposit（偏差 #18）
             f"{api}/tx/transfer",
@@ -173,20 +173,26 @@ def main() -> int:
                 "dry_run": False,
             },
         )
-        est_resp = client.post(
-            f"{api}/aa/userop/estimate",
-            json={"owner": address_a, "salt": 1, "target": address_a, "value_wei": "0"},
+        aa = client.post(
+            f"{api}/aa/execute",
+            json={
+                "owner": address_a,
+                "salt": 2,
+                "target": address_a,
+                "value_wei": "0",
+                "dry_run": False,
+            },
         )
-        if est_resp.status_code == 200 and est_resp.json().get("estimate"):
-            est = est_resp.json()["estimate"]
-            vgl = int(est.get("verificationGasLimit", "0"), 16)
-            detail10 = (
-                f"智能账户={predicted['address'][:14]}… 模拟通过 vgl={vgl}"
-                "（偏差 #17）上链受 bundler 限制"
+        if aa.status_code == 200 and aa.json().get("success"):
+            record(
+                10,
+                "aa/execute 4337 上链",
+                "PASS",
+                f"智能账户={predicted['address'][:12]}… UserOp success "
+                f"tx={aa.json().get('transaction_hash', '')[:18]}…",
             )
-            record(10, "aa 4337 建户+入金+estimate", "PASS", detail10)
         else:
-            record(10, "aa 4337 estimate", "FAIL", est_resp.text[:120])
+            record(10, "aa/execute 4337", "FAIL", aa.text[:120])
     else:
         record(10, "aa 4337", "NEEDS_FUNDS", "A 无资金建户")
 

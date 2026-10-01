@@ -8,7 +8,7 @@
 |---|---|---|---|
 | G1 协议冻结 | test_01/02 live 全绿 + 结果归档 | ✅ **PASS** | `results/g1_live_2026-10-01.{xml,json}`（14/14，2026-10-01） |
 | G2 读能力 | test_04/06/07/08 live 部分全绿 | ✅ **PASS** | test_04(5) + test_06(4) + test_07(4) + test_08(5) live 全绿 |
-| G3 写能力 | needs_funds 全绿 | ✅ **PASS（2026-10-02 补跑）** | `results/g3_needs_funds.json`：**8 passed + 1 skipped + 0 failed**（skip=4337 上链受 bundler 限制，偏差 #17；其余转账/approve/ERC-8004 注册/BDEX swap 全部真实上链） |
+| G3 写能力 | needs_funds 全绿 | ✅ **PASS（终态）** | **9/9 全部真实上链通过，无 skip**：转账×2/approve/4337 全链路×2（UserOp 经 handleOps 自提交上链）/ERC-8004 注册/BDEX swap/单位防线×2 |
 | G4 服务 | unit 全绿 + /docs 可交互 | ✅ **PASS** | unit 103 通过/覆盖 81.23%；`/docs` 200、55 路径（uvicorn 实测存证于 D4 提交说明） |
 | G5 演示 | 05 篇 15 步剧本全程跑通 | ✅ **PASS（全资金口径）** | `results/g5_demo.md` 终版：**15/15 PASS**（自转/ERC-8004 注册/BDEX 兑换真实上链；4337=建户+入金+estimate 模拟通过，上链受偏差 #17 限制） |
 
@@ -43,7 +43,7 @@
 | 14 | Docker 构建在本机因外网镜像源不可达（buildkit resolve 超时）未完成容器验证；G5 按任务预案走本机 uvicorn + 本机 Redis；Dockerfile/compose 已交付（基础镜像 python:3.11-slim，本地有缓存 tag 可离线构建的环境可用） | 本机网络限制；README 已注明双路径 |
 | 15 | 主网 faucet_api_url 按测试网同构推定（`api-faucet.botchain.ai`） | 未实测（铁律 7：不主动访问主网域） |
 | 16 | **UserOp RPC 形态用离散字段**（verificationGasLimit/callGasLimit/maxFeePerGas/maxPriorityFeePerGas 顶层十进制），packed bytes32 仅用于 getUserOpHash | bundler.bohr.life 的校验器拒收 v0.7 packed 字段（C-16 实测） |
-| 17 | **bundler.bohr.life 收单不打包**：eth_sendUserOperation 接受 UserOp 后不出 bundle 上链（30s+，debug_* 关闭）；且其对 initCode 模拟报 AA20（EOA 直调 factory 正常） | 4337 上链验收改口径：建户+入金（真实上链）+estimate 模拟全过（签名/结构/nonce 被 bundler 认可）即 PASS；上链环节用例显式 skip（C-17） |
+| 17 | **bundler.bohr.life 收单不打包**（eth_sendUserOperation 接受后不出 bundle）；对 initCode 模拟报 AA20 | 服务已实现降级：send 超时 → **EntryPoint.handleOps 自提交**，UserOp 真实上链（2026-10-02 实测 success=true，gas≈136k）。4337 全链路（建户/入金/签名/UserOp 上链）**9/9 用例真实通过，无 skip** |
 | 18 | **EntryPoint.depositFor 本链真实 revert**；入金改走 SimpleAccount.receive()（普通转账即 addDeposit） | 自制 EntryPoint 实现（C-18） |
 | 19 | **EntryPoint 无 getNonce 视图、nonce 独立于 tx-nonce**（CREATE2 出生合约 tx-nonce=1 而 UserOp nonce 从 0 计）；发送/估值前用 estimate 扫描探测正确 nonce | 自制 EntryPoint 的 nonce 语义（C-19） |
 | 20 | 4337 maxFee/maxPriority 报 1.5× 链价（30gwei） | bundler 打包激励；真实结算按 effectiveGasPrice=20gwei（回实测得） |
