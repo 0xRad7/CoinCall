@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     chain_id: int = 968
     # 计价 token 合约地址（BOT 968 USDT），非凭据：
     payment_token_address: str = "0x75edC9335175Fc0552D51D48439F229c10420fe3"  # noqa: S105
-    topup_deposit_address: str = "0x000000000000000000000000000000000000dEaD"
     receipt_secret: str = "coincall-dev-receipt-secret"  # noqa: S105 —— dev 占位，生产从 env 注入
     manifest_cache_ttl: float = 60.0  # 01 §5：网关侧 manifest 内存缓存
     chain_cache_ttl: float = 30.0  # 09 P0-4：链上约束短缓存

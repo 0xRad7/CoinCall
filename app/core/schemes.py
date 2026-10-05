@@ -132,11 +132,16 @@ class PayVaultScheme:
                 "token": str(pricing.get("token", "")),
             },
             "wallet_balance_raw": str(wallet_balance_raw),
-            "topup": {
-                "endpoint": "POST /consumer/topup",
-                "token": str(pricing.get("token", "")),
-                "deposit_address": pay_to,  # 04 §2 平台收款地址（V1 以 vault 地址占位）
-                "min_amount": "1",
+            "payment": {  # v2：消费者本地钱包签 EIP-712 直付，资金不过平台（铁律 P7；02 §3）
+                "scheme": self.name,
+                "header": "X-PAYMENT",  # base64 JSON：Authorization 六元组 + v/r/s
+                "domain": {
+                    "name": "PayVault",
+                    "version": "1",
+                    "chainId": self.chain_id,
+                    "verifyingContract": self.verifying_contract,
+                },
+                "approve_to": pay_to,  # 余额/授权不足时，钱包 approve 的目标合约
             },
             "trace_id": "",
         }
