@@ -18,4 +18,8 @@ CoinCall —— BOT Chain 上的 x402 式按次付费 Agent 服务层。本仓�
 
 ## 全量测试入口
 
-见 `AGENTS.md`（W3 落地后生效；在此之前以各子仓 README 为准）。
+见 `AGENTS.md`（W3 落地后生效；在此之前以各子仓 README 为准）；本仓用例绑定明细见 `tests/README.md`。
+
+## Provider 接入
+
+五步上架即售（注册身份→绑钱包→登记→发布→上榜）：见 `PROVIDER_ONBOARDING.md`。
