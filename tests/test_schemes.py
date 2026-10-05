@@ -1,13 +1,13 @@
 """冻结契约 #3：payment_scheme Protocol + PayVaultScheme v1 + registry（02 §7.5）。"""
 
 import pytest
+
 from app.core.payment import XPayment, parse_x_payment
 from app.core.schemes import (
     SCHEME_REGISTRY,
     PayVaultScheme,
     get_scheme,
 )
-
 from tests.conftest import CONSUMER_WALLET, VAULT, FakeChain, make_manifest, make_x_payment_header
 
 pytestmark = pytest.mark.unit
@@ -41,7 +41,9 @@ async def test_build_challenge_shape() -> None:
     assert challenge["service_id"] == "svc_translate_v1"
     assert challenge["pricing"]["amount_raw"] == "10000"
     assert challenge["wallet_balance_raw"] == "123"
-    assert challenge["topup"]["endpoint"] == "POST /consumer/topup"
+    assert challenge["payment"]["scheme"] == "erc3009-vault"
+    assert challenge["payment"]["approve_to"].startswith("0x")
+    assert challenge["payment"]["domain"]["verifyingContract"].startswith("0x")
     assert challenge["trace_id"] == ""  # 路由层注入
 
 

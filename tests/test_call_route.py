@@ -79,10 +79,11 @@ async def test_missing_api_key_402_challenge_format(settings: object) -> None:
         assert body["service_id"] == "svc_translate_v1"
         assert body["pricing"] == {"amount": "0.01", "amount_raw": "10000", "token": "USDT"}
         assert "wallet_balance_raw" in body
-        assert body["topup"]["endpoint"] == "POST /consumer/topup"
-        assert body["topup"]["token"] == "USDT"
-        assert body["topup"]["deposit_address"].startswith("0x")
-        assert "min_amount" in body["topup"]
+        assert body["payment"]["scheme"] == "erc3009-vault"
+        assert body["payment"]["header"] == "X-PAYMENT"
+        assert body["payment"]["approve_to"].startswith("0x")
+        assert body["payment"]["domain"]["name"] == "PayVault"
+        assert body["payment"]["domain"]["chainId"] == 968
         assert body["trace_id"]
 
 
