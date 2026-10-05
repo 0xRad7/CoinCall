@@ -4,7 +4,8 @@
 
 - 技术栈：React 18 + Vite 5 + TypeScript（strict）+ ethers v6 + react-router（Hash 路由）
 - 运行时**零 CDN**：所有依赖打进构建产物，现场断网（后端在本地时）可用
-- 中文 UI；私钥只存 sessionStorage（关页即清），签名全部在浏览器进程内完成
+- 中文 UI；**控制台不接触任何私钥**——消费端第一步是连接浏览器钱包（OKX / MetaMask，`window.ethereum || window.okxwallet`），
+  只读地址，签名与交易全部由扩展弹窗在本地完成；链不对时自动引导切链/添加 BOT Chain 测试网（switch 失败 4902 → add）
 
 ## 安装
 
@@ -55,7 +56,7 @@ COINCALL_E2E=1 npx vitest run tests/e2e.live.test.ts
 
 - **总览**（默认）：GMV/笔数/服务/Provider 四卡 + degraded 提示、Provider 收入榜（proof 交易外链 scan.bohr.life）、服务目录卡片、keeper 结算观测（10s 轮询可开关）
 - **Provider 工作台**：五步向导 ①登记（链上身份实时预检）→ ②发布服务（amount↔amount_raw 联动、endpoint 类型切换、schema JSON 校验、422 逐字段定位）→ ③我的服务（暂停/恢复/改价=重发 manifest，带二次确认）→ ④收款钱包绑定（EIP-712 typed data 展示、注入钱包/粘贴签名双模式、5 分钟 deadline 倒计时）→ ⑤提现（PayVault credits eth_call + providerWithdraw）
-- **消费端工作台**：①钱包生成/导入（安全须知折叠、key 文件下载、销毁会话密钥）→ ②资金三数 + 铸造 + 授权滑条（pending→confirmed + 交易外链）→ ③API key 一次性明文展示 + 「已保存」确认 → ④试用调用（按 input_schema 动态表单；本地 EIP-712 签名组 X-PAYMENT；402 质询转成「去授权」动作按钮）→ ⑤调用历史（localStorage，可清空）→ ⑥预算护栏
+- **消费端工作台**：①连接钱包（扩展弹窗 eth_requestAccounts 只拿地址；顶栏常驻地址 chip + 链徽标 + 断开；链≠968 一键引导 switch→add）→ ②资金三数 + 铸造 + 授权滑条（eth_sendTransaction，20 gwei 固定费率，pending→confirmed + 交易外链）→ ③API key（绑定已连接地址，一次性明文展示 + 「已保存」确认）→ ④试用调用（按 input_schema 动态表单；扩展弹窗 signTypedData 签 EIP-712 授权、组包时 v 归一 0/1→27/28；402 质询转成「去授权」动作直接触发挥扩展 approve 弹窗；拒绝签名 4001 显示友好取消态）→ ⑤调用历史（localStorage，可清空）→ ⑥预算护栏。**没有扩展的演示机**：第一步末尾有折叠的「没有浏览器钱包？」→「创建一次性演示钱包」兜底（随机生成、sessionStorage、关页即焚、仅测试网，与主路径强隔离；沿用黄金向量锁定的本地 digest 签名路径）
 - **帮助**：三服务关系图（纯 CSS）、错误码人话表、私钥安全声明
 
 ## 端口说明
