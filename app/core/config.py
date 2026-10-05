@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     receipt_secret: str = "coincall-dev-receipt-secret"  # noqa: S105 —— dev 占位，生产从 env 注入
     manifest_cache_ttl: float = 60.0  # 01 §5：网关侧 manifest 内存缓存
     chain_cache_ttl: float = 30.0  # 09 P0-4：链上约束短缓存
+    # 前端控制台（coincall-console，Vite 5173）跨域白名单；逗号分隔，空=关闭
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     # ---- keeper 结算器（04 §3 / 09 P0-5）----
     keeper_enabled: bool = False  # 单测默认关（A2 零网络）；生产/演示 env 置 true
     keeper_batch_size: int = 3  # 攒批笔数阈值（演示故意取小，快速上屏）
