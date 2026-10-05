@@ -112,9 +112,10 @@ def test_paid_call_e2e_settled_by_keeper() -> None:
     assert settled["last_batch"]["tx_hash"].startswith("0x")
     assert settled["queue"]["pending"] == 0
 
-    # ⑤ 结算后钱包余额减少一笔回款前的量：0.01 USDT
+    # ⑤ 结算后钱包余额至少减少本笔 0.01 USDT
+    # （公开测试钱包可能被并行任务同时消费，用单调下界而非严格等式）
     after = wallet.balance()
-    assert after.usdt_balance_raw == ready.usdt_balance_raw - 10_000
+    assert after.usdt_balance_raw <= ready.usdt_balance_raw - 10_000
 
 
 @pytest.mark.unit
