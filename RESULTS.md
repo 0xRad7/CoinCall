@@ -110,3 +110,28 @@ docker compose config    → testnet 缺省渲染不变；mainnet+锁+代理组�
 ```
 
 主网链上读写验证（live/needs_funds 打 677）**未执行**（无币+用户豁免）；测试网回归未重跑（G1~G5 已终态存证，本轮改动均为网络参数化面，单测覆盖）。
+
+## 九、P0-1 身份三端点 + 仓库更名（2026-10-05，W1）
+
+**交付**（docs/test/feat 分型提交，tag `d7-api-ext`）：
+
+| 变更 | 内容 |
+|---|---|
+| 签名定案（先于编码） | `results/w1_setagentwallet_findings.md`：setAgentWallet=**EIP-712 v4**（typehash `AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256 deadline)`、domain name=ERC8004IdentityRegistry/version=1/verifyingContract=代理 0xec8f…99c0）、**newWallet 本人签名**（ECDSA 恢复==newWallet 或其 ERC-1271）、deadline 窗口 [now, now+300s]、无 nonce、空签名必 revert。05 篇预判（EIP-191/owner 签/validAfter/空签名可用）全盘不成立 → **C-23** |
+| `POST /agent-identity/{token_id}/wallet` | ownerOf 校验（not_owner 422）→ deadline 窗口预检（bad_deadline 422，链时间基准）→ 自带 signature 或服务代签（keystore/出资账户，`core/eip712.py` 黄金向量锁死）→ TxService（dry_run 默认/20 gwei） |
+| `GET /agent-identity/register-result/{tx_hash}` | 回执 Transfer mint（from=0x0）离线解码 → {found,status,agent_ids,owner,agent_wallet}；未上链 found=false；坏哈希 bad_tx_hash 422 |
+| `GET /agent-identity/{token_id}` 扩展 | `?metadata_keys=` 按键聚合链上 metadata（UTF-8 优先，非文本回退 0x hex）；默认不带向后兼容 |
+| 仓库更名 | bot_chain_api → coincall-bot-chain-api：README 注记/FastAPI title/根路由 service/compose 项目名/.env.example 头；包名 `app/`、git 历史、本文历史原文不动。更名致 venv shebang 失效 → **C-24**（rm -rf .venv && uv sync） |
+| 既有缺陷修复 | M9 冒烟用例共享库陈旧水位触发数十万块回扫超时 → tmp_path 空库隔离（C-10 补漏）→ **C-25** |
+
+**验证口径**：
+
+```
+ruff check/format/mypy      → 全过（每提交 pre-commit 机械强制）
+pytest -m unit --cov=app    → 124 passed；覆盖率 80.36%（门 ≥80）；新增 eip712.py 100% / modules/erc8004.py 83%
+pytest -m needs_funds       → 12/12 全绿（本任务新增 4：EIP-712 域链上对账 eip712Domain()、
+                             注册→新钱包签名→绑定→getAgentWallet 回读全链路、错签者 estimate 拦截、既有注册回归）
+消耗                        → 3 笔注册 + 1 笔 setAgentWallet + 1 笔 estimate-only revert（<0.01 BOT）
+```
+
+**遗留**：① `setMetadata`/`unsetAgentWallet` 已精录 ABI 未暴露端点（05 篇 B 端点 P2，按任务书"可砍"未做）；② sync_logs/sync_blocks 水位追赶区间无上限（C-25 关联，建议分块补扫）；③ pyproject dist 名仍为 bot-chain-api（避免 uv.lock 重锁），如需发布改名单独走 build 提交。
