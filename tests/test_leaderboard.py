@@ -5,6 +5,7 @@
 混合 marker 文件不设模块级 pytestmark（逐用例打标）。
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,21 @@ class TestLeaderboardUnit:
             # 展示值与权威值一致（10 USDT / 0.07 USDT）
             assert rows[0]["revenue"] == "10"
             assert rows[1]["revenue"] == "0.07"
+
+    @pytest.mark.unit
+    def test_provider_row_enriched_from_manifest_wallet(self, tmp_path: Path) -> None:
+        """Charged 键=manifest 收款钱包：未走 /providers 登记也应有 display_name/agent_id。"""
+        manifest = json.loads(json.dumps(VALID_MANIFEST))
+        manifest["service_id"] = "svc_translate"
+        manifest["provider"]["wallet"] = PROVIDER_3C44
+        manifest["provider"]["display_name"] = "Translate Booth"
+        with _client(tmp_path, chain=_chain_with_history()) as client:
+            resp = client.post("/manifests", json=manifest)
+            assert resp.status_code in (200, 201), resp.text
+            rows = client.get("/leaderboard/providers").json()["providers"]
+            row = next(r for r in rows if r["wallet"] == PROVIDER_3C44)
+            assert row["display_name"] == "Translate Booth"
+            assert row["agent_id"] == 137
 
     @pytest.mark.unit
     def test_sync_backfills_from_deploy_block_and_sets_watermark(self, tmp_path: Path) -> None:
