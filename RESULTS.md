@@ -135,3 +135,20 @@ pytest -m needs_funds       → 12/12 全绿（本任务新增 4：EIP-712 域�
 ```
 
 **遗留**：① `setMetadata`/`unsetAgentWallet` 已精录 ABI 未暴露端点（05 篇 B 端点 P2，按任务书"可砍"未做）；② sync_logs/sync_blocks 水位追赶区间无上限（C-25 关联，建议分块补扫）；③ pyproject dist 名仍为 bot-chain-api（避免 uv.lock 重锁），如需发布改名单独走 build 提交。
+
+## 十、P1-2 补端点：GET /contracts/logs eth_getLogs 透传（2026-10-01，发起人指示）
+
+**背景**：发起人既定指示"链上功能优先走 bot-chain-api，缺端点先补端点"——CoinCall core（P1-2/P1-3）需要按 PayVault `Charged` 事件做收入真相索引，本服务此前无 getLogs 透传端点（M9 indexer 是入库语义，非透传）。
+
+**交付**：`GET /api/v1/contracts/logs?address=&from_block=&to_block=&topic0=&limit=`
+
+| 项 | 口径 |
+|---|---|
+| 窗口 | `to_block - from_block + 1 ≤ 5000`（rpc.bohr.life 实测上限），超限 422 `window_too_large` |
+| limit | 默认 1000 / 上限 5000；命中截断时 `truncated=true` |
+| 返回 | 原始 log 数组（address/topics/data/block_hash/transaction_hash/log_index…，HexBytes→0x 归一），**不做 ABI 解码**（调用方自解） |
+| 错误 | 坏区间/坏地址/坏 topic0 → 422 service_error；RPC 失败 → 502 chain_error |
+
+**验证**：unit 9 例（透传参数/原始形态/窗口/limit/错误映射）+ live 1 例（真实取 PayVault 部署块起 5000 窗内 Charged 事件：8 笔、provider 0x3C44…93BC 在列、value 恒正）；全量门 `pytest -m unit --cov=app` 133 passed / 覆盖率 80.88%。
+
+**测试夹具注记**：本批新增用例的 TestClient 夹具将 DUCKDB_PATH 指到 tmp_path 并 cache_clear（C-14：8010 服务常驻持库时既有 test_10 夹具会 IOException——该既有问题属"跑测试前确认无本服务进程占用"的既约纪律，不在本批修复范围）。
