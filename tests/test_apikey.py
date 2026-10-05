@@ -1,6 +1,9 @@
 """T10：01/03 节 api key 签发与校验（明文只回显一次，落库只存 hash）。"""
 
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.unit
 
 WALLET = "0x1234567890AbCdEf1234567890aBcDeF12345678"
 

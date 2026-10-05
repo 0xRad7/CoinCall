@@ -1,6 +1,9 @@
 """应用层：healthz 与三段错误模型贯穿（trace_id）。"""
 
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.unit
 
 
 def test_healthz(client: TestClient) -> None:

@@ -2,9 +2,12 @@
 
 import copy
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import VALID_MANIFEST
+
+pytestmark = pytest.mark.unit
 
 
 def _post(client: TestClient, manifest: dict[str, object]) -> object:
@@ -17,7 +20,7 @@ def test_publish_and_get_roundtrip(client: TestClient) -> None:
     body = resp.json()
     assert body["service_id"] == "svc_translate_v1"
     assert body["status"] == "active"
-    assert body["chain"] == {"network": 968}
+    assert body["manifest"]["chain"] == {"network": 968}
     assert body["manifest_hash"].startswith("sha256:")
     assert len(body["manifest_hash"]) == len("sha256:") + 64
 
