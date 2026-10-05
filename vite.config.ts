@@ -19,7 +19,7 @@ export default defineConfig({
   server: { port: 5173, host: "127.0.0.1", proxy },
   preview: { port: 5173, host: "127.0.0.1", proxy },
   test: {
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
   },
 } as ReturnType<typeof defineConfig>);
