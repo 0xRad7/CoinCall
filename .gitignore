@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+.venv/
+.env
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+*.egg-info/
+wallet.key
