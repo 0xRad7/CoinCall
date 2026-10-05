@@ -1,4 +1,8 @@
-# bot_chain_api
+# coincall-bot-chain-api
+
+> **更名注记（2026-10-05）**：本仓库已由 `bot_chain_api` 更名为 **coincall-bot-chain-api**
+> （目录/服务标题/compose 项目名同步更新；git 历史完好，Python 包名仍为 `app/`，
+> CONSTRAINTS/RESULTS 历史记录原文保留不改）。
 
 BOT Chain 全功能链上服务（ETH Wuhan 2026 · 赛题接入后端）。赛时 Agent / 前端只对接本服务的
 REST API（`/api/v1`，默认测试网 Chain ID **968**），不再现场写链代码。
@@ -84,7 +88,7 @@ curl http://localhost:8000/api/v1/chain/health     # rpc 通道 chainId 必须�
 | M3 交易 | `/api/v1/tx` | transfer（dry_run 默认）/send-raw/回执/事件解码 |
 | M4 代币 | `/api/v1/tokens` | ERC20/721 读写（dry_run 默认） |
 | M5 账户抽象 | `/api/v1/aa` | 4337 EntryPoint v0.7 + Bundler 全链路 |
-| M6 Agent 身份 | `/api/v1/agent-identity` | ERC-8004 register/聚合视图/信誉/验证 |
+| M6 Agent 身份 | `/api/v1/agent-identity` | ERC-8004 register/聚合视图/信誉/验证/**wallet 绑定**/注册结果解析 |
 | M7 DEX | `/api/v1/bdex` | V2 报价/兑换（dry_run 默认） |
 | M8 通用合约 | `/api/v1/contracts` | 任意 call/send/deploy/decode |
 | M9 索引 | `/api/v1/indexer` | 4 类 sync + status + SSE subscribe |

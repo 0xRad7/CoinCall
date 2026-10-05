@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="BOT Chain API",
+        title="coincall-bot-chain-api",
         version=__version__,
         description=(
             "BOT Chain 全功能链上服务 (ETH Wuhan 2026)。"
@@ -137,7 +137,7 @@ def create_app() -> FastAPI:
     @app.get("/", tags=["meta"])
     def root() -> dict[str, str]:
         return {
-            "service": "bot_chain_api",
+            "service": "coincall-bot-chain-api",
             "version": __version__,
             "docs": "/docs",
             "openapi": "/openapi.json",

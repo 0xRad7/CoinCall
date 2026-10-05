@@ -61,7 +61,7 @@ class IdentityView(BaseModel):
 
 class RegisterRequest(BaseModel):
     owner: str | None = Field(default=None, description="默认取环境变量出资账户")
-    agent_uri: str = Field(default="https://bot-chain-api.local/agents/default")
+    agent_uri: str = Field(default="https://coincall-bot-chain-api.local/agents/default")
     dry_run: bool = True
 
 

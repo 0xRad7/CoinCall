@@ -1,3 +1,5 @@
+name: coincall-bot-chain-api  # 仓库更名（2026-10-05），compose 项目名同步
+
 services:
   redis:
     image: redis:7-alpine
