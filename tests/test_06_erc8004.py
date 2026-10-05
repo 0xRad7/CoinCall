@@ -14,6 +14,8 @@ from app.core.abis.erc8004 import (
     VALIDATION_REGISTRY_ABI,
 )
 from app.core.chains import get_chain
+from app.core.eip712 import domain_separator, sign_agent_wallet_set
+from app.core.errors import TxRevertedError
 from app.core.tx import TxService
 
 pytestmark = pytest.mark.live
@@ -89,3 +91,106 @@ class TestErc8004NeedsFunds:
         assert agent_ids, f"未解析出 agentId: {receipt.logs}"
         agent_id = agent_ids[0]
         assert reg.functions.ownerOf(agent_id).call() == acct.address
+
+    def test_eip712_domain_onchain_matches_findings(self, w3) -> None:
+        """C-23 定案对账：链上 eip712Domain()（IERC5267）与源码归档结论一致。"""
+        reg = w3.eth.contract(address=IDENTITY, abi=IDENTITY_REGISTRY_ABI)
+        domain = reg.functions.eip712Domain().call()
+        _fields, name, version, chain_id, verifying, salt = domain[:6]
+        assert name == "ERC8004IdentityRegistry"
+        assert version == "1"
+        assert chain_id == 968
+        assert verifying.lower() == IDENTITY.lower()  # verifyingContract = 代理地址
+        assert bytes(salt) == b"\x00" * 32
+        # 链上声明字段经本地重算 == 黄金 domainSeparator（签名路径逐字节锁死，test_00 同值）
+        assert Web3.to_hex(domain_separator(chain_id, verifying)) == (
+            "0x2afa5c5221b1fc50a3423f69446f07999dafe2a83724420ab5a34586a29362cf"
+        )
+
+    def test_set_agent_wallet_full_loop(self, w3, funder_key) -> None:
+        """P0-1 端点 A 链上回环：注册 → 新钱包 EIP-712 签名（服务侧代签语义）→ 绑定成功。"""
+        owner = Account.from_key(funder_key)
+        reg = w3.eth.contract(address=IDENTITY, abi=IDENTITY_REGISTRY_ABI)
+        svc = TxService(w3=w3, funder_key=funder_key)
+        register_data = reg.encode_abi(
+            "register", args=["https://bot-chain-api.local/agents/wallet-bind"]
+        )
+        out = svc.execute(
+            from_address=owner.address,
+            to_address=IDENTITY,
+            value_wei=0,
+            data=register_data,
+            dry_run=False,
+        )
+        receipt = w3.eth.get_transaction_receipt(out.tx_hash)
+        agent_id = next(
+            int(e.args.tokenId)
+            for e in reg.events.Transfer().process_receipt(receipt)
+            if e.args.to == owner.address
+        )
+
+        new_wallet = Account.create()
+        deadline = int(w3.eth.get_block("latest")["timestamp"]) + 120
+        signature = sign_agent_wallet_set(
+            new_wallet,
+            chain_id=968,
+            registry=IDENTITY,
+            agent_id=agent_id,
+            new_wallet=new_wallet.address,
+            owner=owner.address,
+            deadline=deadline,
+        )
+        data = reg.encode_abi(
+            "setAgentWallet", args=[agent_id, new_wallet.address, deadline, signature]
+        )
+        bound = svc.execute(
+            from_address=owner.address,  # 交易发送者必须是 owner（源码 msg.sender 检查）
+            to_address=IDENTITY,
+            value_wei=0,
+            data=data,
+            dry_run=False,
+        )
+        assert bound.status == 1
+        assert reg.functions.getAgentWallet(agent_id).call() == new_wallet.address
+
+    def test_set_agent_wallet_rejects_non_wallet_signer(self, w3, funder_key) -> None:
+        """负向实证：owner 签名（而非 newWallet 本人）必 revert（estimate 阶段拦截，不花 gas）。"""
+        owner = Account.from_key(funder_key)
+        reg = w3.eth.contract(address=IDENTITY, abi=IDENTITY_REGISTRY_ABI)
+        svc = TxService(w3=w3, funder_key=funder_key)
+        register_data = reg.encode_abi("register", args=["https://bot-chain-api.local/agents/neg"])
+        out = svc.execute(
+            from_address=owner.address,
+            to_address=IDENTITY,
+            value_wei=0,
+            data=register_data,
+            dry_run=False,
+        )
+        receipt = w3.eth.get_transaction_receipt(out.tx_hash)
+        agent_id = next(
+            int(e.args.tokenId)
+            for e in reg.events.Transfer().process_receipt(receipt)
+            if e.args.to == owner.address
+        )
+        fake_wallet = Account.create()
+        deadline = int(w3.eth.get_block("latest")["timestamp"]) + 120
+        wrong_sig = sign_agent_wallet_set(
+            owner,  # 错签者：owner 而非 newWallet
+            chain_id=968,
+            registry=IDENTITY,
+            agent_id=agent_id,
+            new_wallet=fake_wallet.address,
+            owner=owner.address,
+            deadline=deadline,
+        )
+        data = reg.encode_abi(
+            "setAgentWallet", args=[agent_id, fake_wallet.address, deadline, wrong_sig]
+        )
+        with pytest.raises(TxRevertedError):
+            svc.execute(
+                from_address=owner.address,
+                to_address=IDENTITY,
+                value_wei=0,
+                data=data,
+                dry_run=False,
+            )

@@ -9,7 +9,9 @@ from app.core.tx import TxPreview, TxReceiptSummary
 
 CHAIN_ID = 968
 BLOCK_NUMBER = 25_000_000
+CHAIN_TS = 1_700_000_000 + BLOCK_NUMBER  # make_fake_block 的 timestamp（deadline 窗口断言用）
 TX_HASH = "0x" + "ab" * 32
+IDENTITY_REGISTRY = "0xec8fFbC3c9A34AdDCbB3A14F91db2bd26A8b99c0"
 ACCOUNT_A = "0x1111111111111111111111111111111111111111"
 ACCOUNT_B = "0x2222222222222222222222222222222222222222"
 USDT = "0x75edC9335175Fc0552D51D48439F229c10420fe3"
@@ -81,6 +83,7 @@ def make_fake_contract() -> MagicMock:
             "ownerOf": _fn(ACCOUNT_A),
             "tokenURI": _fn("ipfs://t/1"),
             "getAgentWallet": _fn(ACCOUNT_B),
+            "getMetadata": _fn(b'{"service": "demo"}'),
             "getPair": _fn(ACCOUNT_B),
             "token0": _fn(USDT),
             "token1": _fn(WBOT),

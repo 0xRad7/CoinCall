@@ -8,6 +8,8 @@ import httpx
 import pytest
 import respx
 from eth_account import Account
+from eth_account.messages import encode_typed_data
+from eth_keys import keys as eth_keys
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -15,6 +17,12 @@ from web3 import Web3
 
 from app.core.chains import CHAINS, get_chain
 from app.core.config import Settings
+from app.core.eip712 import (
+    AGENT_WALLET_SET_TYPEHASH,
+    agent_wallet_set_digest,
+    domain_separator,
+    sign_agent_wallet_set,
+)
 from app.core.errors import (
     ChainError,
     ErrorResponse,
@@ -303,3 +311,128 @@ class TestExplorer:
             with pytest.raises(ChainError):
                 client.stats()
             client._http.close()
+
+
+class TestEip712AgentWalletSet:
+    """setAgentWallet EIP-712 签名定案黄金向量（C-23，源码实证；与 eth_account 逐字节对账）。"""
+
+    REGISTRY = CHAINS[TESTNET].contracts.identity_registry
+    GOLDEN_TYPEHASH = "0x678b53cd718d595370ab070ebf48edfdcd834beac116bf23e625fc7f4d5b7d32"
+    GOLDEN_DOMAIN = "0x2afa5c5221b1fc50a3423f69446f07999dafe2a83724420ab5a34586a29362cf"
+    GOLDEN_DIGEST = "0xf147e6850760a6352660c6c50863e20aa6b56798db025d3a49c010fe96844474"
+    GOLDEN_AGENT_ID = 137
+    GOLDEN_DEADLINE = 1_759_500_000
+
+    def test_typehash_and_domain_separator_golden(self) -> None:
+        assert Web3.to_hex(AGENT_WALLET_SET_TYPEHASH) == self.GOLDEN_TYPEHASH
+        assert Web3.to_hex(domain_separator(CHAIN_ID_TESTNET, self.REGISTRY)) == self.GOLDEN_DOMAIN
+
+    def test_digest_golden_vector(self) -> None:
+        digest = agent_wallet_set_digest(
+            chain_id=CHAIN_ID_TESTNET,
+            registry=self.REGISTRY,
+            agent_id=self.GOLDEN_AGENT_ID,
+            new_wallet=ACCOUNT_A,
+            owner=ACCOUNT_B,
+            deadline=self.GOLDEN_DEADLINE,
+        )
+        assert Web3.to_hex(digest) == self.GOLDEN_DIGEST
+
+    def test_owner_field_is_bound_into_digest(self) -> None:
+        """定案要点：ownerOf(agentId) 参与消息哈希（换 owner 即换 digest，不可移植签名）。"""
+        common = {
+            "chain_id": CHAIN_ID_TESTNET,
+            "registry": self.REGISTRY,
+            "agent_id": self.GOLDEN_AGENT_ID,
+            "new_wallet": ACCOUNT_A,
+            "deadline": self.GOLDEN_DEADLINE,
+        }
+        assert agent_wallet_set_digest(owner=ACCOUNT_A, **common) != agent_wallet_set_digest(
+            owner=ACCOUNT_B, **common
+        )
+
+    def test_sign_matches_eth_account_typed_data(self) -> None:
+        """本仓库手写编码与 eth_account.encode_typed_data(v4) 产出完全一致。"""
+        signer = Account.from_key(FAKE_KEY)
+        ours = sign_agent_wallet_set(
+            signer,
+            chain_id=CHAIN_ID_TESTNET,
+            registry=self.REGISTRY,
+            agent_id=self.GOLDEN_AGENT_ID,
+            new_wallet=signer.address,
+            owner=ACCOUNT_B,
+            deadline=self.GOLDEN_DEADLINE,
+        )
+        signable = encode_typed_data(
+            full_message={
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "version", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"},
+                    ],
+                    "AgentWalletSet": [
+                        {"name": "agentId", "type": "uint256"},
+                        {"name": "newWallet", "type": "address"},
+                        {"name": "owner", "type": "address"},
+                        {"name": "deadline", "type": "uint256"},
+                    ],
+                },
+                "primaryType": "AgentWalletSet",
+                "domain": {
+                    "name": "ERC8004IdentityRegistry",
+                    "version": "1",
+                    "chainId": CHAIN_ID_TESTNET,
+                    "verifyingContract": self.REGISTRY,
+                },
+                "message": {
+                    "agentId": self.GOLDEN_AGENT_ID,
+                    "newWallet": signer.address,
+                    "owner": ACCOUNT_B,
+                    "deadline": self.GOLDEN_DEADLINE,
+                },
+            }
+        )
+        assert ours == bytes(signer.sign_message(signable).signature)
+
+    def test_sign_and_recover_roundtrip(self) -> None:
+        """65 字节 r||s||v，v∈{27,28}，恢复地址==newWallet（合约 tryRecover 同语义）。"""
+        signer = Account.from_key(FAKE_KEY)
+        sig = sign_agent_wallet_set(
+            signer,
+            chain_id=CHAIN_ID_TESTNET,
+            registry=self.REGISTRY,
+            agent_id=self.GOLDEN_AGENT_ID,
+            new_wallet=signer.address,
+            owner=ACCOUNT_B,
+            deadline=self.GOLDEN_DEADLINE,
+        )
+        assert len(sig) == 65
+        assert sig[64] in (27, 28)
+        digest = agent_wallet_set_digest(
+            chain_id=CHAIN_ID_TESTNET,
+            registry=self.REGISTRY,
+            agent_id=self.GOLDEN_AGENT_ID,
+            new_wallet=signer.address,
+            owner=ACCOUNT_B,
+            deadline=self.GOLDEN_DEADLINE,
+        )
+        recovered = (
+            eth_keys.Signature(sig).recover_public_key_from_msg_hash(digest).to_checksum_address()
+        )
+        assert recovered == signer.address
+
+    def test_signer_must_be_new_wallet(self) -> None:
+        """定案要点：签名者必须是 newWallet 本人，owner/他人私钥直接拒绝。"""
+        other = Account.from_key("0x" + "44" * 32)
+        with pytest.raises(ValueError, match="newWallet"):
+            sign_agent_wallet_set(
+                other,
+                chain_id=CHAIN_ID_TESTNET,
+                registry=self.REGISTRY,
+                agent_id=self.GOLDEN_AGENT_ID,
+                new_wallet=ACCOUNT_A,
+                owner=ACCOUNT_B,
+                deadline=self.GOLDEN_DEADLINE,
+            )

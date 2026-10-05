@@ -9,12 +9,16 @@ import httpx
 import pytest
 import respx
 from eth_abi import encode as abi_encode
-from eth_utils import function_abi_to_4byte_selector
+from eth_account import Account
+from eth_utils import function_abi_to_4byte_selector, keccak
 from fastapi.testclient import TestClient
 from httpx import Response
+from web3 import Web3
+from web3.exceptions import TransactionNotFound
 
 from app.core.bundler import _find_user_op_event, _submit_via_handle_ops, _to_int
 from app.core.chains import get_chain
+from app.core.config import get_settings
 from app.core.deps import (
     get_request_explorer,
     get_request_keystore,
@@ -28,9 +32,11 @@ from tests.fakes import (
     ACCOUNT_A,
     ACCOUNT_B,
     CHAIN_ID,
+    IDENTITY_REGISTRY,
     TX_HASH,
     USDT,
     make_fake_keystore,
+    make_fake_receipt,
     make_fake_tx_service,
     make_fake_w3,
 )
@@ -381,6 +387,216 @@ class TestM6AgentIdentity:
         assert client.get(f"{API}/agent-identity/5/reputation").status_code == 200
         assert client.get(f"{API}/agent-identity/5/validations").status_code == 200
 
+    def test_identity_view_metadata_keys(self, client: TestClient) -> None:
+        """端点 B：聚合视图可按键附带链上 metadata（默认不带，向后兼容）。"""
+        body = client.get(f"{API}/agent-identity/5").json()
+        assert body["metadata"] == {}
+        body = client.get(
+            f"{API}/agent-identity/5", params={"metadata_keys": ["service_manifest"]}
+        ).json()
+        assert body["token_id"] == 5
+        assert body["metadata"]["service_manifest"] == '{"service": "demo"}'
+
+
+def build_m6_app(
+    fake_w3=None,
+    fake_tx=None,
+):
+    """M6 新端点专用 client 工厂：可注入定制 fake w3/tx（同 client fixture 的装配口径）。"""
+    app = create_app()
+    w3 = fake_w3 or make_fake_w3()
+    app.dependency_overrides[get_request_web3] = lambda: w3
+    app.dependency_overrides[get_request_explorer] = lambda: ExplorerClient(
+        make_fake_explorer_client()
+    )
+    app.dependency_overrides[get_request_keystore] = make_fake_keystore
+    app.dependency_overrides[get_request_tx] = fake_tx or make_fake_tx_service
+    return app, w3
+
+
+def mint_transfer_log(
+    token_id: int,
+    to: str,
+    from_addr: str | None = None,
+    address: str = IDENTITY_REGISTRY,
+) -> dict:
+    """构造 ERC-721 Transfer 日志（from=None 即 0x0 铸造）。"""
+    from_addr_hex = "0" * 40 if from_addr is None else from_addr[2:].lower()
+    to_hex = to[2:].lower()
+    return {
+        "address": Web3.to_checksum_address(address),
+        "topics": [
+            keccak(b"Transfer(address,address,uint256)"),
+            bytes.fromhex(from_addr_hex.rjust(64, "0")),
+            bytes.fromhex(to_hex.rjust(64, "0")),
+        ],
+        "data": abi_encode(["uint256"], [token_id]),
+        "blockNumber": 25_000_000,
+        "blockHash": bytes(32),
+        "transactionHash": bytes.fromhex(TX_HASH[2:]),
+        "transactionIndex": 0,
+        "logIndex": 0,
+        "removed": False,
+    }
+
+
+class TestM6WalletBinding:
+    """端点 A：POST /agent-identity/{token_id}/wallet（EIP-712 newWallet 签名，C-23）。"""
+
+    def test_dry_run_default_with_caller_signature(self) -> None:
+        app, _ = build_m6_app()
+        with TestClient(app) as tc:
+            r = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={
+                    "owner": ACCOUNT_A,
+                    "wallet_address": ACCOUNT_B,
+                    "signature": "0x" + "22" * 65,
+                },
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["dry_run"] is True
+        assert body["unsigned_tx"]["data"].startswith("0x")
+        assert body["unsigned_tx"]["to"] == IDENTITY_REGISTRY
+
+    def test_service_signs_for_managed_wallet(self) -> None:
+        """wallet_address 为代管账户时服务代签（resolve_signer → EIP-712 签名）。"""
+        wallet = Account.from_key("0x" + "33" * 32)
+        tx = make_fake_tx_service()
+        tx.resolve_signer.side_effect = None
+        tx.resolve_signer.return_value = wallet
+        app, _ = build_m6_app(fake_tx=tx)
+        with TestClient(app) as tc:
+            r = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={"owner": ACCOUNT_A, "wallet_address": wallet.address},
+            )
+        assert r.status_code == 200
+        assert r.json()["dry_run"] is True
+        tx.resolve_signer.assert_called_once_with(wallet.address)
+
+    def test_owner_mismatch_rejected(self) -> None:
+        app, _ = build_m6_app()
+        with TestClient(app) as tc:
+            r = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={
+                    "owner": ACCOUNT_B,
+                    "wallet_address": ACCOUNT_B,
+                    "signature": "0x" + "22" * 65,
+                },
+            )
+        assert r.status_code == 422
+        assert r.json()["error"] == "service_error"
+        assert r.json()["code"] == "not_owner"
+
+    def test_deadline_window_enforced(self) -> None:
+        app, _ = build_m6_app()
+        with TestClient(app) as tc:
+            expired = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={
+                    "owner": ACCOUNT_A,
+                    "wallet_address": ACCOUNT_B,
+                    "signature": "0x" + "22" * 65,
+                    "deadline": 1_725_000_000 - 1,
+                },
+            )
+            too_far = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={
+                    "owner": ACCOUNT_A,
+                    "wallet_address": ACCOUNT_B,
+                    "signature": "0x" + "22" * 65,
+                    "deadline": 1_725_000_000 + 301,
+                },
+            )
+        assert expired.status_code == 422
+        assert expired.json()["code"] == "bad_deadline"
+        assert too_far.status_code == 422
+        assert too_far.json()["code"] == "bad_deadline"
+
+    def test_signature_required_when_not_managed(self) -> None:
+        app, _ = build_m6_app()  # 默认 fake resolve_signer 抛 ServiceError
+        with TestClient(app) as tc:
+            r = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={"owner": ACCOUNT_A, "wallet_address": ACCOUNT_B},
+            )
+        assert r.status_code == 422
+        assert r.json()["code"] == "signature_required"
+
+    def test_real_send_returns_receipt(self) -> None:
+        app, _ = build_m6_app()
+        with TestClient(app) as tc:
+            r = tc.post(
+                f"{API}/agent-identity/5/wallet",
+                json={
+                    "owner": ACCOUNT_A,
+                    "wallet_address": ACCOUNT_B,
+                    "signature": "0x" + "22" * 65,
+                    "dry_run": False,
+                },
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["dry_run"] is False
+        assert body["tx_hash"] == TX_HASH
+        assert body["status"] == 1
+
+
+class TestM6RegisterResult:
+    """端点 C：GET /agent-identity/register-result/{tx_hash}（Transfer mint 解析）。"""
+
+    def test_mint_parsed_to_agent_ids(self) -> None:
+        w3 = make_fake_w3()
+        receipt = dict(make_fake_receipt())
+        receipt["logs"] = [
+            mint_transfer_log(137, ACCOUNT_A),
+            mint_transfer_log(138, ACCOUNT_A, from_addr=ACCOUNT_B),  # 非铸造，排除
+            mint_transfer_log(999, ACCOUNT_A, address=USDT),  # 非注册表合约，排除
+        ]
+        w3.eth.get_transaction_receipt.return_value = receipt
+        app, _ = build_m6_app(fake_w3=w3)
+        with TestClient(app) as tc:
+            body = tc.get(f"{API}/agent-identity/register-result/{TX_HASH}").json()
+        assert body["found"] is True
+        assert body["status"] == 1
+        assert body["agent_ids"] == [137]
+        assert body["owner"] == ACCOUNT_A
+        assert body["agent_wallet"] == ACCOUNT_B  # fake getAgentWallet
+
+    def test_not_onchain_yet(self) -> None:
+        w3 = make_fake_w3()
+        w3.eth.get_transaction_receipt.side_effect = TransactionNotFound
+        app, _ = build_m6_app(fake_w3=w3)
+        with TestClient(app) as tc:
+            body = tc.get(f"{API}/agent-identity/register-result/{TX_HASH}").json()
+        assert body["found"] is False
+        assert body["agent_ids"] == []
+
+    def test_receipt_without_mint_logs(self) -> None:
+        w3 = make_fake_w3()
+        receipt = dict(make_fake_receipt())
+        receipt["logs"] = []
+        w3.eth.get_transaction_receipt.return_value = receipt
+        app, _ = build_m6_app(fake_w3=w3)
+        with TestClient(app) as tc:
+            body = tc.get(f"{API}/agent-identity/register-result/{TX_HASH}").json()
+        assert body["found"] is True
+        assert body["agent_ids"] == []
+        assert body["owner"] is None
+
+    def test_bad_tx_hash_rejected(self) -> None:
+        w3 = make_fake_w3()
+        w3.eth.get_transaction_receipt.side_effect = ValueError("cannot parse hex")
+        app, _ = build_m6_app(fake_w3=w3)
+        with TestClient(app) as tc:
+            r = tc.get(f"{API}/agent-identity/register-result/not-a-hash")
+        assert r.status_code == 422
+        assert r.json()["code"] == "bad_tx_hash"
+
 
 class TestM7Bdex:
     def test_config(self, client: TestClient) -> None:
@@ -464,12 +680,27 @@ class TestM9Indexer:
         assert body["network"] == "testnet"
         assert body["counts"]["blocks"] == 0  # lifespan 建的空库
 
-    def test_sync_logs_smoke_with_fake_w3(self, client: TestClient) -> None:
-        r = client.post(f"{API}/indexer/sync/logs", json={"window": 1})
-        assert r.status_code == 200
-        body = r.json()
-        assert body["stream"] == "logs"
-        assert body["synced_blocks"] >= 1  # 空 watermark 时 =window；有水位时含 64 块 reorg 回扫
+    def test_sync_logs_smoke_with_fake_w3(self, tmp_path, monkeypatch) -> None:
+        """C-10/C-25：空库隔离起步——共享库的陈旧水位会把 window=1 拖成数十万块回扫（网关超时）。"""
+        app = create_app()
+        fake_w3 = make_fake_w3()
+        app.dependency_overrides[get_request_web3] = lambda: fake_w3
+        app.dependency_overrides[get_request_explorer] = lambda: ExplorerClient(
+            make_fake_explorer_client()
+        )
+        app.dependency_overrides[get_request_keystore] = make_fake_keystore
+        app.dependency_overrides[get_request_tx] = make_fake_tx_service
+        monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "m9_smoke.duckdb"))
+        get_settings.cache_clear()
+        try:
+            with TestClient(app) as tc:
+                r = tc.post(f"{API}/indexer/sync/logs", json={"window": 1})
+                assert r.status_code == 200
+                body = r.json()
+                assert body["stream"] == "logs"
+                assert body["synced_blocks"] >= 1  # 空 watermark 时 =window
+        finally:
+            get_settings.cache_clear()
 
 
 class TestHandleOpsFallback:
