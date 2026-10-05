@@ -373,11 +373,22 @@ def leaderboard_providers(request: Request) -> LeaderboardProvidersResponse:
     store: CoreStore = request.app.state.store
     revenue_rows = store.charged_by_provider()
     registered = {p["wallet"]: p for p in store.list_providers()}
+    # Charged 键=manifest 收款钱包，与 /providers 登记的 agentWallet 天然分离：
+    # 富化优先级 登记表 → manifest.provider（跨服务首个命中）→ 空（CONSTRAINTS §E 展示缺口补齐）
+    manifest_info: dict[str, dict[str, object]] = {}
+    for svc in store.list_services():
+        provider = svc["manifest"].get("provider", {})
+        wallet = str(provider.get("wallet", "")).lower()
+        if wallet and wallet not in manifest_info:
+            manifest_info[wallet] = {
+                "display_name": provider.get("display_name"),
+                "agent_id": provider.get("agent_id"),
+            }
     rows: list[ProviderRevenueRow] = []
     seen: set[str] = set()
     for r in revenue_rows:
         wallet = r["provider"]
-        info = registered.get(wallet)
+        info = registered.get(wallet) or manifest_info.get(wallet)
         rows.append(
             ProviderRevenueRow(
                 wallet=wallet,
