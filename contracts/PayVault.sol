@@ -21,7 +21,7 @@ contract PayVault {
         uint256 value; // 金额（最小单位）
         uint256 validAfter; // 生效时间窗下界（含）
         uint256 validBefore; // 生效时间窗上界（含）
-        uint256 nonce; // 一次性随机数，成功扣款后烧毁（I2）
+        bytes32 nonce; // 一次性随机数（EIP-3009 正典口径），成功扣款后烧毁（I2）
     }
 
     struct ChargeCall {
@@ -38,10 +38,10 @@ contract PayVault {
     bytes32 public immutable DOMAIN_SEPARATOR;
     uint256 public totalCredits; // Σ 未提现 credits（I4 审计视图：链上即对账）
     mapping(address => uint256) public credits; // provider => 应收账款
-    mapping(uint256 => bool) public usedNonces; // nonce => 已成功扣款（I2）
+    mapping(bytes32 => bool) public usedNonces; // nonce => 已成功扣款（I2）
 
     // ---- 事件 ---------------------------------------------------------------
-    event Charged(address indexed provider, address indexed from, uint256 value, uint256 indexed nonce);
+    event Charged(address indexed provider, address indexed from, uint256 value, bytes32 indexed nonce);
     event ChargeFailed(address indexed provider, address indexed from, string reason);
     event Withdrawn(address indexed provider, address indexed to, uint256 amount);
     event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
@@ -55,8 +55,9 @@ contract PayVault {
 
     bytes32 private constant _DOMAIN_TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-    bytes32 private constant _AUTH_TYPE_HASH =
-        keccak256("Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)");
+    bytes32 private constant _AUTH_TYPE_HASH = keccak256(
+        "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+    );
     bytes4 private constant _TRANSFER_SELECTOR = 0xa9059cbb; // transfer(address,uint256)
     bytes4 private constant _TRANSFER_FROM_SELECTOR = 0x23b872dd; // transferFrom(address,address,uint256)
 

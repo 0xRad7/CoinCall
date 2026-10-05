@@ -21,6 +21,7 @@ from payvault.eip712 import (
     authorization_digest,
     authorization_struct_hash,
     domain_separator,
+    nonce_from,
     recover_signer,
     sign_authorization,
 )
@@ -34,26 +35,32 @@ GOLDEN_VERIFYING_CONTRACT = (
     "0x000000000000000000000000000000000000dEaD"  # 占位：真实合约地址由部署时域承担
 )
 
-CASES: tuple[tuple[str, dict[str, int]], ...] = (
-    # ① 主向量：1 USDT(6dp)、全时间窗、nonce=31337
+# nonce 为 bytes32（EIP-3009 正典，E-1 整改）：0x 前缀 32 字节 hex 常量，锁死
+# 元组结构：(label, value, valid_after, valid_before, nonce_hex)
+CASES: tuple[tuple[str, int, int, int, str], ...] = (
+    # ① 主向量：1 USDT(6dp)、全时间窗、nonce = 0x00..7a69（= 31337）
     (
         "canonical",
-        {"value": 1_000_000, "valid_after": 0, "valid_before": 4102444800, "nonce": 31337},
-    ),  # 2100-01-01 UTC
-    # ② 大额 + 大 nonce + 非零 validAfter
+        1_000_000,
+        0,
+        4102444800,  # valid_before = 2100-01-01 UTC
+        "0x0000000000000000000000000000000000000000000000000000000000007a69",
+    ),
+    # ② 大额 + 随机形态 nonce + 非零 validAfter
     (
         "large_value_and_nonce",
-        {
-            "value": 250_000_000_000,
-            "valid_after": 1735689600,
-            "valid_before": 4102444800,
-            "nonce": 2**200 + 12345,
-        },
+        250_000_000_000,
+        1735689600,
+        4102444800,
+        "0x9d35b4a52c2e1f0a8c67d5e4b3f29a718d6c0e5b4a3f2c1d0e9f8a7b6c5d4e3f",
     ),
-    # ③ 零金额边界 + 窄窗
+    # ③ 零金额边界 + 窄窗 + 最小 nonce
     (
         "zero_value_narrow_window",
-        {"value": 0, "valid_after": 1735689601, "valid_before": 4102444799, "nonce": 1},
+        0,
+        1735689601,
+        4102444799,
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
     ),
 )
 
@@ -65,19 +72,19 @@ def build_vectors() -> dict[str, Any]:
     vault = Web3.to_checksum_address(GOLDEN_VERIFYING_CONTRACT)
     sep = domain_separator(GOLDEN_CHAIN_ID, vault)
     cases: list[dict[str, Any]] = []
-    for label, case in CASES:
+    for label, value, valid_after, valid_before, nonce_hex in CASES:
         auth = Authorization(
             from_addr=account.address,
             to=vault,
-            value=case["value"],
-            valid_after=case["valid_after"],
-            valid_before=case["valid_before"],
-            nonce=case["nonce"],
+            value=value,
+            valid_after=valid_after,
+            valid_before=valid_before,
+            nonce=nonce_from(nonce_hex),
         )
         signed = sign_authorization(account, auth, GOLDEN_CHAIN_ID, vault)
         recovered = recover_signer(signed.digest, signed.v, signed.r, signed.s)
         if recovered != Web3.to_checksum_address(account.address):
-            msg = f"向量自验签失败: nonce={case['nonce']}"
+            msg = f"向量自验签失败: nonce={nonce_hex}"
             raise RuntimeError(msg)
         cases.append(
             {
@@ -123,15 +130,15 @@ def main() -> None:
     VECTORS_PATH.write_text(
         json.dumps(vectors, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    _, primary = CASES[0]
+    _, value, valid_after, valid_before, nonce_hex = CASES[0]
     digest = authorization_digest(
         Authorization(
             from_addr=vectors["cases"][0]["address"],
             to=GOLDEN_VERIFYING_CONTRACT,
-            value=primary["value"],
-            valid_after=primary["valid_after"],
-            valid_before=primary["valid_before"],
-            nonce=primary["nonce"],
+            value=value,
+            valid_after=valid_after,
+            valid_before=valid_before,
+            nonce=nonce_from(nonce_hex),
         ),
         GOLDEN_CHAIN_ID,
         GOLDEN_VERIFYING_CONTRACT,

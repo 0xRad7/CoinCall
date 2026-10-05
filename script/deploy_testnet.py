@@ -35,7 +35,12 @@ from payvault.chain import (
     deploy_contract,
 )
 from payvault.compile import load_artifact
-from payvault.eip712 import AUTHORIZATION_TYPE_STRING, Authorization, sign_authorization
+from payvault.eip712 import (
+    AUTHORIZATION_TYPE_STRING,
+    Authorization,
+    nonce_from,
+    sign_authorization,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 DEPLOYMENT_PATH = ROOT / "deployments" / "testnet-968.json"
@@ -94,16 +99,16 @@ def call_revert_data(func: Any, from_address: str) -> str | None:  # noqa: ANN40
 
 
 def make_charge_call(
-    signer: LocalAccount, vault: Contract, *, value: int, nonce: int
+    signer: LocalAccount, vault: Contract, *, value: int, nonce: str | bytes
 ) -> dict[str, Any]:
-    """signer 以消费者身份对部署合约域签一条授权并组装 batch 元素。"""
+    """signer 以消费者身份对部署合约域签一条授权并组装 batch 元素（nonce bytes32）。"""
     auth = Authorization(
         from_addr=signer.address,
         to=vault.address,
         value=value,
         valid_after=0,
         valid_before=4102444800,
-        nonce=nonce,
+        nonce=nonce_from(nonce),
     )
     signed = sign_authorization(signer, auth, TESTNET_CHAIN_ID, vault.address)
     return {
@@ -115,7 +120,8 @@ def make_charge_call(
     }
 
 
-def main() -> None:
+def main(reuse_mock_usdt: str | None = None) -> None:
+    """部署+冒烟；reuse_mock_usdt 传入已部署 MockUSDT 地址则沿用不重部署。"""
     w3 = connect_testnet()
     assert_chain_id(w3, TESTNET_CHAIN_ID)  # 签名前铁律：防 RPC 指错网络
     account = account_from_key(load_private_key())
@@ -128,8 +134,16 @@ def main() -> None:
         sys.exit(1)
 
     # ---- 部署 ---------------------------------------------------------------
-    mock_usdt, mock_receipt = deploy_contract(w3, account, "MockUSDT")
-    print(f"[2/6] MockUSDT 部署于 {mock_usdt.address} (tx {mock_receipt['tx_hash']})")
+    mock_artifact = load_artifact("MockUSDT")
+    if reuse_mock_usdt:
+        mock_usdt = w3.eth.contract(
+            address=Web3.to_checksum_address(reuse_mock_usdt), abi=mock_artifact["abi"]
+        )
+        mock_receipt = None
+        print(f"[2/6] 沿用已部署 MockUSDT {mock_usdt.address}（不重部署）")
+    else:
+        mock_usdt, mock_receipt = deploy_contract(w3, account, "MockUSDT")
+        print(f"[2/6] MockUSDT 部署于 {mock_usdt.address} (tx {mock_receipt['tx_hash']})")
     call_contract(w3, account, mock_usdt.functions.mint(operator_address, MINT_AMOUNT))
     print(f"[2/6] 已 mint {MINT_AMOUNT // 10**6} MockUSDT 给 {operator_address}")
 
@@ -143,7 +157,6 @@ def main() -> None:
     # 在 immutable 槽位是占位零，与链上 code 天然不同——两者不可直接比对。
     bytecode_hash = "0x" + Web3.keccak(bytes(w3.eth.get_code(vault.address))).hex()
     mock_code_hash = "0x" + Web3.keccak(bytes(w3.eth.get_code(mock_usdt.address))).hex()
-    mock_artifact = load_artifact("MockUSDT")
     if mock_code_hash != mock_artifact["deployedBytecodeHash"]:
         print("[WARN] MockUSDT（无 immutable）链上 code 与产物不一致，需人工排查", file=sys.stderr)
 
@@ -167,7 +180,9 @@ def main() -> None:
         value=SMOKE_AMOUNT,
         valid_after=0,
         valid_before=4102444800,
-        nonce=9527,
+        nonce=nonce_from(  # 9527
+            "0x0000000000000000000000000000000000000000000000000000000000002537"
+        ),
     )
     forged = sign_authorization(account, auth, TESTNET_CHAIN_ID, vault.address)
     unauthorized = {
@@ -188,7 +203,9 @@ def main() -> None:
 
     # ---- 冒烟 c：全链路回环 approve→charge→重放→withdraw→I4 --------------------
     call_contract(w3, account, mock_usdt.functions.approve(vault.address, 10 * SMOKE_AMOUNT))
-    charge_call = make_charge_call(account, vault, value=SMOKE_AMOUNT, nonce=1)
+    charge_call = make_charge_call(
+        account, vault, value=SMOKE_AMOUNT, nonce="0x" + "00" * 31 + "01"
+    )
 
     summary = call_contract(w3, account, vault.functions.chargeWithSigBatch([charge_call]))
     receipt = receipt_of(w3, summary)
@@ -254,9 +271,13 @@ def main() -> None:
         "bytecodeHash": bytecode_hash,
         "mockUsdtBytecodeHash": mock_code_hash,
         "deployTxs": {
-            "mockUsdt": mock_receipt["tx_hash"],
+            # 沿用旧 MockUSDT 时记录 reused:<地址> 而非交易哈希
+            "mockUsdt": (
+                mock_receipt["tx_hash"] if mock_receipt else f"reused:{mock_usdt.address}"
+            ),
             "payVault": vault_receipt["tx_hash"],
         },
+        "mockUsdtReused": mock_receipt is None,
         "domainSeparator": "0x" + bytes(vault.functions.DOMAIN_SEPARATOR().call()).hex(),
         "eip712": {
             "domain": {"name": "PayVault", "version": "1", "chainId": TESTNET_CHAIN_ID},
@@ -278,4 +299,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else None)

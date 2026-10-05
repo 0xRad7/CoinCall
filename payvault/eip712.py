@@ -9,12 +9,13 @@ struct = Authorization(address from,address to,uint256 value,
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import eth_abi
 from eth_account.messages import SignableMessage, encode_typed_data
 from eth_account.signers.local import LocalAccount
 from eth_keys.datatypes import Signature as EthKeysSignature
+from eth_typing import HexStr
 from eth_utils import to_canonical_address
 from web3 import Web3
 
@@ -24,11 +25,23 @@ DOMAIN_VERSION = "1"
 DOMAIN_TYPE_STRING = (  # 语义常量，不可折行
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
 )
-# 类型字符串是 keccak 输入的语义常量，不可折行
-AUTHORIZATION_TYPE_STRING = "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)"  # noqa: E501
+# 类型字符串是 keccak 输入的语义常量，不可折行；nonce 为 bytes32（EIP-3009 正典，E-1 已整改）
+AUTHORIZATION_TYPE_STRING = "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"  # noqa: E501
 
 EIP712_DOMAIN_TYPEHASH = Web3.keccak(text=DOMAIN_TYPE_STRING)
 AUTHORIZATION_TYPEHASH = Web3.keccak(text=AUTHORIZATION_TYPE_STRING)
+
+
+NONCE_BYTES = 32  # bytes32（EIP-3009 正典）
+
+
+def nonce_from(value: str | bytes) -> bytes:
+    """nonce 归一化为 32 字节：接受 0x-hex 或 bytes；长度不符抛 ValueError。"""
+    raw = Web3.to_bytes(hexstr=cast("HexStr", value)) if isinstance(value, str) else bytes(value)
+    if len(raw) != NONCE_BYTES:
+        msg = f"nonce 必须是 32 字节（bytes32），实际 {len(raw)} 字节"
+        raise ValueError(msg)
+    return raw
 
 
 @dataclass(frozen=True)
@@ -40,7 +53,12 @@ class Authorization:
     value: int
     valid_after: int
     valid_before: int
-    nonce: int
+    nonce: bytes  # bytes32：EIP-3009 正典口径（见 CONSTRAINTS.md E-1）
+
+    def __post_init__(self) -> None:
+        if len(self.nonce) != NONCE_BYTES:
+            msg = f"nonce 必须是 32 字节（bytes32），实际 {len(self.nonce)} 字节"
+            raise ValueError(msg)
 
     def as_typed_data(self) -> dict[str, Any]:
         """eth_account encode_typed_data 的 message 视图（库路径交叉验证用）。"""
@@ -50,7 +68,7 @@ class Authorization:
             "value": self.value,
             "validAfter": self.valid_after,
             "validBefore": self.valid_before,
-            "nonce": self.nonce,
+            "nonce": Web3.to_hex(self.nonce),
         }
 
 
@@ -78,7 +96,7 @@ def authorization_struct_hash(auth: Authorization) -> bytes:
     """keccak(abi.encode(TYPEHASH, from, to, value, validAfter, validBefore, nonce))。"""
     return Web3.keccak(
         eth_abi.encode(
-            ["bytes32", "address", "address", "uint256", "uint256", "uint256", "uint256"],
+            ["bytes32", "address", "address", "uint256", "uint256", "uint256", "bytes32"],
             [
                 AUTHORIZATION_TYPEHASH,
                 to_canonical_address(auth.from_addr),
@@ -118,7 +136,7 @@ def to_signable(auth: Authorization, chain_id: int, verifying_contract: str) -> 
                     {"name": "value", "type": "uint256"},
                     {"name": "validAfter", "type": "uint256"},
                     {"name": "validBefore", "type": "uint256"},
-                    {"name": "nonce", "type": "uint256"},
+                    {"name": "nonce", "type": "bytes32"},
                 ],
             },
             "primaryType": "Authorization",
@@ -196,6 +214,7 @@ __all__ = [
     "authorization_digest",
     "authorization_struct_hash",
     "domain_separator",
+    "nonce_from",
     "recover_signer",
     "sign_authorization",
     "to_signable",
