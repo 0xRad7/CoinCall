@@ -167,7 +167,9 @@ class BotChainSettleChain:
         self.pay_vault = pay_vault
         self.operator_address = operator_address
         self._rpc_url = rpc_url
-        self._http = http or httpx.AsyncClient(timeout=HTTP_TIMEOUT_S)
+        # trust_env=False：bot-chain-api 是直连服务地址，C-07——macOS 系统代理会把
+        # 127.0.0.1 请求劫持成 502 空体（live 实跑踩坑）
+        self._http = http or httpx.AsyncClient(timeout=HTTP_TIMEOUT_S, trust_env=False)
         self._owns_http = http is None
         self._w3: AsyncWeb3 | None = None
 

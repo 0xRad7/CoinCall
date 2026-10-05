@@ -49,7 +49,8 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = app_settings
         app.state.store = CallStore(app_settings.duckdb_path)  # C-14：单进程单写者
-        app.state.http = httpx.AsyncClient(timeout=10.0)
+        # trust_env=False：core(8020)/keeper 通道都是直连本机地址，C-07——系统代理劫持 502
+        app.state.http = httpx.AsyncClient(timeout=10.0, trust_env=False)
         app.state.auth = auth_client or CoreAuthClient(
             base_url=app_settings.core_base_url, http=app.state.http
         )

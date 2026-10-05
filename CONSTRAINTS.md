@@ -48,6 +48,7 @@ uv run pytest -q -m unit --cov=app --cov-fail-under=80
 | C-03 | 2026-10-05 | `pytestmark = pytest.mark.unit` 模块级打在含 live 用例的文件上，live 被误选入 unit | pytestmark 对全模块追加 marker | 混合 marker 的文件不设模块级 pytestmark，逐用例打标 |
 | C-04 | 2026-10-05 | FakeAuth 以 `keys_by_key or default` 兜底，空 dict 被当成"未传" | falsy 判断误伤显式空表 | 注入型 fake 的"未传"判断一律 `is None`，禁用 truthiness |
 | C-05 | 2026-10-05 | `from __future__ import annotations` 插到 docstring 之前，docstring 失效且 E402 全红 | future import 必须在模块 docstring 之后、其他代码之前 | 脚本插 import 先确认锚点顺序；TYPE_CHECKING 引用必须配 future annotations |
+| C-07 | 2026-10-06 | needs_funds 实跑：httpx 默认 `trust_env=True` 吞 macOS 系统代理（127.0.0.1:7890），对 bot-chain-api `127.0.0.1:8010` 的请求被代理拦成 **502 空体**；同命令 curl 正常，造成"服务没问题"的假象 | httpx 默认读系统代理配置（macOS SCUTIL），curl 不读；localhost 不在 NO_PROXY | 本仓所有指向本机服务的 httpx 客户端（app.state.http / BotChainSettleChain / live 测试）一律 `trust_env=False`；新增客户端必须显式表态 |
 
 ## §E 偏差清单
 
