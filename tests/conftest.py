@@ -185,6 +185,7 @@ def settings(tmp_path: Path) -> Settings:
         duckdb_path=str(tmp_path / "gateway.duckdb"),
         pay_vault_address=VAULT,
         chain_id=CHAIN_ID,
+        keeper_enabled=False,  # 单测零后台任务（A2）；keeper 用例显式注入实例
     )
 
 
@@ -196,6 +197,7 @@ async def gateway_serve(
     auth: FakeAuth | None = None,
     manifests: FakeManifests | None = None,
     providers: dict[str, Any] | None = None,
+    keeper: Any | None = None,
 ) -> AsyncIterator[tuple[httpx.AsyncClient, FastAPI]]:
     """组装带 fake 依赖的应用并进入 lifespan（ASGITransport 不自动跑 lifespan）。"""
     app = create_app(
@@ -204,6 +206,7 @@ async def gateway_serve(
         auth_client=auth or FakeAuth(),
         manifest_client=manifests or FakeManifests(),
         providers=providers or {"internal": FixedProvider(), "http_json": FixedProvider()},
+        keeper=keeper,
     )
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)

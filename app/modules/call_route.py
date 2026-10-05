@@ -25,6 +25,7 @@ from app.core.errors import ApiError, PaymentRequiredError
 from app.core.payment import PaymentError, XPayment, parse_x_payment
 from app.modules.auth import ApiKeyInfo, AuthError, CoreAuthClient
 from app.modules.calls import CallRecord, CallStatus, CallStore
+from app.modules.keeper import Keeper
 from app.modules.manifest_client import ManifestInfo, ServiceNotFoundError
 from app.modules.providers import ProviderAdapter, ProviderError, ProviderResult
 from app.modules.receipt import build_receipt, sign_receipt
@@ -65,12 +66,12 @@ async def _challenge(request: Request, code: str, detail: str) -> PaymentRequire
 
 
 async def _authenticate(request: Request, api_key: str | None) -> ApiKeyInfo:
-    """步骤①：无 key → 402（带注册指引口径）；坏 key → 401。"""
+    """步骤①：无 key → 402（带注册指引口径）；坏 key → 401；坏账消费者 → 402 bad_debt。"""
     auth: CoreAuthClient = request.app.state.auth
     if not api_key:
         raise await _challenge(request, "missing_api_key", "缺少 X-Api-Key（先到 core 签发）")
     try:
-        return await auth.validate(api_key)
+        key_info = await auth.validate(api_key)
     except AuthError as exc:
         if exc.code == "core_unavailable":
             raise ApiError(
@@ -79,6 +80,13 @@ async def _authenticate(request: Request, api_key: str | None) -> ApiKeyInfo:
         raise ApiError(
             status_code=401, error="unauthorized", detail=exc.detail, code=exc.code
         ) from exc
+    keeper: Keeper = request.app.state.keeper
+    if keeper.blacklisted(key_info.consumer_wallet):
+        # 拉黑联动（09 P0-5）：keeper 坏账 → 影子闸门 K 限幅之外的最后防线
+        raise await _challenge(
+            request, "bad_debt", "消费者存在未结坏账（bad_debt），付费调用已被拦截"
+        )
+    return key_info
 
 
 async def _load_manifest(request: Request, service_id: str) -> ManifestInfo:

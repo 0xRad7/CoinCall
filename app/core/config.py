@@ -21,3 +21,11 @@ class Settings(BaseSettings):
     receipt_secret: str = "coincall-dev-receipt-secret"  # noqa: S105 —— dev 占位，生产从 env 注入
     manifest_cache_ttl: float = 60.0  # 01 §5：网关侧 manifest 内存缓存
     chain_cache_ttl: float = 30.0  # 09 P0-4：链上约束短缓存
+    # ---- keeper 结算器（04 §3 / 09 P0-5）----
+    keeper_enabled: bool = False  # 单测默认关（A2 零网络）；生产/演示 env 置 true
+    keeper_batch_size: int = 3  # 攒批笔数阈值（演示故意取小，快速上屏）
+    keeper_flush_interval: float = 30.0  # 攒批时间阈值（秒）
+    keeper_operator_address: str = "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a"
+    bot_chain_api_base_url: str = "http://127.0.0.1:8010"
+    #: agent_id → agentWallet 静态覆盖（缺省走 core manifest 解析）
+    keeper_provider_wallet_overrides: dict[str, str] = {}

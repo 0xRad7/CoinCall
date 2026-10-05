@@ -52,6 +52,16 @@ uv run pytest -q -m unit --cov=app --cov-fail-under=80
 ## §E 偏差清单
 
 - nonce 防重放为内存 set（02：Redis 记录）；Redis 镜像、幂等 24h 持久化属 P2。
-- settle 队列的消费者（keeper）是 W5，本仓只写不消费；`SettleStatus.EXPIRED` 为 keeper 预留。
+- ~~settle 队列的消费者（keeper）是 W5，本仓只写不消费~~ → W5/P0-5 已落地（app/modules/keeper.py，2026-10-06）。
 - HttpJsonProvider 已实现但默认单测全 mock；真实外联与 PayVault 地址接线属 W4。
 - 402 质询 `topup.deposit_address` 暂用 vault 地址占位（04 §2 平台收款地址属 W4+）。
+- keeper 拉黑联动为**最小实现**（P0-5）：core 无 apikey 挂起/拉黑端点（读 core 仓确认），
+  故坏账消费者只进 gateway 进程内存黑名单并在 `/call` 认证步拦截（402 code=bad_debt）；
+  重启即清空、core 侧不知情。P2：core 增挂起端点 + 持久化 bad_debt 表。
+- keeper `transfer_failed` 重试计数在内存（与 nonce set 同口径）：keeper 重启后计数重置，
+  最坏情况多重试一轮（nonce 未烧，安全）。
+- ChargeFailed 事件**不带 nonce**（合约契约）：批内按 `from` 地址归属失败行；
+  同批同消费者多笔失败时按提交顺序一对一归属（演示规模下无歧义）。
+- keeper 的 provider 记账钱包解析：静态覆盖（`COINCALL_KEEPER_PROVIDER_WALLET_OVERRIDES`，
+  agent_id→wallet）优先，缺省走 core manifest（calls.service_id → provider.wallet）；
+  两者都失败该行保持 pending 并告警，不丢单。

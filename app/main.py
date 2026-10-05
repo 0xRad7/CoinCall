@@ -28,6 +28,8 @@ from app.core.shadow_gate import ShadowGate
 from app.modules.auth import CoreAuthClient
 from app.modules.call_route import router as call_router
 from app.modules.calls import CallStore
+from app.modules.keeper import BotChainSettleChain, Keeper, provider_wallet_resolver
+from app.modules.keeper_route import router as keeper_router
 from app.modules.manifest_client import ManifestClient
 from app.modules.providers import HttpJsonProvider, InternalEchoProvider, ProviderAdapter
 
@@ -39,6 +41,7 @@ def create_app(
     auth_client: CoreAuthClient | None = None,
     manifest_client: ManifestClient | None = None,
     providers: Mapping[str, ProviderAdapter] | None = None,
+    keeper: Keeper | None = None,
 ) -> FastAPI:
     app_settings = settings or Settings()
 
@@ -76,7 +79,39 @@ def create_app(
         app.state.providers = dict(providers) if providers else default_providers
         idempotency: dict[tuple[str, str], dict[str, object]] = {}
         app.state.idempotency = idempotency
+        # keeper：常驻结算任务（04 §3）；注入实例优先，否则按 keeper_enabled 装配真实通道
+        built_chain: BotChainSettleChain | None = None
+        if keeper is not None:
+            app.state.keeper = keeper
+        else:
+            if app_settings.keeper_enabled:
+                built_chain = BotChainSettleChain(
+                    base_url=app_settings.bot_chain_api_base_url,
+                    rpc_url=app_settings.chain_rpc_url,
+                    pay_vault=app_settings.pay_vault_address,
+                    operator_address=app_settings.keeper_operator_address,
+                )
+            app.state.keeper = Keeper(
+                store=app.state.store,
+                chain=built_chain,
+                wallet_for=(
+                    provider_wallet_resolver(
+                        app_settings.keeper_provider_wallet_overrides,
+                        app.state.store,
+                        app.state.manifests,
+                    )
+                    if built_chain is not None
+                    else None
+                ),
+                batch_size=app_settings.keeper_batch_size,
+                flush_interval=app_settings.keeper_flush_interval,
+            )
+        if app_settings.keeper_enabled:
+            app.state.keeper.start()
         yield
+        await app.state.keeper.stop()
+        if built_chain is not None:
+            await built_chain.aclose()
         await app.state.http.aclose()
         app.state.store.close()
 
@@ -98,6 +133,7 @@ def create_app(
         return {"status": "ok", "service": "coincall-gateway"}
 
     app.include_router(call_router)
+    app.include_router(keeper_router)
     return app
 
 
