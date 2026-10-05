@@ -1,13 +1,17 @@
 /**
- * 浏览器注入钱包（window.ethereum / window.okxwallet，如 OKX、MetaMask）共享模块。
- * 两个工作台（消费端 / Provider）复用同一套连接、切链、签名、发交易逻辑。
+ * 浏览器注入钱包发现与操作（EIP-6963 优先 + legacy 回退 + 多钱包选择）。
  *
- * 铁律：控制台不接触任何私钥——地址只读获取（eth_requestAccounts/eth_accounts），
- * 签名与交易全部由扩展弹窗在本地完成（EIP-1193）。
+ * 检测决策树：
+ *   ① 页面 dispatch eip6963:requestProvider，收集 announceProvider 事件（现代钱包都支持）；
+ *   ② legacy 槽位（okxwallet → ethereum.isOkxWallet → ethereum.isMetaMask → ethereum）仅在
+ *      该 provider 没被任何 6963 公告覆盖时（引用相等或 OKX/MetaMask rdns 指纹去重）作为额外候选；
+ *   ③ 候选 0 个 → 未装扩展提示；1 个 → 直连；≥2 个 → 钱包选择器（记住 rdns，下次默认选中、仍可重选）；
+ *   ④ 一切链操作（switch/add/send）都走用户选中的那个 provider 引用，不再重查全局槽位。
  *
  * BOT Chain 测试网参数（权威来源 ../coincall-bot-chain-api：
  *   app/core/chains.py（chain_id/rpc/explorer）+ app/modules/accounts.py
  *   的 NATIVE_SYMBOL="BOT"、NATIVE_DECIMALS=18）。
+ * 铁律不变：控制台不接触任何私钥；地址只读，签名/交易在扩展弹窗内完成。
  */
 import { BrowserProvider, TransactionReceipt, getAddress } from "ethers";
 import { CHAIN_ID, GAS_PRICE_GWEI } from "./constants";
@@ -27,12 +31,66 @@ export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] | object }): Promise<unknown>;
   on?(event: string, handler: (...args: unknown[]) => void): void;
   removeListener?(event: string, handler: (...args: unknown[]) => void): void;
+  isOkxWallet?: boolean;
+  isMetaMask?: boolean;
 }
 
-/** 检测注入钱包（浏览器里 window === globalThis；测试里可直接挂 globalThis.ethereum）。 */
-export function getInjected(): Eip1193Provider | null {
-  const g = globalThis as unknown as { ethereum?: Eip1193Provider; okxwallet?: Eip1193Provider };
-  return g.ethereum ?? g.okxwallet ?? null;
+export interface Eip6963Info {
+  uuid: string;
+  name: string;
+  icon: string;
+  rdns: string;
+}
+
+export interface Eip6963Announcement {
+  info: Eip6963Info;
+  provider: Eip1193Provider;
+}
+
+/** 选择器里的候选（6963 公告或 legacy 槽位推断）。 */
+export interface WalletCandidate {
+  name: string;
+  icon?: string;
+  rdns: string | null; // null = legacy 槽位推断，无 rdns
+  provider: Eip1193Provider;
+  source: "eip6963" | "legacy-okxwallet" | "legacy-ethereum-okx" | "legacy-ethereum-metamask" | "legacy-ethereum";
+}
+
+/** 用户实际选中的钱包：持有 provider 引用，后续链操作全部走它。 */
+export interface SelectedWallet {
+  name: string;
+  rdns: string | null;
+  provider: Eip1193Provider;
+}
+
+// ---- EIP-6963 多注入发现 ----
+
+/** 挂 announceProvider 监听并广播 requestProvider；返回清理函数。target 可注入（测试用）。 */
+export function startEip6963Discovery(onAnnounce: (a: Eip6963Announcement) => void, target: EventTarget = defaultTarget()): () => void {
+  const handler = (e: Event) => {
+    const detail = (e as CustomEvent<Eip6963Announcement>).detail;
+    if (detail && detail.info && typeof detail.info.rdns === "string" && detail.provider) onAnnounce(detail);
+  };
+  target.addEventListener("eip6963:announceProvider", handler as EventListener);
+  target.dispatchEvent(new Event("eip6963:requestProvider"));
+  return () => target.removeEventListener("eip6963:announceProvider", handler as EventListener);
+}
+
+/** 一次性收集（窗口期内到达的全部公告）。 */
+export function discoverEip6963(target: EventTarget = defaultTarget(), timeoutMs = 300): Promise<Eip6963Announcement[]> {
+  return new Promise((resolve) => {
+    const found: Eip6963Announcement[] = [];
+    const stop = startEip6963Discovery((a) => found.push(a), target);
+    setTimeout(() => {
+      stop();
+      resolve(found);
+    }, timeoutMs);
+  });
+}
+
+function defaultTarget(): EventTarget {
+  if (typeof window !== "undefined") return window;
+  return globalThis; // Node 测试里由调用方显式传 EventTarget
 }
 
 // ---- EIP-1193 错误分类 ----
@@ -56,87 +114,129 @@ export function friendlyInjectedError(e: unknown): { title: string; hint: string
   return { title: `钱包请求失败：${msg.slice(0, 120)}`, hint: "请确认扩展已解锁且当前账户可用；持续失败可刷新页面重连。" };
 }
 
-// ---- 连接与链 ----
+// ---- legacy 槽位回退（EIP-6963 无响应的旧扩展） ----
 
-/** 主动连接（弹窗）：eth_requestAccounts → [address]，eth_chainId → 968? */
-export async function connectInjected(): Promise<{ address: string; chainId: number }> {
-  const inj = getInjected();
-  if (!inj) throw new Error("未检测到浏览器钱包扩展（window.ethereum / window.okxwallet）。请安装 OKX 或 MetaMask，或展开「没有浏览器钱包？」使用一次性演示钱包。");
-  const accounts = (await inj.request({ method: "eth_requestAccounts" })) as string[];
+export function detectLegacyCandidate(
+  g: { okxwallet?: Eip1193Provider; ethereum?: Eip1193Provider } = globalThis as { okxwallet?: Eip1193Provider; ethereum?: Eip1193Provider }
+): WalletCandidate | null {
+  // 顺序即优先级：OKX 专属槽位 > 通用槽位的 OKX 自标识 > MetaMask > 通用兜底（Core 这类只有独占时才命中）
+  if (g.okxwallet) return { name: "OKX Wallet", rdns: null, provider: g.okxwallet, source: "legacy-okxwallet" };
+  const eth = g.ethereum;
+  if (!eth) return null;
+  if (eth.isOkxWallet === true) return { name: "OKX Wallet", rdns: null, provider: eth, source: "legacy-ethereum-okx" };
+  if (eth.isMetaMask === true) return { name: "MetaMask", rdns: null, provider: eth, source: "legacy-ethereum-metamask" };
+  return { name: "浏览器钱包", rdns: null, provider: eth, source: "legacy-ethereum" };
+}
+
+// ---- 候选合并与自动决策（纯函数，测试锁定） ----
+
+function looksLike(s: string | null | undefined, needle: string): boolean {
+  return typeof s === "string" && s.toLowerCase().includes(needle);
+}
+
+/** 6963 公告（到达序）+ 未被公告覆盖的 legacy 候选（追加在末尾）。 */
+export function collectCandidates(announcements: Eip6963Announcement[], legacy: WalletCandidate | null): WalletCandidate[] {
+  const from6963: WalletCandidate[] = announcements.map((a) => ({
+    name: a.info.name,
+    icon: a.info.icon,
+    rdns: a.info.rdns,
+    provider: a.provider,
+    source: "eip6963" as const,
+  }));
+  if (!legacy) return from6963;
+  const covered = from6963.some((c) => {
+    if (c.provider === legacy.provider) return true; // 同一对象（钱包既公告又占槽位）
+    if (legacy.source === "legacy-okxwallet" || legacy.source === "legacy-ethereum-okx") {
+      return looksLike(c.rdns, "okx") || looksLike(c.name, "okx");
+    }
+    if (legacy.source === "legacy-ethereum-metamask") {
+      return looksLike(c.rdns, "metamask") || looksLike(c.name, "metamask");
+    }
+    return false; // 无身份的通用槽位不猜指纹，保留为候选（用户在选择器里自行辨认）
+  });
+  return covered ? from6963 : [...from6963, legacy];
+}
+
+export type Choice =
+  | { type: "none" }
+  | { type: "auto"; candidate: WalletCandidate }
+  | { type: "choice" };
+
+/** 候选 → 决策：0 个 none；1 个 auto；记住的 rdns 命中 auto（默认选中）；否则弹选择器。 */
+export function resolveAutoChoice(candidates: WalletCandidate[], rememberedRdns: string | null): Choice {
+  if (candidates.length === 0) return { type: "none" };
+  if (candidates.length === 1) return { type: "auto", candidate: candidates[0]! };
+  if (rememberedRdns) {
+    const hit = candidates.find((c) => c.rdns === rememberedRdns);
+    if (hit) return { type: "auto", candidate: hit };
+  }
+  return { type: "choice" };
+}
+
+// ---- 连接与链操作（全部显式传入用户选中的 provider） ----
+
+export async function connectInjected(p: Eip1193Provider): Promise<{ address: string; chainId: number }> {
+  const accounts = (await p.request({ method: "eth_requestAccounts" })) as string[];
   const address = accounts?.[0];
   if (!address) throw new Error("钱包没有返回账户（可能被拒绝或扩展锁定）。");
-  const chainId = await getInjectedChainId();
+  const chainId = await getInjectedChainId(p);
   return { address: getAddress(address), chainId };
 }
 
-/** 静默读取已授权账户（无弹窗；页面刷新恢复会话用）。 */
-export async function silentAccounts(): Promise<string | null> {
-  const inj = getInjected();
-  if (!inj) return null;
+export async function silentAccounts(p: Eip1193Provider): Promise<string | null> {
   try {
-    const accounts = (await inj.request({ method: "eth_accounts" })) as string[];
+    const accounts = (await p.request({ method: "eth_accounts" })) as string[];
     return accounts?.[0] ? getAddress(accounts[0]) : null;
   } catch {
     return null;
   }
 }
 
-export async function getInjectedChainId(): Promise<number> {
-  const inj = getInjected();
-  if (!inj) throw new Error("未检测到浏览器钱包扩展。");
-  const hex = (await inj.request({ method: "eth_chainId" })) as string;
+export async function getInjectedChainId(p: Eip1193Provider): Promise<number> {
+  const hex = (await p.request({ method: "eth_chainId" })) as string;
   return parseInt(hex, 16);
 }
 
 /**
- * 确保当前链是 968：先 wallet_switchEthereumChain；钱包报 4902（未添加）
- * 则 wallet_addEthereumChain（BOT Chain 测试网参数）。返回切换后的 chainId。
+ * 确保用户选中的钱包在 968 链：先 wallet_switchEthereumChain；
+ * 4902（未添加）则 wallet_addEthereumChain（BOT Chain 测试网参数）。
  */
-export async function ensureChain968(): Promise<number> {
-  const inj = getInjected();
-  if (!inj) throw new Error("未检测到浏览器钱包扩展。");
-  const current = await getInjectedChainId();
+export async function ensureChain968(p: Eip1193Provider): Promise<number> {
+  const current = await getInjectedChainId(p);
   if (current === CHAIN_ID) return current;
   try {
-    await inj.request({ method: "wallet_switchEthereumChain", params: [{ chainId: BOT_CHAIN_HEX }] });
+    await p.request({ method: "wallet_switchEthereumChain", params: [{ chainId: BOT_CHAIN_HEX }] });
   } catch (e) {
     if (isUnrecognizedChain(e) || (e as { code?: number })?.code === -32603) {
-      await inj.request({ method: "wallet_addEthereumChain", params: [BOT_CHAIN_PARAMS] });
+      await p.request({ method: "wallet_addEthereumChain", params: [BOT_CHAIN_PARAMS] });
     } else {
       throw e;
     }
   }
-  const after = await getInjectedChainId();
+  const after = await getInjectedChainId(p);
   if (after !== CHAIN_ID) throw new Error(`切链后仍不是 968（当前 ${after}）。请在钱包里手动切换到 BOT Chain Testnet。`);
   return after;
 }
 
-// ---- 签名与交易 ----
-
-/** ethers BrowserProvider（signTypedData 走扩展，digest 由扩展计算）。 */
-export function browserProvider(): BrowserProvider {
-  const inj = getInjected();
-  if (!inj) throw new Error("未检测到浏览器钱包扩展。");
-  return new BrowserProvider(inj);
+/** ethers BrowserProvider（signTypedData 走扩展弹窗，digest 由扩展计算）。 */
+export function browserProvider(p: Eip1193Provider): BrowserProvider {
+  return new BrowserProvider(p);
 }
 
 /**
- * 扩展弹窗发交易（eth_sendTransaction）：恒定气价 POA，显式
- * maxFeePerGas = maxPriorityFeePerGas = 20 gwei；gas 用 eth_estimateGas 上浮 30%。
- * 返回交易哈希（等待确认由调用方/ waitForInjectedReceipt 完成）。
+ * 扩展弹窗发交易（eth_sendTransaction，走用户选中的 provider）：恒定气价 POA，
+ * 显式 maxFeePerGas = maxPriorityFeePerGas = 20 gwei；gas 用 eth_estimateGas 上浮 30%。
  */
-export async function sendInjectedTx(from: string, to: string, data: string): Promise<string> {
-  const inj = getInjected();
-  if (!inj) throw new Error("未检测到浏览器钱包扩展。");
+export async function sendInjectedTx(p: Eip1193Provider, from: string, to: string, data: string): Promise<string> {
   const fee = "0x" + (BigInt(GAS_PRICE_GWEI) * 10n ** 9n).toString(16); // 20 gwei
   let gasLimit = 120_000n;
   try {
-    const est = (await inj.request({ method: "eth_estimateGas", params: [{ from, to, data }] })) as string;
+    const est = (await p.request({ method: "eth_estimateGas", params: [{ from, to, data }] })) as string;
     gasLimit = (BigInt(est) * 13n) / 10n;
   } catch {
     // 估计失败用保守默认值，由链/钱包终裁
   }
-  return (await inj.request({
+  return (await p.request({
     method: "eth_sendTransaction",
     params: [{ from, to, data, gasLimit: "0x" + gasLimit.toString(16), maxFeePerGas: fee, maxPriorityFeePerGas: fee }],
   })) as string;
