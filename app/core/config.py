@@ -13,3 +13,19 @@ class Settings(BaseSettings):
 
     port: int = 8020
     duckdb_path: str = "data/core.duckdb"
+    # ---- P1-2/P1-3：链上事实源（经 coincall-bot-chain-api，唯一链通道）----
+    bot_chain_api_base_url: str = "http://127.0.0.1:8010"
+    #: PayVault 合约（coincall-contracts/deployments/testnet-968.json 的事实源）
+    pay_vault_address: str = "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471"  # 公开合约地址
+    #: PayVault 部署块（eth_getCode 实证：25795947 无代码/25795948 起 6696B）；首跑回补起点
+    pay_vault_deploy_block: int = 25_795_948
+    #: ERC-8004 身份存在性校验结果短缓存秒数（含 not_found 负缓存）
+    identity_cache_ttl: float = 60.0
+    # ---- P1-3：排行榜双源----
+    gateway_base_url: str = "http://127.0.0.1:8030"
+    #: Charged 增量同步的单次窗口（rpc.bohr.life getLogs 上限，同 bot-chain-api 口径）
+    charged_sync_window: int = 5000
+    #: 水位回补时的 reorg 安全余量（块）
+    charged_sync_safety: int = 64
+    #: 两次增量同步的最小间隔（秒）——防排行榜请求打爆链通道
+    leaderboard_min_sync_interval: float = 3.0

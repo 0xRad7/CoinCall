@@ -56,6 +56,45 @@ class ApiKeyValidateResponse(BaseModel):
     status: str
 
 
+class ApiKeyRow(BaseModel):
+    """列表行（03 §2：不回显 secret；hash 亦不外露）。"""
+
+    key_id: str
+    consumer_wallet: str
+    quota_raw: int | None
+    status: str
+    created_at: str
+
+
+class ApiKeyListResponse(BaseModel):
+    keys: list[ApiKeyRow]
+
+
+class ApiKeyRevokeResponse(BaseModel):
+    key_id: str
+    status: str
+
+
+class ApiKeyWalletRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    consumer_wallet: str
+
+    @field_validator("consumer_wallet")
+    @classmethod
+    def _wallet(cls, v: str) -> str:
+        if not ADDRESS_PATTERN.match(v):
+            raise ValueError(f"consumer_wallet 不是合法 EVM 地址: {v!r}")
+        return v
+
+
+class ApiKeyWalletResponse(BaseModel):
+    key_id: str
+    consumer_wallet: str
+    status: str
+    note: str = Field(default="网关 /call 认证实时调 validate，换绑即时生效；无网关侧缓存 TTL 影响")
+
+
 def _hash_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
 
@@ -103,4 +142,52 @@ def validate_api_key(body: ApiKeyValidateRequest, request: Request) -> ApiKeyVal
         consumer_wallet=row["consumer_wallet"],
         quota_raw=row["quota_raw"],
         status=row["status"],
+    )
+
+
+@router.get("/apikeys", response_model=ApiKeyListResponse)
+def list_api_keys(request: Request) -> ApiKeyListResponse:
+    """列表（03 §2）：不回显 secret——明文只在签发响应出现一次，hash 亦不外露。"""
+    rows = _store(request).list_api_keys()
+    return ApiKeyListResponse(keys=[ApiKeyRow(**row) for row in rows])
+
+
+@router.delete("/apikeys/{key_id}", response_model=ApiKeyRevokeResponse)
+def revoke_api_key(key_id: str, request: Request) -> ApiKeyRevokeResponse:
+    """吊销（立即生效）：此后 validate → 401 apikey_revoked，网关侧即拒；幂等。"""
+    store = _store(request)
+    if store.get_api_key(key_id) is None:
+        raise ApiError(
+            status_code=404,
+            error="not_found",
+            detail=f"api key 不存在: {key_id}",
+            code="apikey_not_found",
+        )
+    store.set_api_key_status(key_id, "revoked")
+    return ApiKeyRevokeResponse(key_id=key_id, status="revoked")
+
+
+@router.put("/apikeys/{key_id}/wallet", response_model=ApiKeyWalletResponse)
+def rebind_api_key_wallet(
+    key_id: str, body: ApiKeyWalletRequest, request: Request
+) -> ApiKeyWalletResponse:
+    """换绑消费者钱包（X-PAYMENT.from 校验对象随之更新）。
+
+    网关 /call 每次实时调 /internal/apikeys/validate（无缓存），换绑即时生效；
+    若未来网关侧引入缓存，需按其 TTL 评估生效延迟（届时改本字段文案）。
+    """
+    store = _store(request)
+    existing = store.get_api_key(key_id)
+    if existing is None:
+        raise ApiError(
+            status_code=404,
+            error="not_found",
+            detail=f"api key 不存在: {key_id}",
+            code="apikey_not_found",
+        )
+    store.update_api_key_wallet(key_id, body.consumer_wallet)
+    return ApiKeyWalletResponse(
+        key_id=key_id,
+        consumer_wallet=body.consumer_wallet,
+        status=existing["status"],
     )
