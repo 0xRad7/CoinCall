@@ -111,6 +111,27 @@ class TestM1ChainInfo:
         assert body["ok"] is True
         for channel in ("rpc", "bundler", "explorer"):
             assert body["channels"][channel]["ok"] is True
+        assert "968" in body["channels"]["rpc"]["detail"]
+
+    @respx.mock
+    def test_chain_health_rpc_chain_id_mismatch_is_red(self) -> None:
+        """网络误配防线（主网适配）：RPC 实际 chainId 与部署配置不符时 rpc 通道红灯。"""
+        app = create_app()
+        fake_w3 = make_fake_w3()
+        fake_w3.eth.chain_id = 999  # 配置为 testnet(968) 而 RPC 返回 999
+        app.dependency_overrides[get_request_web3] = lambda: fake_w3
+        respx.post("https://bundler.bohr.life/rpc/").mock(
+            return_value=Response(200, json={"jsonrpc": "2.0", "id": 1, "result": "0x3c8"})
+        )
+        respx.get("https://scan.bohr.life/api/v2/stats").mock(
+            return_value=Response(200, json={"total_addresses": "1"})
+        )
+        with TestClient(app) as tc:
+            body = tc.get(f"{API}/chain/health").json()
+        assert body["ok"] is False
+        rpc = body["channels"]["rpc"]
+        assert rpc["ok"] is False
+        assert "999" in rpc["detail"] and "968" in rpc["detail"]
 
 
 class TestM2Accounts:
