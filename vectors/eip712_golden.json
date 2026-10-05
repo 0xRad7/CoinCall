@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "description": "PayVault EIP-712 Authorization 黄金向量：锁死 digest 字节级口径；网关仓（独立实现的验签侧）在汇合阶段逐字节比对",
+  "chain_id": 968,
+  "account_derivation": {
+    "mnemonic": "test test test test test test test test test test test junk",
+    "path": "m/44'/60'/0'/0/0",
+    "note": "公开 anvil 测试助记词，无资金价值；向量文件不含私钥"
+  },
+  "domain": {
+    "name": "PayVault",
+    "version": "1",
+    "chainId": 968,
+    "verifyingContract": "0x000000000000000000000000000000000000dEaD"
+  },
+  "struct_type": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)",
+  "cases": [
+    {
+      "description": "canonical",
+      "message": {
+        "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "to": "0x000000000000000000000000000000000000dEaD",
+        "value": 1000000,
+        "validAfter": 0,
+        "validBefore": 4102444800,
+        "nonce": 31337
+      },
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "domainSeparator": "0x2ef5b3070e03185596b3705bb17837553dc0b7a7b3b37c4c1ede815db62adab2",
+      "structHash": "0xbf796ba3afc768a33eb7c98abb275b5cf9b4b0392f3ec3f32441cc12b75a26ff",
+      "digest": "0x4872383611000cb725b0e12fe63c222fccb11d1696d0ea1e9cb58f83a1860f15",
+      "signature": {
+        "v": 27,
+        "r": "0xcbb06d58af76bcc69013eacf87da3db0de708ea39a30c13f2a8682b6cf917368",
+        "s": "0x52d0c8d45b51a47c026e36ce96a5be1c9ad39a4a3c6a0bb50f25986a4cdc6fc3"
+      }
+    },
+    {
+      "description": "large_value_and_nonce",
+      "message": {
+        "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "to": "0x000000000000000000000000000000000000dEaD",
+        "value": 250000000000,
+        "validAfter": 1735689600,
+        "validBefore": 4102444800,
+        "nonce": 1606938044258990275541962092341162602522202993782792835313721
+      },
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "domainSeparator": "0x2ef5b3070e03185596b3705bb17837553dc0b7a7b3b37c4c1ede815db62adab2",
+      "structHash": "0x1e7b662f18f78dabc6108e10a4ac979db878d9a8f314a90ac7dd4dec0e6a83c1",
+      "digest": "0x94871fe12176367192f9e4519360f664652231375b85e3de6264417628bc2a99",
+      "signature": {
+        "v": 27,
+        "r": "0x643b93165907ba46fdecc097ecaba27343e4bbe9a10de6bbb15938796e95b709",
+        "s": "0x480d96507b2d8f8d54bd02e6067513acfbd85b7e83a15486ec3544a40300f94e"
+      }
+    },
+    {
+      "description": "zero_value_narrow_window",
+      "message": {
+        "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "to": "0x000000000000000000000000000000000000dEaD",
+        "value": 0,
+        "validAfter": 1735689601,
+        "validBefore": 4102444799,
+        "nonce": 1
+      },
+      "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+      "domainSeparator": "0x2ef5b3070e03185596b3705bb17837553dc0b7a7b3b37c4c1ede815db62adab2",
+      "structHash": "0x84048dbae61f03b8d7e4c71da8f21520f3181d370d92fc343ee73c4fd0646b9d",
+      "digest": "0x035a6f2fd795dc317a7dd1a42144821ecd369799f0d3e0fac9976b7112bc6468",
+      "signature": {
+        "v": 27,
+        "r": "0x986fb6801c28868e165ff5c2c636fa4cb194f371a40b7e4926e6db5c743aa805",
+        "s": "0x4ea0ee6dfcfbdc9c934f7e87cd73bd1f6c7144dbfd2afbadf521581073dcd589"
+      }
+    }
+  ]
+}
