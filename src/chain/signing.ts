@@ -96,6 +96,56 @@ export function randomNonce(): string {
   return hexlify(randomBytes(32));
 }
 
+/** v 归一化到 27|28（扩展可能回 0|1；极端情况带 EIP-155 偏移也纠回恢复位）。 */
+export function normalizeV(v: number): number {
+  if (v === 0 || v === 1) return v + 27;
+  if (v === 27 || v === 28) return v;
+  if (v >= 35) return ((v - 35) % 2 === 0) ? 27 : 28;
+  throw new Error(`非法签名 v 值: ${v}（期望 0|1|27|28）`);
+}
+
+/** 65 字节 joined 签名（0x + r+s+v）→ {v,r,s}，v 已归一 27|28。 */
+export function sigFromJoined(joined: string): PaymentSignature {
+  if (!/^0x[0-9a-fA-F]{130}$/.test(joined)) throw new Error("签名格式非法：应为 0x + 65 字节 hex");
+  const r = "0x" + joined.slice(2, 66).toLowerCase();
+  const s = "0x" + joined.slice(66, 130).toLowerCase();
+  const v = normalizeV(parseInt(joined.slice(130, 132), 16));
+  return { v, r, s };
+}
+
+/** 扩展（BrowserProvider.signTypedData / eth_signTypedData_v4）用的 typed data 视图；digest 由扩展计算。 */
+export function authorizationTypedData(
+  auth: Authorization,
+  verifyingContract: string,
+  chainId: bigint | number = CHAIN_ID
+): {
+  domain: { name: string; version: string; chainId: number; verifyingContract: string };
+  types: Record<string, Array<{ name: string; type: string }>>;
+  message: Record<string, unknown>;
+} {
+  return {
+    domain: { name: DOMAIN_NAME, version: DOMAIN_VERSION, chainId: Number(chainId), verifyingContract },
+    types: {
+      Authorization: [
+        { name: "from", type: "address" },
+        { name: "to", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "validAfter", type: "uint256" },
+        { name: "validBefore", type: "uint256" },
+        { name: "nonce", type: "bytes32" },
+      ],
+    },
+    message: {
+      from: getAddress(auth.from),
+      to: getAddress(auth.to),
+      value: auth.value,
+      validAfter: auth.validAfter,
+      validBefore: auth.validBefore,
+      nonce: auth.nonce,
+    },
+  };
+}
+
 /** 组装一次试用调用的授权（nonce 随机、valid_before = now + AUTH_WINDOW_S）。 */
 export function buildCallAuthorization(from: string, to: string, valueRaw: bigint, nowSec: number): Authorization {
   return {

@@ -1,4 +1,42 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useWallet } from "./state/WalletContext";
+import { CHAIN_ID } from "./chain/constants";
+
+/** 顶栏：连接后常驻地址 chip + 链徽标（不对时可点切链）+ 断开按钮。 */
+function WalletChipBar() {
+  const w = useWallet();
+  if (!w.address || !w.mode) return null;
+  const chainBadge =
+    w.mode === "demo" ? (
+      <span className="badge warn" title="一次性演示钱包，关页即焚">
+        demo 钱包
+      </span>
+    ) : w.chainOk ? (
+      <span className="badge ok" title={`chainId ${CHAIN_ID} · BOT Chain Testnet`}>
+        链 {CHAIN_ID} ✓
+      </span>
+    ) : (
+      <button className="badge err" style={{ border: "none", cursor: "pointer" }} onClick={() => void w.ensureChain()} title="当前不是 BOT Chain 测试网，点击引导切换/添加">
+        链 {w.chainId ?? "?"} ✗ 点我切链
+      </button>
+    );
+  return (
+    <div className="wallet-bar">
+      <span className="mono wallet-addr" title={w.address}>
+        ● {w.address.slice(0, 8)}…{w.address.slice(-6)}
+      </span>
+      {chainBadge}
+      {w.switching && (
+        <span className="dim">
+          <span className="spin" style={{ width: 12, height: 12, borderWidth: 2 }} /> 切链中…
+        </span>
+      )}
+      <button className="btn small secondary" onClick={w.disconnect}>
+        断开
+      </button>
+    </div>
+  );
+}
 
 export function AppShell() {
   return (
@@ -23,12 +61,15 @@ export function AppShell() {
         <div className="nav-foot">
           chainId 968 · BOT Chain
           <br />
-          全部数据本地处理
+          不接触任何私钥
         </div>
       </nav>
-      <main className="main">
-        <Outlet />
-      </main>
+      <div className="main-col">
+        <WalletChipBar />
+        <main className="main">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
