@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.middleware.base import RequestResponseEndpoint
@@ -94,6 +95,13 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
+    if app_settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[o.strip() for o in app_settings.cors_origins.split(",") if o.strip()],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
