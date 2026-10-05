@@ -47,6 +47,8 @@
 | 18 | **EntryPoint.depositFor 本链真实 revert**；入金改走 SimpleAccount.receive()（普通转账即 addDeposit） | 自制 EntryPoint 实现（C-18） |
 | 19 | **EntryPoint 无 getNonce 视图、nonce 独立于 tx-nonce**（CREATE2 出生合约 tx-nonce=1 而 UserOp nonce 从 0 计）；发送/估值前用 estimate 扫描探测正确 nonce | 自制 EntryPoint 的 nonce 语义（C-19） |
 | 20 | 4337 maxFee/maxPriority 报 1.5× 链价（30gwei） | bundler 打包激励；真实结算按 effectiveGasPrice=20gwei（回实测得） |
+| 21 | `BOT_CHAIN_API_KEY` 在 README/.env.example 曾承诺"设置后 `/api` 需带 X-API-Key"，代码中无任何消费点（鉴权中间件未实现） | 文档承诺先于实现落地；主网适配轮按用户指示仅做开关部署、不扩 scope，两处文档已改为"规划项未生效"，鉴权待单独立项 |
+| 22 | 主网 `rpc.botchain.ai` 在本机可**直连**（estimateGas 有响应），与"DNS 污染仅代理可达"的既有认知不符 | 本机网络环境差异（DoH/hosts 等可能成因）；`resolve_proxy` 分流逻辑不变：配 PROXY 走代理、未配直连，两种形态均兼容 |
 
 ## 四、质量摘要（d5 时点，最终）
 
@@ -85,3 +87,26 @@ uv run uvicorn app.main:app --port 8010     # 调试页 http://localhost:8010/do
 uv run pytest -m "unit or live"             # 142 用例
 python scripts/demo_g5.py --base http://localhost:8010
 ```
+
+## 八、主网适配——开关部署（2026-10-05，用户指示）
+
+指示原文口径：测试网集成已由 AI 跑过（G1~G5 全绿，见上）；**主网无币，链上验证跳过**。
+本轮只做"用开关配置区分部署"，交付 4 个提交（test/feat/build/docs 分型）：
+
+| 变更 | 内容 |
+|---|---|
+| `feat(m1)` health 防线 | `/chain/health` rpc 通道加 **chainId 匹配校验**（实测值 ≠ 配置值即红灯）——主网误配/代理失效在首次健康检查即暴露，替代启动期探活（单测 lifespan 会触真网，弃用） |
+| `build(deploy)` 开关化 | compose 的 `BOT_CHAIN_NETWORK` 从写死 `testnet` 改为 `${BOT_CHAIN_NETWORK:-testnet}`，新增 `BOT_CHAIN_ALLOW_MAINNET`/`PROXY` 透传与 `host-gateway` 映射（Linux 宿主代理可达）；`.env.example` 补主网部署清单 |
+| 既有能力复核 | 两网规格/双重锁/私钥拒载/DuckDB network 隔离/proxy 分流在 d1~d5 已就绪，本轮零改动即生效 |
+
+**验证口径**（按用户指示，主网链上验证跳过）：
+
+```
+ruff check/format/mypy   → 全过（每提交 pre-commit 机械强制）
+pytest -m unit --cov=app → 107 passed；覆盖率 80.04%（门 ≥80）
+主网模式离线自检         → lifespan 启动 network=mainnet/chain_id=677/funded_key=None；
+                           transfer dry_run=200（chainId=677 预览）；真实发送无私钥/无币按设计失败
+docker compose config    → testnet 缺省渲染不变；mainnet+锁+代理组合插值正确
+```
+
+主网链上读写验证（live/needs_funds 打 677）**未执行**（无币+用户豁免）；测试网回归未重跑（G1~G5 已终态存证，本轮改动均为网络参数化面，单测覆盖）。

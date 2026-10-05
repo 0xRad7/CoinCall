@@ -41,6 +41,27 @@ uv run uvicorn app.main:app --port 8000
 也支持半自动：从浏览器开发者工具复制 `turnstileToken` 后
 `POST /api/v1/faucet/claim {"address":…, "turnstile_token":…, "dry_run":false}` 代发。
 
+## 主网部署（开关切换，双重锁）
+
+两网规格同源（`app/core/chains.py` 唯一来源），部署**只靠 `.env` 开关区分，不改任何代码**：
+
+```bash
+# .env 修改三项后重启即切主网（Chain ID 677）
+BOT_CHAIN_NETWORK=mainnet
+BOT_CHAIN_ALLOW_MAINNET=1                          # 双重锁：缺此项启动即报 mainnet_locked
+PROXY=http://host.docker.internal:7890             # 主网 botchain.ai 域仅代理可达
+docker compose up -d
+curl http://localhost:8000/api/v1/chain/health     # rpc 通道 chainId 必须为 677，红灯即误配
+```
+
+- **自动切换面**：rpc/bundler/explorer/faucet 四客户端与全部合约地址切为主网规格；DuckDB 六表按
+  `network` 列隔离两网数据；compose 已透传 `BOT_CHAIN_NETWORK/ALLOW_MAINNET/PROXY`
+  （Linux 宿主代理经 `host-gateway` 映射，容器内**不可**写 `127.0.0.1`）。
+- **资金安全**：主网模式拒载 `BOT_CHAIN_TEST_PRIVATE_KEY`（误填也不生效），写接口仅 dry_run
+  预览；`dry_run=false` 在无币账户于 estimateGas 即失败。主网无水龙头——领水指引与
+  `scripts/demo_g5.py` 仅适用测试网（剧本断言 968/20gwei）。
+- **本机 uvicorn 路径**同理：`BOT_CHAIN_NETWORK=mainnet BOT_CHAIN_ALLOW_MAINNET=1 PROXY=… uv run uvicorn app.main:app --port 8000`。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
@@ -51,7 +72,7 @@ uv run uvicorn app.main:app --port 8000
 | `BOT_CHAIN_KEYSTORE_SECRET` | 空 | 代管账户 keystore 加密口令（未设=进程内临时态，重启丢失） |
 | `REDIS_URL` | 空 | 如 `redis://localhost:6379/0`；未设自动降级进程锁/内存幂等 |
 | `DUCKDB_PATH` | `data/botchain.duckdb` | 分析库路径 |
-| `BOT_CHAIN_API_KEY` | 空 | 设置后 `/api` 需带 `X-API-Key` |
+| `BOT_CHAIN_API_KEY` | 空 | 规划项：当前版本未实现鉴权中间件，设置暂不生效（见 RESULTS 偏差 #21） |
 | `PROXY` | 空 | 仅 `botchain.ai` 主网域需要；`*.bohr.life` 永远直连 |
 
 ## API 速览（55 端点，`/docs` 交互式文档）
