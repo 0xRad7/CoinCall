@@ -216,7 +216,8 @@ class ContractScanHandler:
             tip = int(info["block_number"])
         except (KeyError, TypeError, ValueError) as exc:
             raise InternalServiceError(f"8010 /chain/info 缺 block_number: {info!r}") from exc
-        from_block = max(0, tip - window)
+        # 窗口=tip-from+1 ≤ 5000（8010 getLogs 硬顶）：from = tip - window + 1
+        from_block = max(0, tip - window + 1)
         logs = await _get_json(
             self.http,
             f"{self.bot_chain}/api/v1/contracts/logs"

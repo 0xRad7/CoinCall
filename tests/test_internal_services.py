@@ -205,7 +205,7 @@ async def test_contract_scan_handler_decodes_charged_logs() -> None:
     assert body["total_value_raw"] == 60_000
     assert body["total_value"] == "0.060000"
     assert body["pay_vault"] == VAULT
-    assert body["window"] == {"from_block": 700, "to_block": 1000, "blocks": 301}
+    assert body["window"] == {"from_block": 701, "to_block": 1000, "blocks": 300}
     first = body["events"][0]
     assert first["provider"] == PROVIDER_WALLET
     assert first["from"] == CONSUMER_WALLET
@@ -218,7 +218,7 @@ async def test_contract_scan_handler_decodes_charged_logs() -> None:
     sent = dict(logs_route.calls.last.request.url.params)
     assert sent["address"].lower() == VAULT.lower()
     assert sent["topic0"].lower() == CHARGED_TOPIC0.lower()
-    assert int(sent["from_block"]) == 700
+    assert int(sent["from_block"]) == 701
     assert int(sent["to_block"]) == 1000
 
 
@@ -236,7 +236,7 @@ async def test_contract_scan_handler_window_clamped() -> None:
             make_manifest("svc_contract_scan"), {"window_blocks": 999_999}
         )
     sent = dict(route.calls.last.request.url.params)
-    assert int(sent["from_block"]) == 6000 - 5000  # 8010 窗口硬顶 5000
+    assert int(sent["from_block"]) == 6000 - 5000 + 1  # 窗口=tip-from+1 ≤ 8010 硬顶 5000
     assert result.body["count"] == 0
     assert result.body["total_value_raw"] == 0
 
@@ -255,7 +255,7 @@ async def test_contract_scan_handler_default_window_and_bad_input() -> None:
         await handler.handle(make_manifest("svc_contract_scan"), {"window_blocks": "abc"})
         await handler.handle(make_manifest("svc_contract_scan"), {"window_blocks": -5})
     for call in route.calls:
-        assert int(dict(call.request.url.params)["from_block"]) == 700
+        assert int(dict(call.request.url.params)["from_block"]) == 1000 - 300 + 1
 
 
 @respx.mock
