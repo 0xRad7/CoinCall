@@ -28,10 +28,11 @@ from app.core.shadow_gate import ShadowGate
 from app.modules.auth import CoreAuthClient
 from app.modules.call_route import router as call_router
 from app.modules.calls import CallStore
+from app.modules.internal_services import InternalServicesProvider
 from app.modules.keeper import BotChainSettleChain, Keeper, provider_wallet_resolver
 from app.modules.keeper_route import router as keeper_router
 from app.modules.manifest_client import ManifestClient
-from app.modules.providers import HttpJsonProvider, InternalEchoProvider, ProviderAdapter
+from app.modules.providers import HttpJsonProvider, ProviderAdapter
 from app.modules.stats_route import router as stats_router
 
 
@@ -74,8 +75,14 @@ def create_app(
         app.state.scheme = scheme
         register_scheme(scheme)
         app.state.shadow_gate = ShadowGate(k=app_settings.shadow_k)
+        # internal 适配器：internal://<name> → demo handler（09 P1-4）；未知名/无 url → 回显兜底
         default_providers: dict[str, ProviderAdapter] = {
-            "internal": InternalEchoProvider(),
+            "internal": InternalServicesProvider(
+                http=app.state.http,
+                bot_chain_base_url=app_settings.bot_chain_api_base_url,
+                core_base_url=app_settings.core_base_url,
+                pay_vault=app_settings.pay_vault_address,
+            ),
             "http_json": HttpJsonProvider(app.state.http),
         }
         app.state.providers = dict(providers) if providers else default_providers
