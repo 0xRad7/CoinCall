@@ -229,7 +229,7 @@ class TestAppSkeleton:
         client = TestClient(create_app())
         r = client.get("/")
         assert r.status_code == 200
-        assert r.json()["service"] == "bot_chain_api"
+        assert r.json()["service"] == "coincall-bot-chain-api"  # 仓库更名（2026-10-05）
 
     def test_playground_redirects_to_docs(self) -> None:
         client = TestClient(create_app())
