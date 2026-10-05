@@ -112,7 +112,7 @@ def create_app() -> FastAPI:
         description=(
             "BOT Chain 全功能链上服务 (ETH Wuhan 2026)。"
             "写接口默认 dry_run=true 返回预览; 真实发送需显式 dry_run=false。"
-            "默认测试网 Chain ID 968。"
+            "网络由 BOT_CHAIN_NETWORK 切换: testnet=968(默认) / mainnet=677(需双重锁+代理)。"
         ),
         openapi_tags=TAGS_METADATA,
         lifespan=lifespan,
