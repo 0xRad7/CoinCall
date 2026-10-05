@@ -1,27 +1,28 @@
 {
   "network": "botchain-testnet",
   "chainId": 968,
-  "payVault": "0x583aa9Ae52748Ae4C803643A6Db2DFB77c240e1E",
+  "payVault": "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471",
   "mockUsdt": "0x4F8f2eaAA3988E9f59B72C93262DDC1084E540fb",
   "operator": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
-  "deployTxHash": "0x1453a2d451a26d766504968acb4d79c7b804f24f1ba8b6a4878d2518ed1f3322",
-  "blockNumber": 25795028,
+  "deployTxHash": "0xb7cd16735dd0a82b22d619e56b079ae80ef94cb40d85b9cf0f56b74261f41130",
+  "blockNumber": 25795948,
   "compilerVersion": "0.8.24",
-  "deployTime": "2026-10-05T13:09:35+00:00",
-  "bytecodeHash": "0xb21282960a7a96cbcedf646609e1ca0771e32db6272e7cff567bb2aa743be938",
+  "deployTime": "2026-10-05T13:21:06+00:00",
+  "bytecodeHash": "0x5750182f0362f4558e7de4a7c9b9bc8980a4dcbf785e171057347c88867b9d97",
   "mockUsdtBytecodeHash": "0x33ba5bd9265cd9ffb1d6fe15f1be9ea1f1af124e4eb4e14850fde8dd8265c250",
   "deployTxs": {
-    "mockUsdt": "0x6fe846a81b3ae7389795f53156bf8bdc4b327dbd17635dcf6f6782cdd8345fdb",
-    "payVault": "0x1453a2d451a26d766504968acb4d79c7b804f24f1ba8b6a4878d2518ed1f3322"
+    "mockUsdt": "reused:0x4F8f2eaAA3988E9f59B72C93262DDC1084E540fb",
+    "payVault": "0xb7cd16735dd0a82b22d619e56b079ae80ef94cb40d85b9cf0f56b74261f41130"
   },
-  "domainSeparator": "0x614162d4be62d003c416366b08a67383e4e101d5092d415fbed0c4030710310a",
+  "mockUsdtReused": true,
+  "domainSeparator": "0x9492a98abfe745c032a01618ce9fa0f408f7f5a300693f13ac1dc723415584fe",
   "eip712": {
     "domain": {
       "name": "PayVault",
       "version": "1",
       "chainId": 968
     },
-    "structType": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)",
+    "structType": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)",
     "goldenVector": "vectors/eip712_golden.json"
   },
   "abiFiles": {
@@ -32,24 +33,24 @@
   "smoke": {
     "withdraw_zero_credits_reverts_insufficient_credits": true,
     "unauthorized_charge_failed": true,
-    "unauthorized_charge_tx": "0x738f12cea4f44af12ae011986ddf08074f7cd33ae1e1278c86dc3d656731b5d4",
-    "charge_tx": "0xae6a450db5d0e66396dd008b17f5bde1e196f7304ffa8e8ab3dd7bcea1951533",
+    "unauthorized_charge_tx": "0x46c609fb83cc1d407f1171897e1740e7f23ce6aab6a3350620c2660d116764c7",
+    "charge_tx": "0xcd8ff69c2fb39af0a4b383a1c213d2d6c13ad74e62dae1e08c897c5b1bd8b195",
     "charged_event": {
       "provider": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
       "from": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
-      "nonce": 1,
+      "nonce": "0x0000000000000000000000000000000000000000000000000000000000000001",
       "value": 10000000
     },
     "credits_after_charge": 10000000,
     "nonce_replay_rejected": true,
-    "replay_tx": "0x1e93cfc7d1d1445e6d07f604b0064494e7edb37e8957a06e2deecc49607e6643",
-    "withdraw_tx": "0xa4561b44f5295ef01b0f1542cffc1846e765564281e9e83d2cdbf54602111119",
+    "replay_tx": "0xc8d4af7d657fff4b3c8bd8fe1a5c15d50d50a084db9afcc07b779fe328c4800d",
+    "withdraw_tx": "0x716f963da1ca571ae9c20261e9b37405f0c155a53c7903f2e020f5d850e01ad4",
     "withdrawn_event": {
       "provider": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
       "to": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
       "amount": 10000000
     },
-    "balance_after_withdraw": 1000000000000,
+    "balance_after_withdraw": 2000000000000,
     "i4_balance_equals_credits": true
   },
   "smokeAllPassed": true

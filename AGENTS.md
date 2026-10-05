@@ -25,7 +25,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy   # 静态三
 2. **EIP-712 字节级口径**（网关验签汇合阶段必做）：用你仓自己的 digest 实现，对 `vectors/eip712_golden.json` 的每个 case 重建 digest，断言与 `case["digest"]` 逐字节一致，且 `ecrecover(digest, v, r, s) == case["address"]`。分量不一致时比对 `case["domainSeparator"]`（域编码问题）或 `case["structHash"]`（struct 编码问题）定位。**向量文件不得手改。**
 3. **链上绑定复核**（可选，只读）：`eth_call` PayVault 的 `DOMAIN_SEPARATOR()` 应等于你在 chainId=968 + `payVault` 地址下本地计算的值（`deployments.testnet-968.json.domainSeparator` 已记录，可直接比对）。
 
-注意实现陷阱（本仓已踩过，见 CONSTRAINTS.md C-01）：web3 7.16 的 `Web3.solidity_keccak` 对 address 字符串值产出错误哈希——哈希请走 `eth_abi.encode + keccak`。Nonce 是 **uint256**（非 bytes32），struct 类型名固定 `Authorization`，六字段序 `from,to,value,validAfter,validBefore,nonce`。
+注意实现陷阱（本仓已踩过，见 CONSTRAINTS.md C-01）：web3 7.16 的 `Web3.solidity_keccak` 对 address 字符串值产出错误哈希——哈希请走 `eth_abi.encode + keccak`。Nonce 是 **bytes32**（EIP-3009 正典，0x 前缀 32 字节 hex；曾误用 uint256 已整改，见 E-1/C-07），struct 类型名固定 `Authorization`，六字段序 `from,to,value,validAfter,validBefore,nonce`。废弃合约地址存档在 `deployments/superseded/`，接线只认 `deployments/testnet-968.json` 现行地址。
 
 ## 私钥纪律
 

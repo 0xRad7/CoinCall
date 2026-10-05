@@ -51,12 +51,13 @@ uv run pytest --cov -q          # 覆盖率 ≥80%
 | C-04 | 2026-10-05 | `ContractFunction.encode_abi()` 不存在（web3 7.16） | API 改名 | calldata 组装统一走 `build_transaction(...)["data"]` 公开路径（`chain.calldata`），禁止触私有 `_encode_transaction_data` |
 | C-05 | 2026-10-05 | revert 断言失败：eth-tester 对自定义错误抛 `TransactionFailed`，args 可能是裸选择子 bytes，也可能是 `"execution reverted: b'..'"` 字符串 | eth-tester 与 web3 异常包装不一致 | `tests/helpers.expect_revert_selector` 双路径归一（live 链 ContractLogicError.data / eth-tester TransactionFailed），选择子比对不变 |
 | C-06 | 2026-10-05 | 首次部署脚本 WARN：链上 runtime 哈希 ≠ 产物 `deployedBytecodeHash` | solc 产物 runtime 在 immutable 槽位（token/operator/DOMAIN_SEPARATOR）是**占位零**，与链上 code 天然不同；MockUSDT（无 immutable）比对通过证实 | `deployments.testnet-968.json` 的 `bytecodeHash` 以 `keccak(eth_getCode)` 为权威（任何人可复算）；产物 runtime 哈希仅作编译可复现性用途 |
+| C-07 | 2026-10-05 | 汇合阶段交叉验证发现互操作缺陷：本仓 nonce 用 uint256，网关冻结实现用 bytes32，typehash 不一致导致两侧签名互不相认（原 E-1 偏差） | 任务的底线清单误写 uint256，未与 04 正典（bytes32）复核即采纳 | **冻结契约的类型字段必须溯源规范正典**，任务书转述与正文冲突时以正文为准并升级提问；已整改 E-1（uint256→bytes32）+ 重生成向量 + 重部署（旧地址存档 `deployments/superseded/`），tag `d0-contracts-r1` |
 
 ## §E 偏差记录区（对 04_settlement.md / 任务书口径的偏离）
 
 | # | 偏差 | 依据与理由 |
 |---|---|---|
-| E-1 | `Authorization.nonce` 用 **uint256**（04 §2 写 bytes32） | 任务底线清单明确六元组全 uint256 口径；事件 `Charged.nonce` 同步 uint256 indexed；黄金向量锁死该口径，网关按向量对齐 |
+| E-1 | ~~`Authorization.nonce` 用 uint256~~ **已整改（2026-10-05）：uint256→bytes32，回归 04 正典**（C-07） | 汇合阶段发现与网关冻结实现 typehash 不一致、签名互不相认；现口径 `Authorization(...,bytes32 nonce)`，`usedNonces(bytes32)`、`Charged(...,bytes32 indexed nonce)` 同步，向量已重生成（主 digest `0x65a25c5e…`），旧合约 0x583aa9…c240e1E 废弃存档于 `deployments/superseded/payvault.jsonl`，现行 `0xFe91F55C…cf79C471` |
 | E-2 | struct 含 `to` 字段且合约强制 `to == address(this)`（04 §2 的 struct 无 to） | 任务清单补 to 以对齐 EIP-3009 TransferWithAuthorization；强制本合约收款是 I4 记账恒等的前提，也防授权被指向任意地址 |
 | E-3 | 记账键为 **provider address**（04 §2 为 providerTokenId） | 任务底线清单：`credits[provider]`、`providerWithdraw(address to, uint256 amount)`；地址键免去 ERC-8004 依赖，网关侧用 agentWallet 即 provider 地址 |
 | E-4 | `operatorUpdate` 单步（04 §2 two-step 可选，未采用） | 保持 ≤160 行；operator 与资金无关（I1），最坏=扣款停摆、提现不受影响； NatSpec 已注明 |

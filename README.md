@@ -14,7 +14,7 @@ artifacts/          编译产物（bytecode+ABI JSON）入库，禁止手改
 vectors/            eip712_golden.json 黄金向量（digest 字节级口径锁死）
 tests/              pytest：eth-tester 本地 EVM 行为测试（T4~T8 等）
 script/             deploy_testnet.py 测试网部署+冒烟 / generate_golden_vector.py
-deployments/        testnet-968.json 部署事实
+deployments/        testnet-968.json 部署事实；superseded/ 废弃地址存档（nonce-type 整改）
 payvault/           Python 工具链（编译/EIP-712/链上提交）
 ```
 
@@ -32,7 +32,8 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 `coincall-bot-chain-api/.env` 读取，永不打印）：
 
 ```bash
-uv run python script/deploy_testnet.py
+uv run python script/deploy_testnet.py                                  # 全新部署
+uv run python script/deploy_testnet.py 0x4F8f...E540fb                 # 沿用已部署 MockUSDT
 ```
 
 ## 合约 API 一览
@@ -42,14 +43,14 @@ uv run python script/deploy_testnet.py
 | `chargeWithSigBatch((address provider, Authorization auth, uint8 v, bytes32 r, bytes32 s)[] calls) external onlyOperator` | 逐笔：时间窗→nonce 未用→ecrecover==from→`token.transferFrom(from,this,value)`→`credits[provider]+=value`；单笔失败跳过+`ChargeFailed`，不回滚整批；`MAX_BATCH=50` |
 | `providerWithdraw(address to, uint256 amount) external` | 只提 msg.sender 自己的 credits；**无 pause/无 owner 锁/无时间锁**（铁律 P8） |
 | `operatorUpdate(address newOperator) external onlyOperator` | operator 轮换（单步） |
-| view | `operator() / token() / DOMAIN_SEPARATOR() / totalCredits() / credits(address) / usedNonces(uint256) / MAX_BATCH()` |
+| view | `operator() / token() / DOMAIN_SEPARATOR() / totalCredits() / credits(address) / usedNonces(bytes32) / MAX_BATCH()` |
 
-事件：`Charged(provider, from, value, nonce)` / `ChargeFailed(provider, from, reason)` /
+事件：`Charged(provider, from, value, bytes32 nonce)` / `ChargeFailed(provider, from, reason)` /
 `Withdrawn(provider, to, amount)` / `OperatorUpdated(oldOp, newOp)`。
 
 EIP-712：domain `{name:"PayVault", version:"1", chainId, verifyingContract}`，
-struct `Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)`
-（`to` 必须等于合约地址；字节级口径见 `vectors/eip712_golden.json`）。
+struct `Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)`
+（`to` 必须等于合约地址；nonce 为 bytes32——EIP-3009 正典口径；字节级口径见 `vectors/eip712_golden.json`）。
 
 ## 诚实边界
 
