@@ -6,8 +6,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { coreApi, type ServiceManifest } from "../api/core";
 import { agentWalletSetTypedData, botChainApi, type AgentIdentity } from "../api/gateway";
 import { ApiError } from "../api/client";
-import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT, fromRaw, toRaw } from "../chain/constants";
-import { fetchProviderCredits, getInjected, injectedSendProviderWithdraw, injectedSignTypedData, trackInjectedTx } from "../chain/rpc";
+import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY_VAULT, fromRaw, toRaw } from "../chain/constants";
+import { fetchProviderCredits, encodeAddrUint } from "../chain/rpc";
+import { browserProvider, getInjected, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureChain968, silentAccounts } from "../chain/injected";
 import { AmountInput } from "../components/AmountInput";
 import { JsonEditor } from "../components/JsonEditor";
 import { AsyncSection, Badge, ConfirmDialog, CopyButton, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
@@ -496,6 +497,7 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   const [countdown, setCountdown] = useState(0);
   const [typedData, setTypedData] = useState<ReturnType<typeof agentWalletSetTypedData> | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [result, setResult] = useState<{ tx_hash: string } | null>(null);
@@ -539,11 +541,15 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   const signWithInjected = async () => {
     setBusy(true);
     setError(null);
+    setCancelled(false);
     try {
-      const sig = await injectedSignTypedData(newWallet.trim(), typedData!);
+      // 与消费端同一共享路径：BrowserProvider.signTypedData（digest 由扩展计算）
+      const signer = await browserProvider().getSigner(newWallet.trim());
+      const sig = await signer.signTypedData(typedData!.domain, typedData!.types, typedData!.message);
       setSignature(sig);
     } catch (e) {
-      setError(e);
+      if (isUserRejected(e)) setCancelled(true);
+      else setError(e);
     } finally {
       setBusy(false);
     }
@@ -640,6 +646,9 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
               签名完成：<span className="mono">{signature.slice(0, 34)}…</span>（65 字节）——等待提交。
             </SuccessBox>
           )}
+          {cancelled && (
+            <WarnBox>你取消了签名（钱包弹窗里拒绝）。没有产生任何签名，可重新点「调起钱包签名」。</WarnBox>
+          )}
 
           {error != null && <ErrorBox error={error} />}
 
@@ -676,6 +685,8 @@ function WithdrawStep() {
   const [addr, setAddr] = useState("");
   const [credits, setCredits] = useState<bigint | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waitingWallet, setWaitingWallet] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
   const [tx, setTx] = useState<string | null>(null);
@@ -695,17 +706,25 @@ function WithdrawStep() {
 
   const withdraw = async () => {
     setBusy(true);
+    setWaitingWallet(true);
     setError(null);
+    setCancelled(false);
     try {
-      const hash = await injectedSendProviderWithdraw(addr.trim(), credits!);
+      // 与消费端同一共享路径：先确保扩展在 968 链，再 eth_sendTransaction（20 gwei 固定费率）
+      await ensureChain968();
+      const from = (await silentAccounts()) ?? (await connectInjected()).address;
+      const hash = await sendInjectedTx(from, VAULT_ADDR, encodeAddrUint(SEL_C.providerWithdraw, addr.trim(), credits!));
+      setWaitingWallet(false);
       setTx(hash);
-      await trackInjectedTx(hash);
+      await waitForInjectedReceipt(hash);
       const c = await fetchProviderCredits(addr.trim());
       setCredits(c);
     } catch (e) {
-      setError(e);
+      if (isUserRejected(e)) setCancelled(true);
+      else setError(e);
     } finally {
       setBusy(false);
+      setWaitingWallet(false);
       setConfirming(false);
     }
   };
@@ -733,6 +752,12 @@ function WithdrawStep() {
         </div>
       )}
       {error != null && <ErrorBox error={error} />}
+      {cancelled && <WarnBox>你取消了提现交易（钱包弹窗里拒绝）。没有产生任何交易，可重新发起。</WarnBox>}
+      {waitingWallet && (
+        <div className="alert info">
+          <span className="flex"><span className="spin" /> 等待钱包确认…（请在扩展弹窗里确认提现交易）</span>
+        </div>
+      )}
       {tx && (
         <SuccessBox>
           提现交易已发送：<TxLink hash={tx} />
@@ -743,7 +768,7 @@ function WithdrawStep() {
         getInjected() ? (
           <>
             <button className="btn danger" disabled={busy} onClick={() => setConfirming(true)}>
-              发起 providerWithdraw（全额）
+              {busy && waitingWallet ? "等待钱包确认…" : "发起 providerWithdraw（全额）"}
             </button>
             <ConfirmDialog
               open={confirming}
