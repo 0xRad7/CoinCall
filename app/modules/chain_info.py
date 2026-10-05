@@ -143,7 +143,7 @@ def chain_health(
     w3: Web3Dep, explorer_http: ExplorerHttpDep, bundler_http: BundlerDep, chain: ChainDep
 ) -> HealthReport:
     channels = {
-        "rpc": _probe_rpc(w3),
+        "rpc": _probe_rpc(w3, chain.chain_id),
         "bundler": _probe_bundler(bundler_http, chain.chain_id),
         "explorer": _probe_explorer(explorer_http),
     }
@@ -160,14 +160,24 @@ def _mean_block_interval(w3: Web3, tip: int) -> float:
         return 0.0
 
 
-def _probe_rpc(w3: Web3) -> ChannelHealth:
+def _probe_rpc(w3: Web3, expected_chain_id: int) -> ChannelHealth:
+    """rpc 通道：连通 且 chainId 与部署配置一致才算绿（网络/代理误配防线）。"""
     started = time.perf_counter()
     try:
-        ok = bool(w3.is_connected())
-        detail = "connected" if ok else "not connected"
+        if not w3.is_connected():
+            return ChannelHealth(ok=False, latency_ms=_ms_since(started), detail="not connected")
+        got = w3.eth.chain_id
+        if got != expected_chain_id:
+            return ChannelHealth(
+                ok=False,
+                latency_ms=_ms_since(started),
+                detail=f"chainId mismatch: rpc={got} expect={expected_chain_id}",
+            )
+        return ChannelHealth(
+            ok=True, latency_ms=_ms_since(started), detail=f"connected, chainId={got}"
+        )
     except Exception as exc:  # 探活必须吞掉一切异常转为红灯
-        ok, detail = False, str(exc)[:120]
-    return ChannelHealth(ok=ok, latency_ms=_ms_since(started), detail=detail)
+        return ChannelHealth(ok=False, latency_ms=_ms_since(started), detail=str(exc)[:120])
 
 
 def _probe_bundler(client: Client, expected_chain_id: int) -> ChannelHealth:
