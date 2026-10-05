@@ -1,0 +1,56 @@
+{
+  "network": "botchain-testnet",
+  "chainId": 968,
+  "payVault": "0x583aa9Ae52748Ae4C803643A6Db2DFB77c240e1E",
+  "mockUsdt": "0x4F8f2eaAA3988E9f59B72C93262DDC1084E540fb",
+  "operator": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
+  "deployTxHash": "0x1453a2d451a26d766504968acb4d79c7b804f24f1ba8b6a4878d2518ed1f3322",
+  "blockNumber": 25795028,
+  "compilerVersion": "0.8.24",
+  "deployTime": "2026-10-05T13:09:35+00:00",
+  "bytecodeHash": "0xb21282960a7a96cbcedf646609e1ca0771e32db6272e7cff567bb2aa743be938",
+  "mockUsdtBytecodeHash": "0x33ba5bd9265cd9ffb1d6fe15f1be9ea1f1af124e4eb4e14850fde8dd8265c250",
+  "deployTxs": {
+    "mockUsdt": "0x6fe846a81b3ae7389795f53156bf8bdc4b327dbd17635dcf6f6782cdd8345fdb",
+    "payVault": "0x1453a2d451a26d766504968acb4d79c7b804f24f1ba8b6a4878d2518ed1f3322"
+  },
+  "domainSeparator": "0x614162d4be62d003c416366b08a67383e4e101d5092d415fbed0c4030710310a",
+  "eip712": {
+    "domain": {
+      "name": "PayVault",
+      "version": "1",
+      "chainId": 968
+    },
+    "structType": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)",
+    "goldenVector": "vectors/eip712_golden.json"
+  },
+  "abiFiles": {
+    "payVault": "artifacts/PayVault.json",
+    "mockUsdt": "artifacts/MockUSDT.json"
+  },
+  "gasPriceWei": 20000000000,
+  "smoke": {
+    "withdraw_zero_credits_reverts_insufficient_credits": true,
+    "unauthorized_charge_failed": true,
+    "unauthorized_charge_tx": "0x738f12cea4f44af12ae011986ddf08074f7cd33ae1e1278c86dc3d656731b5d4",
+    "charge_tx": "0xae6a450db5d0e66396dd008b17f5bde1e196f7304ffa8e8ab3dd7bcea1951533",
+    "charged_event": {
+      "provider": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
+      "from": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
+      "nonce": 1,
+      "value": 10000000
+    },
+    "credits_after_charge": 10000000,
+    "nonce_replay_rejected": true,
+    "replay_tx": "0x1e93cfc7d1d1445e6d07f604b0064494e7edb37e8957a06e2deecc49607e6643",
+    "withdraw_tx": "0xa4561b44f5295ef01b0f1542cffc1846e765564281e9e83d2cdbf54602111119",
+    "withdrawn_event": {
+      "provider": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
+      "to": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
+      "amount": 10000000
+    },
+    "balance_after_withdraw": 1000000000000,
+    "i4_balance_equals_credits": true
+  },
+  "smokeAllPassed": true
+}
