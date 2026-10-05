@@ -14,6 +14,45 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8030
 
 数据落 `data/gateway.duckdb`（DuckDB 单写者：跑测试前勿同时运行本服务，见 CONSTRAINTS A1）。
 
+## 演示快速启动（07 三幕剧本 / 09 P1-4）
+
+三服务按序拉起（**由主线程/常驻会话拉起**——子智能体/临时会话拉起的进程会随会话被回收，
+这是实测教训；8030 必须带 keeper env）：
+
+```bash
+# 终端 1：coincall-bot-chain-api（8010）   —— 在 ../coincall-bot-chain-api 下
+uv run uvicorn app.main:app --port 8010
+# 终端 2：coincall-core（8020）            —— 在 ../coincall-core 下
+uv run uvicorn app.main:app --port 8020
+# 终端 3：coincall-gateway（8030，keeper 开）
+cd coincall-gateway && COINCALL_KEEPER_ENABLED=true uv run uvicorn app.main:app --port 8030
+```
+
+三幕彩排（无人工干预，逐步打印+断言+时间戳，自动录档 `results/demo_p1.md`）：
+
+```bash
+uv run python scripts/demo_p1.py
+```
+
+- 第一幕 挂服务（≤30s 口径）：登记 provider(162) → 发布 `svc_translate` / `svc_contract_scan` /
+  `svc_chain_report` 三 manifest → catalog 可见；
+- 第二幕 付费调用：SDK（`../coincall-sdk`，脚本自动 sys.path 引入）钱包导入 anvil#1 →
+  三个服务各一笔真实付费 + 402 指引演练（未 approve 新 key → `PaymentRequiredError.guidance`
+  → approve → 成功；注意 approve 后要等网关链上约束 30s 短缓存过期再重试）；
+- 第三幕 结算与信誉：keeper 攒批上链（batch=3 / 30s 档）→ Charged 明细与交易哈希 →
+  `providerWithdraw`（anvil#2 直签 raw tx）→ MockUSDT 到账增量==提取额 → 排行榜/proof；
+- 兜底演练：svc_translate 三段热切换（友队 http_json → 掉线 502 零扣款 → 我方备用 →
+  internal 兜底）；每次切换的传播时延 = 网关 manifest 缓存 TTL（默认 60s）。
+
+内置 demo 服务（`app/modules/internal_services.py`）：manifest `endpoint.type=internal` 且
+`url=internal://<name>` 时网关本地执行（不走外网）——`translate` 回显兜底 / `chain_report`
+（8010 链健康 + core 总览 → 报告）/ `contract_scan`（8010 扫 PayVault Charged → 结构化摘要）；
+无 url 或未知名 → 回显兜底。彩排勘误与工程坑（raw tx 必须带 `to`、SDK 幂等键跨进程重放等）
+见 `results/demo_p1.md` 附注。
+
+诚实边界：overview 的数字就是全部真实发生过的调用（07 §5，无 GMV 修饰）；anvil 私钥是
+公开测试密钥，脚本与日志永不打印任何私钥；演示计价 MockUSDT 为测试网公开 mint。
+
 ## 端点
 
 | 方法 | 路径 | 说明 |
@@ -57,6 +96,7 @@ coincall-bot-chain-api `POST /contracts/send` 提交 `chargeWithSigBatch`
 | `app/modules/keeper.py` | keeper 结算器（攒批/上链/回执分支/黑名单/恢复探测） |
 | `app/modules/keeper_route.py` | `GET /internal/keeper/status` |
 | `app/modules/providers.py` | ProviderAdapter（InternalEchoProvider / HttpJsonProvider） |
+| `app/modules/internal_services.py` | 内置 demo 服务（internal:// 分发 + 三 handler，09 P1-4） |
 | `app/modules/receipt.py` | 收据 + HMAC 防签 |
 
 黄金向量（EIP-712，独立生成，W10 与合约侧逐字节比对）：
@@ -72,5 +112,7 @@ uv run pytest -q -m needs_funds   # 真链结算：需 bot-chain-api(8010) 在�
 ```
 
 绑定用例（TEST-20261005202947）：T11 `test_payment.py` / T12 `test_shadow_gate.py` /
-T13 `test_calls_store.py` / T14 `test_payment.py::test_golden_vector`。制品链宿主在
+T13 `test_calls_store.py` / T14 `test_payment.py::test_golden_vector`；P1 链（TEST-20261005221052）
+T24 = `scripts/demo_p1.py` 彩排录档 `results/demo_p1.md`（internal handlers 单测在
+`tests/test_internal_services.py`）。制品链宿主在
 coincall-core 主仓（本仓只读引用）。规范正文：`../coincall-docs/`（只读）。
