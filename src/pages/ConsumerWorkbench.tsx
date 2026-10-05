@@ -1,16 +1,18 @@
 /**
  * 消费端工作台（核心页）：
- * 钱包（生成/导入）→ 资金（余额/授权/可用 + mint + 授权滑条）→ API key →
- * 试用调用（动态表单 + 本地 EIP-712 签名 + X-PAYMENT → 402 动作化）→ 历史 / 预算。
+ * 连接钱包（浏览器扩展，地址只读）→ 资金（余额/授权/可用 + mint + 授权滑条，扩展弹窗发交易）→
+ * API key → 试用调用（动态表单 + 扩展弹窗 EIP-712 签名 + X-PAYMENT → 402 动作化）→ 历史 / 预算。
+ * 控制台不接触任何私钥；无扩展的演示机可展开「一次性演示钱包」兜底（关页即焚）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hashSha256HexStringish } from "../lib/idempotency";
 import { ApiError } from "../api/client";
 import { coreApi } from "../api/core";
 import { gatewayApi, type Gateway402Challenge } from "../api/gateway";
-import { fromRaw, toRaw, PAY_VAULT as VAULT } from "../chain/constants";
-import { approveVault, fetchAllowance, fetchTokenBalance, mintMockUsdt, type TxProgress } from "../chain/rpc";
-import { buildCallAuthorization, buildPaymentHeader, signAuthorization } from "../chain/signing";
+import { MOCK_USDT, PAY_VAULT as VAULT, SEL, fromRaw, toRaw } from "../chain/constants";
+import { encodeAddrUint, fetchAllowance, fetchTokenBalance, type TxProgress } from "../chain/rpc";
+import { isUserRejected } from "../chain/injected";
+import { buildCallAuthorization, buildPaymentHeader } from "../chain/signing";
 import { SchemaForm } from "../components/SchemaForm";
 import { AsyncSection, Badge, ConfirmDialog, CopyButton, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeChallenge, humanizeError } from "../lib/errors";
@@ -21,16 +23,16 @@ import { useWallet } from "../state/WalletContext";
 const APIKEY_STORE = "coincall.apikey";
 
 export default function ConsumerWorkbench() {
-  const walletApi = useWallet();
-  const hasWallet = walletApi.wallet != null;
+  const { address } = useWallet();
+  const connected = address != null;
 
   return (
     <div>
       <h1 className="page-title">消费端工作台</h1>
-      <p className="page-sub">从零完成一次付费调用：备好钱包与资金 → 签发 API key → 选服务 → 本地签名授权 → 402 网关调用。全程私钥不出浏览器。</p>
+      <p className="page-sub">从零完成一次付费调用：连接钱包 → 备好资金 → 签发 API key → 选服务 → 钱包签名授权 → 402 网关调用。签名与交易全部在你的浏览器钱包弹窗里完成，控制台不接触私钥。</p>
 
-      <WalletSection />
-      {hasWallet && (
+      <ConnectSection />
+      {connected && (
         <>
           <FundsSection />
           <ApiKeySection />
@@ -43,99 +45,108 @@ export default function ConsumerWorkbench() {
   );
 }
 
-/* ============ 1. 钱包 ============ */
-function WalletSection() {
-  const { wallet, address, create, importKey, disconnect } = useWallet();
-  const [showImport, setShowImport] = useState(false);
-  const [pk, setPk] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [warnOpen, setWarnOpen] = useState(false);
+/* ============ 1. 连接钱包 ============ */
+function ConnectSection() {
+  const w = useWallet();
 
-  const doImport = () => {
-    setErr(null);
-    try {
-      importKey(pk);
-      setPk("");
-      setShowImport(false);
-    } catch (e) {
-      setErr(humanizeError(e).title);
-    }
-  };
-
-  const downloadKey = () => {
-    if (!wallet) return;
-    const blob = new Blob(
-      [JSON.stringify({ address: wallet.address, privateKey: wallet.privateKey, network: "BOT Chain 968 (testnet)", warning: "仅测试网演示私钥，请勿存主网资产" }, null, 2)],
-      { type: "application/json" }
+  if (w.address && w.mode) {
+    return (
+      <div className="card">
+        <h3>① 钱包已连接</h3>
+        <div className="alert ok" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span>
+            {w.mode === "injected" ? (
+              <>
+                浏览器钱包 <b className="mono">{w.address}</b>
+              </>
+            ) : (
+              <>
+                一次性演示钱包 <b className="mono">{w.address}</b> <Badge kind="warn">关页即焚</Badge>
+              </>
+            )}
+          </span>
+          <CopyButton text={w.address} />
+          {w.mode === "demo" && w.demoPrivateKey && (
+            <button
+              className="btn small secondary"
+              onClick={() => {
+                const blob = new Blob(
+                  [JSON.stringify({ address: w.address, privateKey: w.demoPrivateKey, network: "BOT Chain 968 (testnet)", warning: "一次性演示钱包：仅测试网、关页即焚、勿存资金" }, null, 2)],
+                  { type: "application/json" }
+                );
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `coincall-demo-${w.address!.slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+              }}
+            >
+              下载 key 文件（领 gas 用）
+            </button>
+          )}
+          <button className="btn small danger" onClick={w.disconnect}>
+            断开
+          </button>
+        </div>
+        {w.mode === "injected" && !w.chainOk && (
+          <WarnBox>
+            当前钱包连的是链 {w.chainId ?? "?"}，不是 BOT Chain 测试网（968）——mint/授权/付费调用都会失败。
+            <button className="btn small" style={{ marginLeft: 8 }} onClick={() => void w.ensureChain()}>
+              引导钱包切链 / 添加 BOT Chain
+            </button>
+          </WarnBox>
+        )}
+        {w.mode === "demo" && <WarnBox>这是一次性演示钱包（仅测试网、关闭页面即焚毁、勿存资金）。主路径请安装 OKX / MetaMask 后「连接钱包」。</WarnBox>}
+      </div>
     );
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `coincall-wallet-${wallet.address.slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
+  }
 
   return (
     <div className="card">
-      <h3>① 本地付费钱包</h3>
-      <p className="card-desc">签名完全在浏览器进程内完成；任何网络请求都不携带私钥本体。</p>
+      <h3>① 连接钱包</h3>
+      <p className="card-desc">只读取你的钱包地址（eth_requestAccounts）；后续签名与交易都由钱包扩展弹窗确认，控制台不接触任何私钥。</p>
 
-      <details className="raw-detail" open={warnOpen} onToggle={(e) => setWarnOpen((e.target as HTMLDetailsElement).open)}>
-        <summary style={{ fontSize: 13, color: "var(--warn)" }}>⚠ 私钥安全须知（首次使用请展开阅读）</summary>
-        <ul style={{ fontSize: 13, color: "var(--text-2)", paddingLeft: 18 }}>
-          <li>本控制台面向<b>测试网（BOT Chain 968）演示</b>，请勿导入持有真实资产的私钥。</li>
-          <li>私钥仅存 <b>sessionStorage</b>：关闭标签页即清除；不写 localStorage、不上传任何服务器。</li>
-          <li>付费调用只需对单笔金额做 EIP-712 签名（时间窗 10 分钟），不触碰转账权限。</li>
-        </ul>
+      {w.issue && (
+        <div className="alert warn">
+          <b>{w.issue.title}</b> —— {w.issue.hint}
+        </div>
+      )}
+
+      <div className="btn-row">
+        <button className="btn" onClick={() => void w.connect()} disabled={w.connecting}>
+          {w.connecting ? <Spinner label="等待钱包确认…" /> : "连接钱包（OKX / MetaMask）"}
+        </button>
+        {!w.hasInjected && <span className="dim">未检测到浏览器钱包扩展。</span>}
+      </div>
+
+      {/* 兜底：无扩展演示机的一次性钱包（默认收起，与主路径强隔离） */}
+      <details style={{ marginTop: 20 }}>
+        <summary className="dim" style={{ cursor: "pointer", fontSize: 13 }}>
+          没有浏览器钱包？
+        </summary>
+        <div className="demo-box" style={{ marginTop: 10 }}>
+          <p className="big-warn">⚠ 仅测试网演示用 · 关页即焚 · 勿存任何资金</p>
+          <p style={{ fontSize: 13, color: "var(--text-2)", margin: "0 0 10px" }}>
+            创建一个一次性演示钱包（随机生成、只存 sessionStorage、关闭标签页即焚毁）。
+            它与「连接浏览器钱包」主路径完全隔离，仅用于没有装扩展的演示机；用它在浏览器进程内本地完成签名（黄金向量锁定的同一条 digest 路径）。
+            需要先给它充测试网 BOT 作 gas 与 MockUSDT（可用页面内 key 文件去水龙头领）。
+          </p>
+          <button className="btn danger" onClick={w.createDemo}>
+            创建一次性演示钱包
+          </button>
+        </div>
       </details>
-      <div style={{ height: 12 }} />
-
-      {address ? (
-        <div className="alert ok" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span>
-            当前钱包 <b className="mono">{address}</b>
-          </span>
-          <CopyButton text={address} />
-          <button className="btn small secondary" onClick={downloadKey}>
-            下载 key 文件
-          </button>
-          <button className="btn small danger" onClick={disconnect}>
-            销毁会话密钥
-          </button>
-        </div>
-      ) : (
-        <div className="btn-row">
-          <button className="btn" onClick={create}>
-            生成新钱包
-          </button>
-          <button className="btn secondary" onClick={() => setShowImport(!showImport)}>
-            {showImport ? "收起导入" : "导入已有私钥"}
-          </button>
-        </div>
-      )}
-
-      {showImport && !address && (
-        <div style={{ marginTop: 12, maxWidth: 560 }}>
-          <div className="field">
-            <label>粘贴私钥（0x + 64 位 hex）</label>
-            <input type="password" value={pk} placeholder="0x…" onChange={(e) => setPk(e.target.value)} />
-            {err && <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>{err}</div>}
-            <div className="help">粘贴后按「导入」；导入即存 sessionStorage（关页即清）。</div>
-          </div>
-          <button className="btn" disabled={!pk.trim()} onClick={doImport}>
-            导入
-          </button>
-        </div>
-      )}
     </div>
   );
 }
 
 /* ============ 2. 资金面板 ============ */
 function FundsSection() {
-  const { wallet, address } = useWallet();
+  const w = useWallet();
+  const { address } = w;
   const [refreshTick, setRefreshTick] = useState(0);
   const [tx, setTx] = useState<TxProgress | null>(null);
+  const [cancelled, setCancelled] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [approvePreset, setApprovePreset] = useState<string>("0.1");
@@ -143,7 +154,7 @@ function FundsSection() {
   const [confirming, setConfirming] = useState<null | "mint" | "approve">(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // 402 质询跳转：监听自定义事件
+  // 402 质询跳转：预置滑条金额并滚动到本面板
   useEffect(() => {
     const handler = (e: Event) => {
       const amount = (e as CustomEvent<string>).detail;
@@ -163,20 +174,26 @@ function FundsSection() {
   const refresh = useCallback(() => setRefreshTick((t) => t + 1), []);
 
   const runTx = async (kind: "mint" | "approve") => {
-    if (!wallet) return;
+    if (!address) return;
     setBusy(true);
     setError(null);
-    setTx({ status: "pending" });
+    setCancelled(null);
+    setTx({ status: "waiting" }); // 等待扩展弹窗确认
     try {
-      if (kind === "mint") {
-        await mintMockUsdt(wallet, wallet.address, toRaw("10"), setTx);
-      } else {
-        await approveVault(wallet, toRaw(approvePreset), setTx);
-      }
+      const data =
+        kind === "mint"
+          ? encodeAddrUint(SEL.mint, address, toRaw("10"))
+          : encodeAddrUint(SEL.approve, VAULT, toRaw(approvePreset));
+      await w.sendTransaction(MOCK_USDT, data, setTx);
       refresh();
     } catch (e) {
-      setError(e);
-      setTx({ status: "failed", error: humanizeError(e).title });
+      if (isUserRejected(e)) {
+        setCancelled(kind === "mint" ? "你取消了铸造交易（钱包弹窗里拒绝）" : "你取消了授权交易（钱包弹窗里拒绝）");
+        setTx(null);
+      } else {
+        setError(e);
+        setTx({ status: "failed", error: humanizeError(e).title });
+      }
     } finally {
       setBusy(false);
       setConfirming(null);
@@ -186,6 +203,7 @@ function FundsSection() {
 
   const d = funds.data;
   const available = d ? (d.allowance < d.balance ? d.allowance : d.balance) : null;
+  const chainBlocked = w.mode === "injected" && !w.chainOk;
 
   return (
     <div className="card" ref={panelRef}>
@@ -195,7 +213,7 @@ function FundsSection() {
           刷新
         </button>
       </div>
-      <p className="card-desc">可用额 = min(余额, 对 PayVault 的授权额)，即当前真正能用于付费调用的额度。</p>
+      <p className="card-desc">可用额 = min(余额, 对 PayVault 的授权额)，即当前真正能用于付费调用的额度。铸造/授权都是钱包弹窗确认的交易（gas 恒 20 gwei）。</p>
 
       {funds.loading && d == null ? (
         <Spinner label="eth_call 读链中…" />
@@ -223,14 +241,23 @@ function FundsSection() {
         </div>
       ) : null}
 
+      {chainBlocked && (
+        <WarnBox>
+          钱包当前在链 {w.chainId ?? "?"}，先切到 BOT Chain（968）再操作资金。
+          <button className="btn small" style={{ marginLeft: 8 }} onClick={() => void w.ensureChain()}>
+            引导切链
+          </button>
+        </WarnBox>
+      )}
       {presetFromChallenge && (
         <div className="alert warn">
-          网关 402 质询提示授权不足：已为你把滑条预置到 <b>{presetFromChallenge} USDT</b>，确认后点「授权」。
+          网关 402 质询提示授权不足：已为你把滑条预置到 <b>{presetFromChallenge} USDT</b>，确认后点「授权」（钱包弹窗确认）。
         </div>
       )}
+      {cancelled && <WarnBox>{cancelled}。没有产生任何交易，可随时重试。</WarnBox>}
 
       <div className="flex" style={{ alignItems: "flex-end" }}>
-        <button className="btn secondary" disabled={busy} onClick={() => setConfirming("mint")}>
+        <button className="btn secondary" disabled={busy || chainBlocked} onClick={() => setConfirming("mint")}>
           铸造 10 MockUSDT（测试网公开 mint）
         </button>
         <div className="grow" style={{ maxWidth: 420 }}>
@@ -251,12 +278,13 @@ function FundsSection() {
                 onChange={(e) => setApprovePreset(e.target.value.trim())}
                 aria-label="自定义授权额度"
               />
-              <button className="btn" disabled={busy} onClick={() => setConfirming("approve")}>
+              <button className="btn" disabled={busy || chainBlocked} onClick={() => setConfirming("approve")}>
                 授权
               </button>
             </div>
             <div className="help num">
-              = raw {(() => { try { return toRaw(approvePreset).toString(); } catch { return "格式错误"; } })()} · 交易由本地钱包直签（gas 恒 20 gwei）
+              = raw {(() => { try { return toRaw(approvePreset).toString(); } catch { return "格式错误"; } })()} ·
+              {w.mode === "injected" ? " 钱包弹窗确认（eth_sendTransaction，20 gwei 固定费率）" : " 演示钱包本地直签（20 gwei）"}
             </div>
           </div>
         </div>
@@ -264,6 +292,11 @@ function FundsSection() {
 
       {tx && (
         <div className={`alert ${tx.status === "confirmed" ? "ok" : tx.status === "failed" ? "err" : "info"}`}>
+          {tx.status === "waiting" && (
+            <span className="flex">
+              <span className="spin" /> 等待钱包确认…（请在扩展弹窗里确认）
+            </span>
+          )}
           {tx.status === "pending" && (
             <span className="flex">
               <span className="spin" /> 交易已广播，等待打包…
@@ -284,8 +317,8 @@ function FundsSection() {
       <ConfirmDialog
         open={confirming === "mint"}
         title="确认铸造（上链，不可逆）"
-        body={<>向 <span className="mono">{address}</span> 铸造 <b>10 MockUSDT</b>（raw=10000000）。测试网公开 mint，无真实价值。</>}
-        confirmText="确认铸造"
+        body={<>向 <span className="mono">{address}</span> 铸造 <b>10 MockUSDT</b>（raw=10000000）。测试网公开 mint，无真实价值；将弹出钱包确认。</>}
+        confirmText="去钱包确认"
         onConfirm={() => void runTx("mint")}
         onCancel={() => setConfirming(null)}
       />
@@ -296,10 +329,10 @@ function FundsSection() {
           <>
             允许 PayVault（{VAULT.slice(0, 10)}…）最多从你的钱包划走 <b className="num">{approvePreset} USDT</b>
             （raw {(() => { try { return toRaw(approvePreset).toString(); } catch { return "?"; } })()}）。keeper
-            只按你逐笔签名的授权扣款，本授权是扣款的上限。可随时重新授权调整额度。
+            只按你逐笔签名的授权扣款，本授权是扣款的上限。可随时重新授权调整额度；将弹出钱包确认。
           </>
         }
-        confirmText="确认授权"
+        confirmText="去钱包确认"
         onConfirm={() => void runTx("approve")}
         onCancel={() => setConfirming(null)}
       />
@@ -344,7 +377,7 @@ function ApiKeySection() {
     <div className="card">
       <h3>③ API key（X-Api-Key）</h3>
       <p className="card-desc">
-        key 与当前钱包地址绑定（<span className="mono">{address ?? "-"}</span>）；X-PAYMENT 的签名人必须是这个地址，否则网关 401/402。
+        key 与当前连接的钱包地址绑定（<span className="mono">{address ?? "-"}</span>）；付费授权签名人必须是这个地址，否则网关 402。
       </p>
       <div className="btn-row" style={{ marginBottom: 12 }}>
         <button className="btn" disabled={!address || busy} onClick={issue}>
@@ -352,7 +385,7 @@ function ApiKeySection() {
         </button>
         {storedKey && (
           <span className="dim">
-            本机已保存 key：<span className="mono">{storedKey.slice(0, 14)}…</span>（用于试用调用；"已保存"后自动填入）
+            本机已保存 key：<span className="mono">{storedKey.slice(0, 14)}…</span>（用于试用调用）
           </span>
         )}
       </div>
@@ -416,13 +449,16 @@ function ApiKeySection() {
 
 /* ============ 4. 试用调用 ============ */
 function TrialCallSection() {
-  const { wallet } = useWallet();
+  const w = useWallet();
+  const { address } = w;
   const catalog = useAsync(() => coreApi.catalog(), []);
   const services = catalog.data?.services.filter((s) => s.status === "active") ?? [];
   const [svcId, setSvcId] = useState<string>("");
   const [paramsJson, setParamsJson] = useState("{}");
   const [parsedParams, setParsedParams] = useState<Record<string, unknown> | null>({});
   const [calling, setCalling] = useState(false);
+  const [waitingSign, setWaitingSign] = useState(false);
+  const [cancelled, setCancelled] = useState<string | null>(null);
   const [result, setResult] = useState<{ ok: boolean; body: unknown; receipt: { receiptId: string | null; chargedRaw: string | null }; challenge?: Gateway402Challenge } | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -445,19 +481,23 @@ function TrialCallSection() {
   const budgetNow = useMemo(() => loadBudgetRaw(), [budgetTick]);
 
   const overBudget = budgetNow != null && priceRaw != null && spent + priceRaw > budgetNow;
+  const chainBlocked = w.mode === "injected" && !w.chainOk;
 
   const call = async () => {
-    if (!wallet || !svc || priceRaw == null || !parsedParams) return;
+    if (!address || !svc || priceRaw == null || !parsedParams) return;
     setCalling(true);
+    setWaitingSign(true);
     setError(null);
     setResult(null);
+    setCancelled(null);
     try {
-      // ① 本地组装授权六元组（nonce 随机、10 分钟窗口）并签名 → X-PAYMENT
+      // ① 组装授权六元组（nonce 随机、10 分钟窗口）→ 钱包弹窗签名（digest 由扩展计算）
       const now = Math.floor(Date.now() / 1000);
-      const auth = buildCallAuthorization(wallet.address, VAULT, priceRaw, now);
-      const sig = signAuthorization(wallet, auth, VAULT);
+      const auth = buildCallAuthorization(address, VAULT, priceRaw, now);
+      const sig = await w.signTypedDataAuth(auth, VAULT);
+      setWaitingSign(false);
+      // ② X-PAYMENT（v 已归一 27|28）+ 幂等键（参数哈希，同参重试同键防双扣）
       const payment = buildPaymentHeader(auth, sig);
-      // ② 幂等键：参数哈希（同参数重试同键，防双扣）
       const idem = await hashSha256HexStringish(`${svc.service_id}:${JSON.stringify(parsedParams)}`);
       const headers = { "X-Api-Key": apiKey ?? "", "X-PAYMENT": payment, "X-Idempotency-Key": idem };
       // ③ 调用（402 在 apiFetch 里抛 ApiError，这里接住转质询）
@@ -476,7 +516,10 @@ function TrialCallSection() {
         resultPreview: JSON.stringify(outcome.body).slice(0, 120),
       });
     } catch (e) {
-      if (e instanceof ApiError && e.status === 402) {
+      setWaitingSign(false);
+      if (isUserRejected(e)) {
+        setCancelled("你取消了支付授权签名（钱包弹窗里拒绝）。未产生任何扣款，可随时重试。");
+      } else if (e instanceof ApiError && e.status === 402) {
         const challenge = e.raw as Gateway402Challenge;
         setResult({ ok: false, body: e.raw, receipt: { receiptId: null, chargedRaw: null }, challenge });
         appendHistory({
@@ -500,9 +543,9 @@ function TrialCallSection() {
 
   return (
     <div className="card">
-      <h3>④ 试用调用（本地签名 → 402 网关）</h3>
+      <h3>④ 试用调用（钱包签名 → 402 网关）</h3>
       <p className="card-desc">
-        选择服务 → 按其 input_schema 生成的表单填参数 → 点「付费调用」。浏览器用本地钱包对 Authorization 六元组做 EIP-712
+        选择服务 → 按其 input_schema 生成的表单填参数 → 点「付费调用」。钱包对 Authorization 六元组做 EIP-712
         签名（域 PayVault/1/968，窗口 10 分钟）组 X-PAYMENT 头。Provider 失败不扣费；同参数重试自动带幂等键。
       </p>
 
@@ -530,7 +573,7 @@ function TrialCallSection() {
         <>
           <div className="alert info">
             <b>{svc.manifest.name}</b> · 单价 <b className="num">{svc.manifest.pricing.amount} USDT</b>
-            <span className="dim num">（raw={svc.manifest.pricing.amount_raw}）</span> · Provider {svc.manifest.provider.display_name} · 本次将签名授权 PayVault 划扣该金额。
+            <span className="dim num">（raw={svc.manifest.pricing.amount_raw}）</span> · Provider {svc.manifest.provider.display_name} · 本次将请钱包签名授权 PayVault 划扣该金额。
           </div>
           <SchemaForm
             schema={svc.manifest.input_schema}
@@ -543,21 +586,38 @@ function TrialCallSection() {
         </>
       )}
 
+      {chainBlocked && (
+        <WarnBox>
+          钱包当前在链 {w.chainId ?? "?"}，签名域是 BOT Chain（968）——先切链再调用。
+          <button className="btn small" style={{ marginLeft: 8 }} onClick={() => void w.ensureChain()}>
+            引导切链
+          </button>
+        </WarnBox>
+      )}
       {!apiKey && svc && <WarnBox>本机没有 API key——先到第 ③ 步签发（否则网关会 402 payment_missing）。</WarnBox>}
       {overBudget && (
         <div className="alert warn">
-          <b>预算拦截</b>：本会话已花费 {fromRaw(spent)} USDT（raw={spent.toString()}）+ 本次 {svc?.manifest.pricing.amount}{" "}
+          <b>预算拦截</b>：本会话已花费 {fromRaw(spent)} USDT（raw={spent.toString()}）+ 本次 {svc?.manifest.pricing.amount ?? "-"}{" "}
           超出预算 {budgetNow != null ? fromRaw(budgetNow) : "-"} USDT。调用按钮已禁用；如需继续请到「预算设置」调整。
         </div>
       )}
+      {cancelled && <WarnBox>{cancelled}</WarnBox>}
 
       <div className="btn-row">
-        <button className="btn" disabled={!svc || !parsedParams || calling || overBudget || !apiKey} onClick={call}>
-          {calling ? <Spinner label="签名并调用中…" /> : `付费调用（${svc ? svc.manifest.pricing.amount + " USDT" : ""}）`}
+        <button className="btn" disabled={!svc || !parsedParams || calling || overBudget || !apiKey || chainBlocked} onClick={call}>
+          {calling ? (
+            waitingSign ? (
+              <Spinner label="等待钱包签名确认…" />
+            ) : (
+              <Spinner label="调用网关中…" />
+            )
+          ) : (
+            `付费调用（${svc ? svc.manifest.pricing.amount + " USDT" : ""}）`
+          )}
         </button>
         {svc && (
           <span className="dim">
-            本次签名：value=raw {svc.manifest.pricing.amount_raw} · to={VAULT.slice(0, 10)}… · 窗口 600s
+            本次签名：value=raw {svc.manifest.pricing.amount_raw} · to={VAULT.slice(0, 10)}… · 窗口 600s · digest 由钱包扩展计算
           </span>
         )}
       </div>
@@ -592,7 +652,7 @@ function TrialCallSection() {
   );
 }
 
-/** 402 质询 → 人话 + 动作按钮（如「去授权」）。 */
+/** 402 质询 → 人话 + 动作按钮（如「去授权」→ 资金面板授权滑条，钱包弹窗确认）。 */
 function ChallengePanel({ challenge }: { challenge: Gateway402Challenge }) {
   const h = humanizeChallenge(challenge);
   return (
@@ -607,7 +667,7 @@ function ChallengePanel({ challenge }: { challenge: Gateway402Challenge }) {
             className="btn"
             onClick={() => window.dispatchEvent(new CustomEvent("coincall:goto-approve", { detail: h.amount }))}
           >
-            去授权 {h.amount} USDT →
+            去授权 {h.amount} USDT（钱包弹窗确认） →
           </button>
         )}
         <CopyButton text={JSON.stringify(challenge, null, 2)} label="复制质询 JSON" />

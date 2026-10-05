@@ -89,28 +89,62 @@ export default function Help() {
       </div>
 
       <div className="card">
+        <h3>钱包连接流（新）</h3>
+        <div className="diagram">
+          <div className="node">
+            <h4>点击「连接钱包」</h4>
+            <p>只调 eth_requestAccounts 读地址<br />（不请求任何私钥/权限）</p>
+          </div>
+          <div className="arrow">→</div>
+          <div className="node">
+            <h4>扩展弹窗确认</h4>
+            <p>OKX / MetaMask 弹窗里你自己确认<br />链 ≠ 968 时引导切链/添加网络</p>
+          </div>
+          <div className="arrow">→</div>
+          <div className="node">
+            <h4>顶栏常驻地址 chip</h4>
+            <p>sessionStorage 记地址（仅地址）<br />链徽标 ✗ 可点重试切链 · 断开即清</p>
+          </div>
+          <div className="arrow">→</div>
+          <div className="node" style={{ borderColor: "var(--success)" }}>
+            <h4>每次动作都弹窗</h4>
+            <p>签名（EIP-712）/交易（mint·授权·提现）<br />全部在扩展内完成，拒绝即取消（4001 友好态）</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
         <h3>私钥与密钥安全声明</h3>
+        <p className="card-desc">
+          <b>控制台不接触任何私钥</b>——地址只读获取，签名与交易全部由你的浏览器钱包（OKX / MetaMask）在本地完成。
+        </p>
         <ul style={{ paddingLeft: 18, lineHeight: 2 }}>
           <li>
-            <b>本控制台只面向测试网（BOT Chain 968）</b>：MockUSDT 无真实价值，公开 mint 仅为演示。请勿导入任何持有真实资产的私钥。
+            <b>地址只读</b>：连接仅调用 eth_requestAccounts / eth_accounts 获取地址（存 sessionStorage，断开即清）；控制台代码里没有任何私钥输入框，
+            网络请求中也不存在私钥字段。
           </li>
           <li>
-            <b>消费端钱包私钥</b>：仅存浏览器 sessionStorage，关闭标签页即清除；不上传、不写 localStorage、不出现在任何网络请求体中。签名（EIP-712 / 交易）
-            全部在本页面进程内完成，唯一外发对象是标准交易/签名产物。
+            <b>签名在扩展内</b>：付费授权（EIP-712 typed data）与交易（mint / 授权 / 提现）都由钱包扩展计算 digest 并弹出确认；你在弹窗里能看到
+            金额与合约地址，拒绝（4001）即取消，不产生任何上链效果。
           </li>
           <li>
-            <b>API key</b>：服务端只存 hash，明文仅签发时回显一次。你在「我已保存」确认后，本机 localStorage 只保留它以便试用调用自动携带——
-            可随时通过清浏览器数据移除。
+            <b>付费授权签名</b>：每笔限定金额 = 服务定价、时间窗 10 分钟、nonce 一次性；即便签名泄露，损失上限为单笔价格。keeper 划款另需你对
+            PayVault 的 approve 额度——想收紧就调低滑条重新授权。
           </li>
           <li>
-            <b>付费授权签名</b>：每笔授权限定金额 = 服务定价、时间窗 10 分钟、nonce 一次性；即便签名泄露，损失上限为单笔价格。keeper
-            划款依赖你对 PayVault 的 approve 额度——想随时收紧就把滑条调低重授权。
+            <b>API key</b>：服务端只存 hash，明文仅签发时回显一次；「我已保存」后本机 localStorage 保留它供试用调用自动携带，可清浏览器数据移除。
+          </li>
+          <li>
+            <b>一次性演示钱包（兜底）</b>：给没装扩展的演示机用——随机生成、仅测试网、关页即焚（sessionStorage）、勿存资金；它在本页进程内本地签名，
+            与「连接浏览器钱包」主路径完全隔离。
           </li>
           <li>
             <b>Provider 提现</b>：providerWithdraw 只能由收款钱包本人发起，路径恒开、无平台托管（铁律 P8）。
           </li>
         </ul>
-        <WarnBox>演示建议：使用专项测试账户（如 anvil 公开测试账户）。演示结束点「销毁会话密钥」清理本机敏感态。</WarnBox>
+        <WarnBox>
+          本控制台面向测试网（BOT Chain 968）演示：MockUSDT 公开 mint、无真实价值。请勿在演示钱包以外的场合使用主网私钥习惯（本页也根本没有输入私钥的地方）。
+        </WarnBox>
       </div>
     </div>
   );
