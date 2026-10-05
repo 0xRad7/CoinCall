@@ -32,6 +32,7 @@ from app.modules.keeper import BotChainSettleChain, Keeper, provider_wallet_reso
 from app.modules.keeper_route import router as keeper_router
 from app.modules.manifest_client import ManifestClient
 from app.modules.providers import HttpJsonProvider, InternalEchoProvider, ProviderAdapter
+from app.modules.stats_route import router as stats_router
 
 
 def create_app(
@@ -135,6 +136,7 @@ def create_app(
 
     app.include_router(call_router)
     app.include_router(keeper_router)
+    app.include_router(stats_router)
     return app
 
 
