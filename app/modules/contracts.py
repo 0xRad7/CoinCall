@@ -1,20 +1,30 @@
-"""M8 通用合约：任意 call/send/deploy/decode（赛题自定义合约入口，写接口 dry_run 默认）。"""
+"""M8 通用合约：任意 call/send/deploy/decode/logs（赛题自定义合约入口，写接口 dry_run 默认）。"""
 
-from typing import Any
+import re
+from typing import Any, cast
 
 from eth_abi import decode
 from eth_abi.exceptions import DecodingError, InsufficientDataBytes
+from eth_typing import ChecksumAddress
 from eth_utils import function_abi_to_4byte_selector
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from web3 import Web3
-from web3.exceptions import ContractLogicError, Web3RPCError
+from web3.exceptions import ContractLogicError, Web3Exception, Web3RPCError
+from web3.types import FilterParams
 
 from app.core.deps import TxServiceDep, Web3Dep
 from app.core.errors import ChainError, ServiceError, TxRevertedError
+from app.core.rpc import checksum
 from app.core.tx import TxPreview, TxReceiptSummary
 
 router = APIRouter(prefix="/contracts", tags=["M8 contracts"])
+
+#: 公共 RPC eth_getLogs 单次窗口上限（rpc.bohr.life 实测口径，与 indexer GETLOGS_WINDOW 一致）
+GETLOGS_WINDOW_LIMIT = 5000
+DEFAULT_LOGS_LIMIT = 1000
+MAX_LOGS_LIMIT = 5000
+TOPIC0_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
 
 class CallRequest(BaseModel):
@@ -64,6 +74,18 @@ class DecodeRequest(BaseModel):
 
 class DecodeView(BaseModel):
     decoded: Any
+
+
+class LogsView(BaseModel):
+    """eth_getLogs 透传结果：原始 log 数组（0x 归一，不做 ABI 解码）。"""
+
+    address: str | None
+    topic0: str | None
+    from_block: int
+    to_block: int
+    count: int
+    truncated: bool = Field(description="原始结果超出 limit 被截断")
+    logs: list[dict[str, Any]]
 
 
 @router.post("/call", response_model=CallView)
@@ -137,6 +159,70 @@ def contract_deploy(
             total_cost_wei=outcome.total_cost_wei,
         )
     return outcome
+
+
+@router.get(
+    "/logs",
+    response_model=LogsView,
+    description=(
+        "只读 eth_getLogs 透传（发起人指示：链上功能优先经本服务）。"
+        "窗口 ≤5000 块、limit 上限 5000；返回原始 log 数组，ABI 解码由调用方自解。"
+    ),
+)
+def contract_logs(
+    w3: Web3Dep,
+    *,
+    address: str | None = Query(default=None, description="合约地址（空=不过滤）"),
+    from_block: int = Query(ge=0, description="起始块（含）"),
+    to_block: int = Query(ge=0, description="结束块（含）"),
+    topic0: str | None = Query(default=None, description="事件签名 topic0（0x + 64 hex）"),
+    limit: int = Query(default=DEFAULT_LOGS_LIMIT, ge=1, le=MAX_LOGS_LIMIT),
+) -> LogsView:
+    if from_block > to_block:
+        msg = f"from_block 不能大于 to_block: {from_block} > {to_block}"
+        raise ServiceError(msg, code="bad_range")
+    window = to_block - from_block + 1
+    if window > GETLOGS_WINDOW_LIMIT:
+        msg = f"getLogs 窗口超限: {window} > {GETLOGS_WINDOW_LIMIT}（请分窗拉取）"
+        raise ServiceError(msg, code="window_too_large")
+    checksummed = checksum(address) if address else None
+    if topic0 is not None and not TOPIC0_PATTERN.match(topic0):
+        raise ServiceError(f"topic0 形态非法（应为 0x + 64 hex）: {topic0!r}", code="bad_topic")
+    criteria: dict[str, Any] = {"fromBlock": from_block, "toBlock": to_block}
+    if checksummed is not None:
+        criteria["address"] = cast(ChecksumAddress, checksummed)
+    if topic0:
+        criteria["topics"] = [topic0]
+    try:
+        raw_logs = w3.eth.get_logs(cast(FilterParams, criteria))
+    except Web3Exception as exc:
+        msg = f"eth_getLogs 失败: {exc}"
+        raise ChainError(msg) from exc
+    logs = [_raw_log(entry) for entry in raw_logs[:limit]]
+    return LogsView(
+        address=checksummed,
+        topic0=topic0,
+        from_block=from_block,
+        to_block=to_block,
+        count=len(logs),
+        truncated=len(raw_logs) > len(logs),
+        logs=logs,
+    )
+
+
+def _raw_log(entry: Any) -> dict[str, Any]:  # noqa: ANN401  # web3 AttributeDict 动态形态
+    """原始 log 归一为纯 JSON（HexBytes→0x hex；POA 中间件下 .hex() 无前缀，C-04 关联）。"""
+    return {
+        "address": entry.get("address", ""),
+        "topics": [Web3.to_hex(t) for t in entry.get("topics", [])],
+        "data": Web3.to_hex(entry.get("data", b"")),
+        "block_number": int(entry.get("blockNumber", 0)),
+        "block_hash": Web3.to_hex(entry.get("blockHash", b"")),
+        "transaction_hash": Web3.to_hex(entry.get("transactionHash", b"")),
+        "transaction_index": int(entry.get("transactionIndex", 0)),
+        "log_index": int(entry.get("logIndex", 0)),
+        "removed": bool(entry.get("removed", False)),
+    }
 
 
 @router.post("/decode", response_model=DecodeView)
