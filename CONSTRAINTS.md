@@ -48,5 +48,7 @@ uv run pytest -q -m unit --cov=app --cov-fail-under=80
 
 ## §E 偏差清单
 
-- provider.wallet 的链上绑定校验（01 §3）与 `GET /services` 目录语义、PATCH 改价、`/providers` 端点：P1-2 范围，本仓 P0 只交付 `POST /manifests` / `GET /manifests/{id}` / `GET /catalog`。
-- EVM 地址仅做格式校验（无 web3 依赖）；EIP-55 checksum 与链上绑定校验留待 P1-2 经 bot-chain-api。
+- provider.wallet 的链上绑定校验（01 §3）与 `GET /services` 目录语义、PATCH 改价、`/providers` 端点：P1-2 范围，本仓 P0 只交付 `POST /manifests` / `GET /manifests/{id}` / `GET /catalog`。→ P1-2 已落地 `/providers` 登记（含链上身份存在性校验）；`GET /services` 目录语义由既有 `/catalog` 承担；PATCH 改价仍留 P2。
+- EVM 地址仅做格式校验（无 web3 依赖）；EIP-55 checksum 与链上绑定校验留待 P1-2 经 bot-chain-api。→ P1-2 维持零 web3：链上事实全部经 8010（identity 视图 + `/contracts/logs` 透传），本仓不引链库。
+- **实测契约（P1-2，2026-10-01）**：8010 identity 视图对未注册 tokenId 返回 **409 tx_reverted**（ownerOf revert，detail 含"不存在或未注册"），并非任务书假设的 404——本仓 identity 客户端将 404 与"不存在"语义的 409 均映射为 422 `identity_not_found`，其余 409 仍按 502 `identity_unavailable` 上抛。
+- P1-3 榜单收入源：06 §3 的 v_service_summary/v_provider_credit 视图原设计基于本仓 calls 表，但 v2 口径（09 P1-3/T23 汇合门）收入以**链上 Charged 为唯一真相**——本仓无 calls 表（流水在网关），故收入侧落 charged_events 库存表（水位增量拉取），活跃度侧读网关 `/internal/stats/calls`；视图 SQL 语义由 Python 聚合等价承载。

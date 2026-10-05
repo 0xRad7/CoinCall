@@ -5,10 +5,10 @@
 （httpx → 8010 bot-chain-api 与 8030 gateway；trust_env=False 防 C-07 代理劫持）。
 """
 
+import threading
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -29,6 +29,16 @@ from app.core.errors import (
 from app.modules.apikey import router as apikey_router
 from app.modules.catalog import router as catalog_router
 from app.modules.identity import BotChainIdentityClient, IdentityClient
+from app.modules.leaderboard import (
+    BotChainClient,
+    ChainSource,
+    ChargedIndexer,
+    GatewayStatsClient,
+    GatewayStatsSource,
+)
+from app.modules.leaderboard import (
+    router as leaderboard_router,
+)
 from app.modules.providers import router as providers_router
 from app.storage.db import CoreStore
 
@@ -37,10 +47,10 @@ def create_app(
     settings: Settings | None = None,
     *,
     identity_client: IdentityClient | None = None,
-    chain_client: Any | None = None,  # noqa: ANN401  # 排行榜数据源注入口（leaderboard 落地时收紧）
-    gateway_client: Any | None = None,  # noqa: ANN401  # 同上
+    chain_client: ChainSource | None = None,
+    gateway_client: GatewayStatsSource | None = None,
 ) -> FastAPI:
-    """chain_client/gateway_client 形参为排行榜数据源注入口（leaderboard 模块落地时收紧类型）。"""
+    """chain_client/gateway_client 即排行榜双源注入口（生产装配真实 8010/8030 客户端）。"""
     app_settings = settings or Settings()
 
     @asynccontextmanager
@@ -51,6 +61,26 @@ def create_app(
         app.state.identities = identity_client or BotChainIdentityClient(
             http, app_settings.bot_chain_api_base_url, app_settings.identity_cache_ttl
         )
+        app.state.chain = chain_client or BotChainClient(
+            http=http,
+            base_url=app_settings.bot_chain_api_base_url,
+            pay_vault=app_settings.pay_vault_address,
+        )
+        app.state.gateway_stats = gateway_client or GatewayStatsClient(
+            http, app_settings.gateway_base_url
+        )
+        app.state.charged_indexer = ChargedIndexer(
+            store=app.state.store,
+            chain=app.state.chain,
+            deploy_block=app_settings.pay_vault_deploy_block,
+            window=app_settings.charged_sync_window,
+            safety=app_settings.charged_sync_safety,
+        )
+        app.state.leaderboard_sync = {
+            "lock": threading.Lock(),
+            "last_ok_ts": 0.0,
+            "min_interval": app_settings.leaderboard_min_sync_interval,
+        }
         yield
         http.close()
         app.state.store.close()
@@ -85,6 +115,7 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(apikey_router)
     app.include_router(providers_router)
+    app.include_router(leaderboard_router)
     return app
 
 

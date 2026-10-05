@@ -235,8 +235,8 @@ class TestLeaderboardUnit:
             ov = client.get("/stats/overview").json()
             assert ov["gmv_raw"] == KNOWN_ONCHAIN_GMV  # 收入侧不受网关影响
             assert any(d.startswith("gateway_stats_failed") for d in ov["degraded"])
-            rows = client.get("/leaderboard/services").json()["services"]
-            assert rows[0]["calls_success"] is None
+            assert ov["calls_success_total"] == 0  # 网关降级时活跃度按 0 口径
+            assert client.get("/leaderboard/services").json()["services"] == []  # 无目录不 500
 
     @pytest.mark.unit
     def test_chain_down_degrades_and_serves_stock(self, tmp_path: Path) -> None:
