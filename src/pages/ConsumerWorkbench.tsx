@@ -57,7 +57,7 @@ function ConnectSection() {
           <span>
             {w.mode === "injected" ? (
               <>
-                浏览器钱包 <b className="mono">{w.address}</b>
+                {w.walletName ?? "浏览器钱包"} <b className="mono">{w.address}</b>
               </>
             ) : (
               <>
@@ -66,6 +66,11 @@ function ConnectSection() {
             )}
           </span>
           <CopyButton text={w.address} />
+          {w.mode === "injected" && w.candidates.length >= 2 && (
+            <button className="btn small secondary" onClick={w.rechoose}>
+              换钱包
+            </button>
+          )}
           {w.mode === "demo" && w.demoPrivateKey && (
             <button
               className="btn small secondary"
@@ -114,9 +119,14 @@ function ConnectSection() {
 
       <div className="btn-row">
         <button className="btn" onClick={() => void w.connect()} disabled={w.connecting}>
-          {w.connecting ? <Spinner label="等待钱包确认…" /> : "连接钱包（OKX / MetaMask）"}
+          {w.connecting ? <Spinner label="等待钱包确认…" /> : "连接钱包"}
         </button>
-        {!w.hasInjected && <span className="dim">未检测到浏览器钱包扩展。</span>}
+        {w.candidates.length > 0 && (
+          <span className="dim">
+            检测到 {w.candidates.length} 个钱包：{w.candidates.map((c) => c.name).join(" / ")}
+          </span>
+        )}
+        {w.candidates.length === 0 && <span className="dim">未检测到浏览器钱包扩展（EIP-6963 与 legacy 槽位均无响应）。</span>}
       </div>
 
       {/* 兜底：无扩展演示机的一次性钱包（默认收起，与主路径强隔离） */}

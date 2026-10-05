@@ -2,7 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useWallet } from "./state/WalletContext";
 import { CHAIN_ID } from "./chain/constants";
 
-/** 顶栏：连接后常驻地址 chip + 链徽标（不对时可点切链）+ 断开按钮。 */
+/** 顶栏：连接后常驻地址 chip（含实际钱包名）+ 链徽标（不对时可点切链）+ 断开按钮。 */
 function WalletChipBar() {
   const w = useWallet();
   if (!w.address || !w.mode) return null;
@@ -23,13 +23,19 @@ function WalletChipBar() {
   return (
     <div className="wallet-bar">
       <span className="mono wallet-addr" title={w.address}>
-        ● {w.address.slice(0, 8)}…{w.address.slice(-6)}
+        ● {w.walletName ? `${w.walletName} · ` : ""}
+        {w.address.slice(0, 8)}…{w.address.slice(-6)}
       </span>
       {chainBadge}
       {w.switching && (
         <span className="dim">
           <span className="spin" style={{ width: 12, height: 12, borderWidth: 2 }} /> 切链中…
         </span>
+      )}
+      {w.mode === "injected" && w.candidates.length >= 2 && (
+        <button className="btn small secondary" onClick={w.rechoose} title="清除记忆并重新选择浏览器钱包">
+          换钱包
+        </button>
       )}
       <button className="btn small secondary" onClick={w.disconnect}>
         断开

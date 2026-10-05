@@ -8,7 +8,8 @@ import { agentWalletSetTypedData, botChainApi, type AgentIdentity } from "../api
 import { ApiError } from "../api/client";
 import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY_VAULT, fromRaw, toRaw } from "../chain/constants";
 import { fetchProviderCredits, encodeAddrUint } from "../chain/rpc";
-import { browserProvider, getInjected, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureChain968, silentAccounts } from "../chain/injected";
+import { browserProvider, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureChain968, silentAccounts } from "../chain/injected";
+import { useWallet } from "../state/WalletContext";
 import { AmountInput } from "../components/AmountInput";
 import { JsonEditor } from "../components/JsonEditor";
 import { AsyncSection, Badge, ConfirmDialog, CopyButton, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
@@ -538,13 +539,17 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
     setError(null);
   }, [identity.data, newWallet, tokenId]);
 
+  const wctx = useWallet();
+
   const signWithInjected = async () => {
     setBusy(true);
     setError(null);
     setCancelled(false);
     try {
-      // 与消费端同一共享路径：BrowserProvider.signTypedData（digest 由扩展计算）
-      const signer = await browserProvider().getSigner(newWallet.trim());
+      // 与消费端同一共享路径：用户选中的 provider → BrowserProvider.signTypedData（digest 由扩展计算）
+      const sel = await wctx.requireProvider();
+      if (!sel) throw new Error("未选择浏览器钱包。");
+      const signer = await browserProvider(sel.provider).getSigner(newWallet.trim());
       const sig = await signer.signTypedData(typedData!.domain, typedData!.types, typedData!.message);
       setSignature(sig);
     } catch (e) {
@@ -627,10 +632,10 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
                 用 <b>新钱包地址</b> 对应的浏览器钱包签名（window.ethereum signTypedData_v4）。钱包里需已导入该地址。
               </div>
               <div className="btn-row">
-                <button className="btn" disabled={busy || expired || needRebuild || !getInjected()} onClick={signWithInjected}>
+                <button className="btn" disabled={busy || expired || needRebuild || wctx.candidates.length === 0} onClick={signWithInjected}>
                   {busy ? <Spinner label="等待钱包确认…" /> : "调起钱包签名"}
                 </button>
-                {!getInjected() && <span className="dim">未检测到注入钱包——改用 B 模式。</span>}
+                {wctx.candidates.length === 0 && <span className="dim">未检测到注入钱包——改用 B 模式。</span>}
               </div>
             </div>
           ) : (
@@ -704,16 +709,20 @@ function WithdrawStep() {
     }
   };
 
+  const wctx = useWallet();
+
   const withdraw = async () => {
     setBusy(true);
     setWaitingWallet(true);
     setError(null);
     setCancelled(false);
     try {
-      // 与消费端同一共享路径：先确保扩展在 968 链，再 eth_sendTransaction（20 gwei 固定费率）
-      await ensureChain968();
-      const from = (await silentAccounts()) ?? (await connectInjected()).address;
-      const hash = await sendInjectedTx(from, VAULT_ADDR, encodeAddrUint(SEL_C.providerWithdraw, addr.trim(), credits!));
+      // 与消费端同一共享路径：用户选中的 provider → 先确保在 968 链，再 eth_sendTransaction（20 gwei 固定费率）
+      const sel = await wctx.requireProvider();
+      if (!sel) throw new Error("未选择浏览器钱包。");
+      await ensureChain968(sel.provider);
+      const from = (await silentAccounts(sel.provider)) ?? (await connectInjected(sel.provider)).address;
+      const hash = await sendInjectedTx(sel.provider, from, VAULT_ADDR, encodeAddrUint(SEL_C.providerWithdraw, addr.trim(), credits!));
       setWaitingWallet(false);
       setTx(hash);
       await waitForInjectedReceipt(hash);
@@ -765,7 +774,7 @@ function WithdrawStep() {
       )}
 
       {credits !== null && credits > 0n && (
-        getInjected() ? (
+        wctx.candidates.length > 0 ? (
           <>
             <button className="btn danger" disabled={busy} onClick={() => setConfirming(true)}>
               {busy && waitingWallet ? "等待钱包确认…" : "发起 providerWithdraw（全额）"}
