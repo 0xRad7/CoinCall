@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 
 import pytest
+from eth_keys import keys
+
 from app.core.payment import (
     AUTHORIZATION_TYPEHASH,
     DEFAULT_CHAIN_ID,
@@ -26,8 +28,6 @@ from app.core.payment import (
     parse_x_payment,
     recover_signer,
 )
-from eth_keys import keys
-
 from tests.conftest import CHAIN_ID, CONSUMER_PRIVATE_KEY, CONSUMER_WALLET, VAULT
 
 pytestmark = pytest.mark.unit

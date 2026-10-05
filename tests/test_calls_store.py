@@ -4,6 +4,7 @@ import json
 
 import duckdb
 import pytest
+
 from app.modules.calls import (
     CALLS_DDL,
     SETTLE_QUEUE_DDL,

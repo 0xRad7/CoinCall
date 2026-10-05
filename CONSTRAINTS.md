@@ -40,6 +40,7 @@ uv run pytest -q -m unit --cov=app --cov-fail-under=80
 
 ## §D 犯错沉淀区（violation log）
 
+| C-08 | 2026-10-05 | 改 pyproject（scripts 豁免）后全量缓存失效，W3/W5 时期的潜在 I001 全部现形——此前部分"绿"是 ruff 缓存给的 | ruff 按配置哈希缓存，配置一变即全量重扫；C-06 只修了版本漂移没堵缓存 | **pyproject/ruff 配置变更后的第一次门禁必须 ruff check --no-cache**；子任务交接时主线程以 --no-cache 复核 |
 | C-06 | 2026-10-05 | 交接态复跑 ruff check 红（I001 import 排序），W3 汇报『全绿』失真 | 工具链 >= 下限约束（ruff 0.6→0.16.10 isort 行为漂移）+ ruff 缓存掩盖首跑结果；交接前未复跑 | pyproject 工具链全部钉死 ==；汇报门禁前必须当场复跑并以输出为准；升级工具链=显式决策+全量重跑 |
 | 编号 | 日期 | 违反事实 | 根因 | 新增/强化约束 |
 |---|---|---|---|---|
