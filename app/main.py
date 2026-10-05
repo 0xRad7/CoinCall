@@ -101,6 +101,8 @@ def create_app(
             allow_origins=[o.strip() for o in app_settings.cors_origins.split(",") if o.strip()],
             allow_methods=["*"],
             allow_headers=["*"],
+            allow_credentials=False,
+            expose_headers=["X-Receipt-Id", "X-Charged-Raw", "X-Receipt-Sig", "ETag"],
         )
 
     @app.middleware("http")
