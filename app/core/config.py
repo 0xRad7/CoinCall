@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     bot_chain_api_key: SecretStr | None = None
     proxy: str | None = None
     indexer_autostart: bool = False
+    # 前端控制台（coincall-console，Vite 5173）跨域白名单；逗号分隔，空=关闭
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @field_validator("bot_chain_allow_mainnet", "indexer_autostart", mode="before")
     @classmethod

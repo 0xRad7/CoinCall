@@ -6,6 +6,7 @@ from pathlib import Path
 
 import redis
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from app import __version__
@@ -119,6 +120,14 @@ def create_app() -> FastAPI:
     )
     install_error_handlers(app)
     app.add_middleware(TraceIdMiddleware)
+    cors = get_settings().cors_origins
+    if cors:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[o.strip() for o in cors.split(",") if o.strip()],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     for module_router in (
         chain_info.router,
