@@ -14,7 +14,7 @@ from app.core.abis.erc8004 import (
     VALIDATION_REGISTRY_ABI,
 )
 from app.core.chains import get_chain
-from app.core.eip712 import domain_separator, sign_agent_wallet_set
+from app.core.eip712 import agent_wallet_set_digest, domain_separator, sign_agent_wallet_set
 from app.core.errors import TxRevertedError
 from app.core.tx import TxService
 
@@ -174,8 +174,8 @@ class TestErc8004NeedsFunds:
         )
         fake_wallet = Account.create()
         deadline = int(w3.eth.get_block("latest")["timestamp"]) + 120
-        wrong_sig = sign_agent_wallet_set(
-            owner,  # 错签者：owner 而非 newWallet
+        # 故意用 owner 私钥对 digest 签名（绕过 sign_agent_wallet_set 的 newWallet 守卫，直签）
+        digest = agent_wallet_set_digest(
             chain_id=968,
             registry=IDENTITY,
             agent_id=agent_id,
@@ -183,6 +183,7 @@ class TestErc8004NeedsFunds:
             owner=owner.address,
             deadline=deadline,
         )
+        wrong_sig = bytes(owner.unsafe_sign_hash(digest).signature)
         data = reg.encode_abi(
             "setAgentWallet", args=[agent_id, fake_wallet.address, deadline, wrong_sig]
         )
