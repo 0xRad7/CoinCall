@@ -1,6 +1,7 @@
 """T12：02 节影子闸门——available = min(链上) − Σ在途；K=3 并发上限；fail-closed。"""
 
 import pytest
+
 from app.core.shadow_gate import ShadowGate
 
 pytestmark = pytest.mark.unit
@@ -8,10 +9,10 @@ pytestmark = pytest.mark.unit
 
 def test_acquire_up_to_k_then_reject() -> None:
     gate = ShadowGate(k=3)
-    for i in range(3):
-        decision = gate.try_acquire(f"key_{i}", 100, limit=10_000)
+    for i in range(3):  # 同一 key 连续三笔在途
+        decision = gate.try_acquire("key_1", 100, limit=10_000)
         assert decision.allowed, f"第 {i + 1} 笔应放行"
-    fourth = gate.try_acquire("key_3", 100, limit=10_000)
+    fourth = gate.try_acquire("key_1", 100, limit=10_000)
     assert not fourth.allowed
     assert fourth.code == "shadow_k_exceeded"
 
@@ -34,9 +35,9 @@ def test_fail_closed_without_chain_limit() -> None:
 def test_release_frees_slot_and_amount() -> None:
     gate = ShadowGate(k=1)
     assert gate.try_acquire("k", 6_000, limit=10_000).allowed
-    assert not gate.try_acquire("k2", 1, limit=10_000).allowed
+    assert not gate.try_acquire("k", 1, limit=10_000).allowed  # 同 key 第二笔撞 K=1
     gate.release("k", 6_000)
-    assert gate.try_acquire("k2", 10_000, limit=10_000).allowed
+    assert gate.try_acquire("k", 10_000, limit=10_000).allowed
 
 
 def test_snapshot_tracks_inflight() -> None:

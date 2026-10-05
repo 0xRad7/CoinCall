@@ -9,12 +9,13 @@ from typing import Any
 
 import httpx
 import pytest
+from eth_keys import keys
+from fastapi import FastAPI
+
 from app.core.config import Settings
 from app.main import create_app
 from app.modules.auth import ApiKeyInfo, AuthError, CoreAuthClient
 from app.modules.manifest_client import ManifestInfo
-from eth_keys import keys
-from fastapi import FastAPI
 
 pytestmark = pytest.mark.unit
 
@@ -44,7 +45,11 @@ def make_manifest(service_id: str = "svc_translate_v1", **overrides: Any) -> Man
         "endpoint": {"type": "internal", "handler": "echo", "timeout_ms": 30000},
         "pricing": {"model": "per_call", "amount": "0.01", "amount_raw": "10000", "token": "USDT"},
         "chain": {"network": CHAIN_ID},
-        "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}},
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
         "output_schema": {"type": "object"},
         "status": "active",
         "manifest_hash": "sha256:" + "0" * 64,
@@ -90,7 +95,8 @@ def make_x_payment_header(
         r="0x" + sig.r.to_bytes(32, "big").hex(),
         s="0x" + sig.s.to_bytes(32, "big").hex(),
     )
-    assert recover_signer(payment, vault, chain_id).lower() == from_addr.lower()
+    if signer is None:  # 默认签名者自检；显式传入异签者时跳过（负路径用例）
+        assert recover_signer(payment, vault, chain_id).lower() == from_addr.lower()
     payload = json.loads(payment.model_dump_json(by_alias=True))
     return base64.b64encode(json.dumps(payload).encode()).decode()
 
@@ -116,14 +122,18 @@ class FakeAuth:
     """CoreAuthClient fake：内存 key 表。"""
 
     def __init__(self, keys_by_key: dict[str, ApiKeyInfo] | None = None) -> None:
-        self.keys = keys_by_key or {
-            API_KEY: ApiKeyInfo(
-                key_id="key_unit1",
-                consumer_wallet=CONSUMER_WALLET,
-                quota_raw=None,
-                status="active",
-            )
-        }
+        self.keys = (
+            keys_by_key
+            if keys_by_key is not None
+            else {
+                API_KEY: ApiKeyInfo(
+                    key_id="key_unit1",
+                    consumer_wallet=CONSUMER_WALLET,
+                    quota_raw=None,
+                    status="active",
+                )
+            }
+        )
 
     async def validate(self, api_key: str) -> ApiKeyInfo:
         info = self.keys.get(api_key)

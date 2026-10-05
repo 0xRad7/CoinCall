@@ -3,9 +3,9 @@
 import httpx
 import pytest
 import respx
+
 from app.modules.auth import AuthError, CoreAuthClient
 from app.modules.manifest_client import ManifestClient, ServiceNotFoundError
-
 from tests.conftest import API_KEY, make_manifest
 
 pytestmark = pytest.mark.unit
@@ -92,3 +92,88 @@ async def test_manifest_client_404() -> None:
         client = ManifestClient(base_url=CORE, http=http)
         with pytest.raises(ServiceNotFoundError):
             await client.get("svc_nope")
+
+
+@respx.mock
+async def test_http_json_provider_success() -> None:
+    from app.modules.providers import HttpJsonProvider
+
+    route = respx.post("https://p.example/translate").mock(
+        return_value=httpx.Response(200, json={"result": "ok"})
+    )
+    async with httpx.AsyncClient() as http:
+        provider = HttpJsonProvider(http)
+        result = await provider.forward(
+            make_manifest(endpoint={"type": "http_json", "url": "https://p.example/translate"}),
+            {"text": "hi"},
+        )
+    assert result.status_code == 200
+    assert result.body == {"result": "ok"}
+    assert route.called
+
+
+@respx.mock
+async def test_http_json_provider_5xx_raises() -> None:
+    from app.modules.providers import HttpJsonProvider, ProviderError
+
+    respx.post("https://p.example/translate").mock(return_value=httpx.Response(500, text="boom"))
+    async with httpx.AsyncClient() as http:
+        provider = HttpJsonProvider(http)
+        with pytest.raises(ProviderError):
+            await provider.forward(
+                make_manifest(endpoint={"type": "http_json", "url": "https://p.example/translate"}),
+                {"text": "hi"},
+            )
+
+
+@respx.mock
+async def test_http_json_provider_timeout_raises() -> None:
+    from app.modules.providers import HttpJsonProvider, ProviderError
+
+    respx.post("https://p.example/translate").mock(side_effect=httpx.ReadTimeout("t/o"))
+    async with httpx.AsyncClient() as http:
+        provider = HttpJsonProvider(http)
+        with pytest.raises(ProviderError):
+            await provider.forward(
+                make_manifest(endpoint={"type": "http_json", "url": "https://p.example/translate"}),
+                {"text": "hi"},
+            )
+
+
+@respx.mock
+async def test_http_json_provider_non_json_raises() -> None:
+    from app.modules.providers import HttpJsonProvider, ProviderError
+
+    respx.post("https://p.example/translate").mock(
+        return_value=httpx.Response(200, text="not-json")
+    )
+    async with httpx.AsyncClient() as http:
+        provider = HttpJsonProvider(http)
+        with pytest.raises(ProviderError):
+            await provider.forward(
+                make_manifest(endpoint={"type": "http_json", "url": "https://p.example/translate"}),
+                {"text": "hi"},
+            )
+
+
+async def test_http_json_provider_missing_url_raises() -> None:
+    from app.modules.providers import HttpJsonProvider, ProviderError
+
+    manifest = make_manifest(endpoint={"type": "http_json", "timeout_ms": 1000})
+    async with httpx.AsyncClient() as http:
+        provider = HttpJsonProvider(http)
+        with pytest.raises(ProviderError):
+            await provider.forward(manifest, {"text": "hi"})
+
+
+async def test_internal_echo_provider_shape() -> None:
+    from app.modules.providers import InternalEchoProvider
+
+    provider = InternalEchoProvider()
+    result = await provider.forward(
+        make_manifest(endpoint={"type": "http_json", "url": "https://p.example/translate"}),
+        {"text": "hi"},
+    )
+    assert result.status_code == 200
+    assert result.body["echo"] == {"text": "hi"}
+    assert result.body["service_id"] == "svc_translate_v1"

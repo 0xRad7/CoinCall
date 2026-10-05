@@ -71,5 +71,9 @@ disallow_untyped_defs = false
 module = "eth_keys.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "jsonschema.*"
+ignore_missing_imports = true
+
 [tool.coverage.run]
 source = ["app"]

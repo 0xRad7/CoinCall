@@ -1,9 +1,8 @@
 """BotChainAdapter：eth_call calldata/解码/短缓存（_raw_call 注入 mock，零网络）+ live 冒烟。"""
 
 import pytest
-from app.core.chain import BotChainAdapter
 
-pytestmark = pytest.mark.unit
+from app.core.chain import BotChainAdapter
 
 TOKEN = "0x75edC9335175Fc0552D51D48439F229c10420fe3"
 VAULT = "0x000000000000000000000000000000000000dEaD"
@@ -23,6 +22,7 @@ class ScriptedChain(BotChainAdapter):
         return "0x" + self.value.to_bytes(32, "big").hex()
 
 
+@pytest.mark.unit
 async def test_balanceof_calldata_and_decode() -> None:
     chain = ScriptedChain(1_234_567)
     balance = await chain.erc20_balance(WALLET, TOKEN)
@@ -33,6 +33,7 @@ async def test_balanceof_calldata_and_decode() -> None:
     assert data[10:].lower() == WALLET[2:].lower().rjust(64, "0")
 
 
+@pytest.mark.unit
 async def test_allowance_calldata_and_decode() -> None:
     chain = ScriptedChain(9_999)
     allowance = await chain.erc20_allowance(WALLET, VAULT, TOKEN)
@@ -43,6 +44,7 @@ async def test_allowance_calldata_and_decode() -> None:
     assert VAULT[2:].lower().rjust(64, "0") in data.lower()
 
 
+@pytest.mark.unit
 async def test_short_cache_dedupes_calls() -> None:
     chain = ScriptedChain(7)
     await chain.erc20_balance(WALLET, TOKEN)
@@ -52,6 +54,7 @@ async def test_short_cache_dedupes_calls() -> None:
     assert len(chain.raw_calls) == 2
 
 
+@pytest.mark.unit
 async def test_cache_key_separates_wallets() -> None:
     chain = ScriptedChain(7)
     await chain.erc20_balance(WALLET, TOKEN)

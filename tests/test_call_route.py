@@ -4,8 +4,8 @@ import base64
 import json
 
 import pytest
-from app.modules.providers import ProviderFailure
 
+from app.modules.providers import ProviderError
 from tests.conftest import (
     API_KEY,
     CONSUMER_PRIVATE_KEY,
@@ -323,7 +323,7 @@ async def test_idempotency_conflict_different_body(settings: object) -> None:
 
 
 async def test_provider_failure_aborts_without_settle(settings: object) -> None:
-    failing = FixedProvider(error=ProviderFailure("provider 500"))
+    failing = FixedProvider(error=ProviderError("provider 500"))
     async with gateway_serve(
         settings,
         providers={"internal": failing, "http_json": failing},  # type: ignore[arg-type]
