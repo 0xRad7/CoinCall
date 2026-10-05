@@ -14,6 +14,21 @@ IDENTITY_REGISTRY_ABI: list[dict] = [
         "type": "event",
     },
     {
+        "inputs": [],
+        "name": "eip712Domain",
+        "outputs": [
+            {"internalType": "bytes1", "name": "fields", "type": "bytes1"},
+            {"internalType": "string", "name": "name", "type": "string"},
+            {"internalType": "string", "name": "version", "type": "string"},
+            {"internalType": "uint256", "name": "chainId", "type": "uint256"},
+            {"internalType": "address", "name": "verifyingContract", "type": "address"},
+            {"internalType": "bytes32", "name": "salt", "type": "bytes32"},
+            {"internalType": "uint256[]", "name": "extensions", "type": "uint256[]"},
+        ],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
         "inputs": [{"internalType": "address", "name": "owner", "type": "address"}],
         "name": "balanceOf",
         "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
@@ -87,6 +102,29 @@ IDENTITY_REGISTRY_ABI: list[dict] = [
         "type": "function",
     },
     {
+        "inputs": [
+            {"internalType": "uint256", "name": "agentId", "type": "uint256"},
+            {"internalType": "address", "name": "newWallet", "type": "address"},
+            {"internalType": "uint256", "name": "deadline", "type": "uint256"},
+            {"internalType": "bytes", "name": "signature", "type": "bytes"},
+        ],
+        "name": "setAgentWallet",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"internalType": "uint256", "name": "agentId", "type": "uint256"},
+            {"internalType": "string", "name": "metadataKey", "type": "string"},
+            {"internalType": "bytes", "name": "metadataValue", "type": "bytes"},
+        ],
+        "name": "setMetadata",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
         "inputs": [],
         "name": "symbol",
         "outputs": [{"internalType": "string", "name": "", "type": "string"}],
@@ -98,6 +136,13 @@ IDENTITY_REGISTRY_ABI: list[dict] = [
         "name": "tokenURI",
         "outputs": [{"internalType": "string", "name": "", "type": "string"}],
         "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "agentId", "type": "uint256"}],
+        "name": "unsetAgentWallet",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function",
     },
 ]
