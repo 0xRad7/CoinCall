@@ -418,8 +418,12 @@ class TestEip712AgentWalletSet:
             owner=ACCOUNT_B,
             deadline=self.GOLDEN_DEADLINE,
         )
+        # eth_keys 的 v 语义是 {0,1}（链上/OZ ECDSA 用 {27,28}，语义等价）
+        v01 = sig[64] - 27
         recovered = (
-            eth_keys.Signature(sig).recover_public_key_from_msg_hash(digest).to_checksum_address()
+            eth_keys.Signature(sig[:64] + bytes([v01]))
+            .recover_public_key_from_msg_hash(digest)
+            .to_checksum_address()
         )
         assert recovered == signer.address
 

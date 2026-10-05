@@ -398,20 +398,18 @@ class TestM6AgentIdentity:
         assert body["metadata"]["service_manifest"] == '{"service": "demo"}'
 
 
-def build_m6_app(
-    fake_w3=None,
-    fake_tx=None,
-):
+def build_m6_app(fake_w3=None, fake_tx=None):
     """M6 新端点专用 client 工厂：可注入定制 fake w3/tx（同 client fixture 的装配口径）。"""
     app = create_app()
     w3 = fake_w3 or make_fake_w3()
+    tx = fake_tx or make_fake_tx_service()
     app.dependency_overrides[get_request_web3] = lambda: w3
     app.dependency_overrides[get_request_explorer] = lambda: ExplorerClient(
         make_fake_explorer_client()
     )
     app.dependency_overrides[get_request_keystore] = make_fake_keystore
-    app.dependency_overrides[get_request_tx] = fake_tx or make_fake_tx_service
-    return app, w3
+    app.dependency_overrides[get_request_tx] = lambda: tx
+    return app, w3, tx
 
 
 def mint_transfer_log(
@@ -420,7 +418,7 @@ def mint_transfer_log(
     from_addr: str | None = None,
     address: str = IDENTITY_REGISTRY,
 ) -> dict:
-    """构造 ERC-721 Transfer 日志（from=None 即 0x0 铸造）。"""
+    """构造 ERC-721 Transfer 日志（from=None 即 0x0 铸造；tokenId 为 indexed，在 topics[3]）。"""
     from_addr_hex = "0" * 40 if from_addr is None else from_addr[2:].lower()
     to_hex = to[2:].lower()
     return {
@@ -429,8 +427,9 @@ def mint_transfer_log(
             keccak(b"Transfer(address,address,uint256)"),
             bytes.fromhex(from_addr_hex.rjust(64, "0")),
             bytes.fromhex(to_hex.rjust(64, "0")),
+            abi_encode(["uint256"], [token_id]),
         ],
-        "data": abi_encode(["uint256"], [token_id]),
+        "data": b"",
         "blockNumber": 25_000_000,
         "blockHash": bytes(32),
         "transactionHash": bytes.fromhex(TX_HASH[2:]),
@@ -444,7 +443,7 @@ class TestM6WalletBinding:
     """端点 A：POST /agent-identity/{token_id}/wallet（EIP-712 newWallet 签名，C-23）。"""
 
     def test_dry_run_default_with_caller_signature(self) -> None:
-        app, _ = build_m6_app()
+        app, _, tx = build_m6_app()
         with TestClient(app) as tc:
             r = tc.post(
                 f"{API}/agent-identity/5/wallet",
@@ -457,8 +456,12 @@ class TestM6WalletBinding:
         assert r.status_code == 200
         body = r.json()
         assert body["dry_run"] is True
-        assert body["unsigned_tx"]["data"].startswith("0x")
-        assert body["unsigned_tx"]["to"] == IDENTITY_REGISTRY
+        # 交易参数：发给注册表、带 setAgentWallet calldata、发送者=owner
+        kwargs = tx.execute.call_args.kwargs
+        assert kwargs["from_address"] == ACCOUNT_A
+        assert kwargs["to_address"] == IDENTITY_REGISTRY
+        assert str(kwargs["data"]).startswith("0x")
+        assert kwargs["dry_run"] is True
 
     def test_service_signs_for_managed_wallet(self) -> None:
         """wallet_address 为代管账户时服务代签（resolve_signer → EIP-712 签名）。"""
@@ -466,7 +469,7 @@ class TestM6WalletBinding:
         tx = make_fake_tx_service()
         tx.resolve_signer.side_effect = None
         tx.resolve_signer.return_value = wallet
-        app, _ = build_m6_app(fake_tx=tx)
+        app, _, _ = build_m6_app(fake_tx=tx)
         with TestClient(app) as tc:
             r = tc.post(
                 f"{API}/agent-identity/5/wallet",
@@ -477,7 +480,7 @@ class TestM6WalletBinding:
         tx.resolve_signer.assert_called_once_with(wallet.address)
 
     def test_owner_mismatch_rejected(self) -> None:
-        app, _ = build_m6_app()
+        app, _, _ = build_m6_app()
         with TestClient(app) as tc:
             r = tc.post(
                 f"{API}/agent-identity/5/wallet",
@@ -492,7 +495,7 @@ class TestM6WalletBinding:
         assert r.json()["code"] == "not_owner"
 
     def test_deadline_window_enforced(self) -> None:
-        app, _ = build_m6_app()
+        app, _, _ = build_m6_app()
         with TestClient(app) as tc:
             expired = tc.post(
                 f"{API}/agent-identity/5/wallet",
@@ -518,7 +521,7 @@ class TestM6WalletBinding:
         assert too_far.json()["code"] == "bad_deadline"
 
     def test_signature_required_when_not_managed(self) -> None:
-        app, _ = build_m6_app()  # 默认 fake resolve_signer 抛 ServiceError
+        app, _, _ = build_m6_app()  # 默认 fake resolve_signer 抛 ServiceError
         with TestClient(app) as tc:
             r = tc.post(
                 f"{API}/agent-identity/5/wallet",
@@ -528,7 +531,7 @@ class TestM6WalletBinding:
         assert r.json()["code"] == "signature_required"
 
     def test_real_send_returns_receipt(self) -> None:
-        app, _ = build_m6_app()
+        app, _, _ = build_m6_app()
         with TestClient(app) as tc:
             r = tc.post(
                 f"{API}/agent-identity/5/wallet",
@@ -558,7 +561,7 @@ class TestM6RegisterResult:
             mint_transfer_log(999, ACCOUNT_A, address=USDT),  # 非注册表合约，排除
         ]
         w3.eth.get_transaction_receipt.return_value = receipt
-        app, _ = build_m6_app(fake_w3=w3)
+        app, _, _ = build_m6_app(fake_w3=w3)
         with TestClient(app) as tc:
             body = tc.get(f"{API}/agent-identity/register-result/{TX_HASH}").json()
         assert body["found"] is True
@@ -569,8 +572,8 @@ class TestM6RegisterResult:
 
     def test_not_onchain_yet(self) -> None:
         w3 = make_fake_w3()
-        w3.eth.get_transaction_receipt.side_effect = TransactionNotFound
-        app, _ = build_m6_app(fake_w3=w3)
+        w3.eth.get_transaction_receipt.side_effect = TransactionNotFound("tx not found")
+        app, _, _ = build_m6_app(fake_w3=w3)
         with TestClient(app) as tc:
             body = tc.get(f"{API}/agent-identity/register-result/{TX_HASH}").json()
         assert body["found"] is False
@@ -581,7 +584,7 @@ class TestM6RegisterResult:
         receipt = dict(make_fake_receipt())
         receipt["logs"] = []
         w3.eth.get_transaction_receipt.return_value = receipt
-        app, _ = build_m6_app(fake_w3=w3)
+        app, _, _ = build_m6_app(fake_w3=w3)
         with TestClient(app) as tc:
             body = tc.get(f"{API}/agent-identity/register-result/{TX_HASH}").json()
         assert body["found"] is True
@@ -591,7 +594,7 @@ class TestM6RegisterResult:
     def test_bad_tx_hash_rejected(self) -> None:
         w3 = make_fake_w3()
         w3.eth.get_transaction_receipt.side_effect = ValueError("cannot parse hex")
-        app, _ = build_m6_app(fake_w3=w3)
+        app, _, _ = build_m6_app(fake_w3=w3)
         with TestClient(app) as tc:
             r = tc.get(f"{API}/agent-identity/register-result/not-a-hash")
         assert r.status_code == 422
