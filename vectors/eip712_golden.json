@@ -13,7 +13,7 @@
     "chainId": 968,
     "verifyingContract": "0x000000000000000000000000000000000000dEaD"
   },
-  "struct_type": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,uint256 nonce)",
+  "struct_type": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)",
   "cases": [
     {
       "description": "canonical",
@@ -23,16 +23,16 @@
         "value": 1000000,
         "validAfter": 0,
         "validBefore": 4102444800,
-        "nonce": 31337
+        "nonce": "0x0000000000000000000000000000000000000000000000000000000000007a69"
       },
       "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "domainSeparator": "0x2ef5b3070e03185596b3705bb17837553dc0b7a7b3b37c4c1ede815db62adab2",
-      "structHash": "0xbf796ba3afc768a33eb7c98abb275b5cf9b4b0392f3ec3f32441cc12b75a26ff",
-      "digest": "0x4872383611000cb725b0e12fe63c222fccb11d1696d0ea1e9cb58f83a1860f15",
+      "structHash": "0x2b6e789dd2947381c367b60d8958935c56e978f752af8142c7ec2c77790a0115",
+      "digest": "0x65a25c5ed41256b06ab644388d1037d6f265519b8f499d32d8c93d4bc3532d25",
       "signature": {
         "v": 27,
-        "r": "0xcbb06d58af76bcc69013eacf87da3db0de708ea39a30c13f2a8682b6cf917368",
-        "s": "0x52d0c8d45b51a47c026e36ce96a5be1c9ad39a4a3c6a0bb50f25986a4cdc6fc3"
+        "r": "0xb44b32f8855b710222c9dad8ffdc5a69428cdbe6af18181042a2cbf64212eba4",
+        "s": "0x7c5ca48505358f4ba69f297f12caf807b2e382846b9c5596b4ed2d2f5cdb2f82"
       }
     },
     {
@@ -43,16 +43,16 @@
         "value": 250000000000,
         "validAfter": 1735689600,
         "validBefore": 4102444800,
-        "nonce": 1606938044258990275541962092341162602522202993782792835313721
+        "nonce": "0x9d35b4a52c2e1f0a8c67d5e4b3f29a718d6c0e5b4a3f2c1d0e9f8a7b6c5d4e3f"
       },
       "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "domainSeparator": "0x2ef5b3070e03185596b3705bb17837553dc0b7a7b3b37c4c1ede815db62adab2",
-      "structHash": "0x1e7b662f18f78dabc6108e10a4ac979db878d9a8f314a90ac7dd4dec0e6a83c1",
-      "digest": "0x94871fe12176367192f9e4519360f664652231375b85e3de6264417628bc2a99",
+      "structHash": "0x85d6edfb64c2257f7561c1ba6b8db1829cf98296b6dc4bfcf7e586121be2f9f2",
+      "digest": "0x1440321ccec2404fa3a3da4af57221c4189b0eac1e2bfe4f62d181432eacc26c",
       "signature": {
         "v": 27,
-        "r": "0x643b93165907ba46fdecc097ecaba27343e4bbe9a10de6bbb15938796e95b709",
-        "s": "0x480d96507b2d8f8d54bd02e6067513acfbd85b7e83a15486ec3544a40300f94e"
+        "r": "0x57edd7d8f5a0bfc335a0ca3e20411ffa054710cfcc45e82a1a046e6ea9d2184a",
+        "s": "0x76edc8f963c0e081dfc3d3009f13da35e6623a2df192077d0ece18f41b0fbf66"
       }
     },
     {
@@ -63,16 +63,16 @@
         "value": 0,
         "validAfter": 1735689601,
         "validBefore": 4102444799,
-        "nonce": 1
+        "nonce": "0x0000000000000000000000000000000000000000000000000000000000000001"
       },
       "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
       "domainSeparator": "0x2ef5b3070e03185596b3705bb17837553dc0b7a7b3b37c4c1ede815db62adab2",
-      "structHash": "0x84048dbae61f03b8d7e4c71da8f21520f3181d370d92fc343ee73c4fd0646b9d",
-      "digest": "0x035a6f2fd795dc317a7dd1a42144821ecd369799f0d3e0fac9976b7112bc6468",
+      "structHash": "0x46e75ec4ae1b78909b9463789215c3dffab88c96cc6f71150e09f5bc09dc6132",
+      "digest": "0x3238e3b72b9e0ceaad68c0d420030b3cbe89000242c5bb6338f9af174b9eb1a4",
       "signature": {
         "v": 27,
-        "r": "0x986fb6801c28868e165ff5c2c636fa4cb194f371a40b7e4926e6db5c743aa805",
-        "s": "0x4ea0ee6dfcfbdc9c934f7e87cd73bd1f6c7144dbfd2afbadf521581073dcd589"
+        "r": "0x089ad08faa366be6a309b6fce286918c04366c2df5637a89cfef3aa96ee08297",
+        "s": "0x5abc84aa7cdf555678beb8500440c84f71110e2a3658708b9c80ff79b302ba14"
       }
     }
   ]

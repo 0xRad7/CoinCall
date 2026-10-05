@@ -20,6 +20,7 @@ from payvault.eip712 import (
     authorization_digest,
     authorization_struct_hash,
     domain_separator,
+    nonce_from,
     recover_signer,
     sign_authorization,
 )
@@ -52,7 +53,7 @@ def case_to_auth(case: dict) -> Authorization:
         value=int(msg["value"]),
         valid_after=int(msg["validAfter"]),
         valid_before=int(msg["validBefore"]),
-        nonce=int(msg["nonce"]),
+        nonce=nonce_from(msg["nonce"]),
     )
 
 
@@ -125,7 +126,7 @@ def test_contract_ecrecover_matches_vector_address(vault_env) -> None:
     assert len(charged) == 1
     assert charged[0]["from"] == case["address"]
     assert charged[0]["value"] == int(case["message"]["value"])
-    assert charged[0]["nonce"] == int(case["message"]["nonce"])
+    assert charged[0]["nonce"] == case["message"]["nonce"]  # 事件侧 bytes→hex 与向量口径一致
 
 
 def test_cross_domain_signature_rejected(vault_env) -> None:

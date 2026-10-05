@@ -26,6 +26,11 @@ from tests.helpers import (
 ONE_USDT = 10**6
 
 
+def nonce_hex(n: int) -> str:
+    """int → 0x 前缀 32 字节 hex（bytes32 nonce 口径）。"""
+    return f"0x{n:064x}"
+
+
 def charged_total(vault, receipt) -> int:
     return sum(int(ev["value"]) for ev in events_of(vault, receipt, "Charged"))
 
@@ -42,7 +47,7 @@ def test_domain_separator_matches_python(vault_env) -> None:
 def test_only_operator_can_charge(vault_env) -> None:
     """非 operator 调 chargeWithSigBatch 直接 revert（NotOperator）。"""
     vault = vault_env.vault
-    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=101)
+    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=nonce_hex(101))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     expect_revert_selector(
         vault.functions.chargeWithSigBatch([charge_call(signed, vault_env.provider.address)]),
@@ -54,7 +59,7 @@ def test_only_operator_can_charge(vault_env) -> None:
 def test_max_batch_enforced(vault_env) -> None:
     """单笔交易硬上限 50：51 笔 revert BatchTooLarge。"""
     vault = vault_env.vault
-    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=102)
+    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=nonce_hex(102))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     calls = [charge_call(signed, vault_env.provider.address)] * 51
     expect_revert_selector(
@@ -70,7 +75,7 @@ def test_max_batch_enforced(vault_env) -> None:
 def test_single_charge_success(vault_env) -> None:
     """approve→单笔 charge：credits 增加、代币进合约、Charged 事件四元组正确。"""
     vault, mock = vault_env.vault, vault_env.mock_usdt
-    auth = default_auth(vault, vault_env.consumer.address, value=3 * ONE_USDT, nonce=1)
+    auth = default_auth(vault, vault_env.consumer.address, value=3 * ONE_USDT, nonce=nonce_hex(1))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     receipt = submit_charge(
         vault_env.w3, vault_env.operator, vault, [charge_call(signed, vault_env.provider.address)]
@@ -79,14 +84,14 @@ def test_single_charge_success(vault_env) -> None:
     assert charged_total(vault, receipt) == 3 * ONE_USDT
     assert vault.functions.credits(vault_env.provider.address).call() == 3 * ONE_USDT
     assert mock.functions.balanceOf(vault.address).call() == 3 * ONE_USDT
-    assert vault.functions.usedNonces(1).call() is True
+    assert vault.functions.usedNonces(nonce_hex(1)).call() is True
     charged = events_of(vault, receipt, "Charged")
     assert len(charged) == 1
     assert charged[0] == {
         "provider": vault_env.provider.address,
         "from": vault_env.consumer.address,
         "value": 3 * ONE_USDT,
-        "nonce": 1,
+        "nonce": nonce_hex(1),
     }
     balance, total, diff = vault_state(mock, vault)
     assert (balance, total, diff) == (3 * ONE_USDT, 3 * ONE_USDT, 0)
@@ -98,7 +103,7 @@ def test_single_charge_success(vault_env) -> None:
 def test_t4_operator_cannot_withdraw_others_credits(vault_env) -> None:
     """合约有真实资金后，operator（0 credits）providerWithdraw 必须 revert。"""
     vault, mock = vault_env.vault, vault_env.mock_usdt
-    auth = default_auth(vault, vault_env.consumer.address, value=5 * ONE_USDT, nonce=2)
+    auth = default_auth(vault, vault_env.consumer.address, value=5 * ONE_USDT, nonce=nonce_hex(2))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     submit_charge(
         vault_env.w3, vault_env.operator, vault, [charge_call(signed, vault_env.provider.address)]
@@ -118,7 +123,7 @@ def test_t4_operator_self_signed_charge_cannot_move_consumer_funds(vault_env) ->
     """operator 自签（无消费者签名）提交 charge：必须 bad_signature 且资金零变动。"""
     vault, mock = vault_env.vault, vault_env.mock_usdt
     # operator 用自己的钥匙签一个 from=consumer 的授权 → 验签必败
-    auth = default_auth(vault, vault_env.consumer.address, value=9 * ONE_USDT, nonce=3)
+    auth = default_auth(vault, vault_env.consumer.address, value=9 * ONE_USDT, nonce=nonce_hex(3))
     forged = sign_for_vault(vault_env.operator, vault, vault_env.chain_id, auth)
     receipt = submit_charge(
         vault_env.w3, vault_env.operator, vault, [charge_call(forged, vault_env.operator.address)]
@@ -136,7 +141,7 @@ def test_t4_operator_self_signed_charge_cannot_move_consumer_funds(vault_env) ->
 def test_t5_nonce_replay_rejected(vault_env) -> None:
     """同 nonce 二次提交：第二笔 ChargeFailed(nonce_used)，记账不增。"""
     vault, mock = vault_env.vault, vault_env.mock_usdt
-    auth = default_auth(vault, vault_env.consumer.address, value=2 * ONE_USDT, nonce=42)
+    auth = default_auth(vault, vault_env.consumer.address, value=2 * ONE_USDT, nonce=nonce_hex(42))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     call = charge_call(signed, vault_env.provider.address)
 
@@ -152,7 +157,7 @@ def test_t5_nonce_replay_rejected(vault_env) -> None:
 def test_duplicate_nonce_within_same_batch(vault_env) -> None:
     """同批内重复 nonce：第一笔 Charged，第二笔 nonce_used。"""
     vault = vault_env.vault
-    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=77)
+    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=nonce_hex(77))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     call = charge_call(signed, vault_env.provider.address)
     receipt = submit_charge(vault_env.w3, vault_env.operator, vault, [call, call])
@@ -170,21 +175,21 @@ def test_t6_batch_partial_failure_skips_and_emits(vault_env) -> None:
         vault_env.consumer,
         vault,
         vault_env.chain_id,
-        default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=201),
+        default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=nonce_hex(201)),
     )
     # 坏签名：provider 钥匙签 from=consumer 的授权
     bad_sig = sign_for_vault(
         vault_env.attacker,
         vault,
         vault_env.chain_id,
-        default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=202),
+        default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=nonce_hex(202)),
     )
     # 余额不足： outsider 签自己的授权但没有 MockUSDT 余额（也未 approve）
     broke = sign_for_vault(
         vault_env.outsider,
         vault,
         vault_env.chain_id,
-        default_auth(vault, vault_env.outsider.address, value=ONE_USDT, nonce=203),
+        default_auth(vault, vault_env.outsider.address, value=ONE_USDT, nonce=nonce_hex(203)),
     )
 
     receipt = submit_charge(
@@ -217,7 +222,7 @@ def test_expired_window_skipped(vault_env, now: int) -> None:
             vault,
             vault_env.consumer.address,
             value=ONE_USDT,
-            nonce=210,
+            nonce=nonce_hex(210),
             valid_after=0,
             valid_before=now - 1,
         ),
@@ -230,7 +235,7 @@ def test_expired_window_skipped(vault_env, now: int) -> None:
             vault,
             vault_env.consumer.address,
             value=ONE_USDT,
-            nonce=211,
+            nonce=nonce_hex(211),
             valid_after=now + 3600,
         ),
     )
@@ -258,7 +263,7 @@ def test_auth_to_must_be_vault(vault_env) -> None:
             vault,
             vault_env.consumer.address,
             value=ONE_USDT,
-            nonce=220,
+            nonce=nonce_hex(220),
             to=vault_env.attacker.address,
         ),
     )
@@ -282,13 +287,13 @@ def test_t7_withdraw_and_i4_invariant(vault_env) -> None:
         consumer,
         vault,
         vault_env.chain_id,
-        default_auth(vault, consumer.address, value=7 * ONE_USDT, nonce=301),
+        default_auth(vault, consumer.address, value=7 * ONE_USDT, nonce=nonce_hex(301)),
     )
     a2 = sign_for_vault(
         consumer,
         vault,
         vault_env.chain_id,
-        default_auth(vault, consumer.address, value=3 * ONE_USDT, nonce=302),
+        default_auth(vault, consumer.address, value=3 * ONE_USDT, nonce=nonce_hex(302)),
     )
     receipt = submit_charge(
         vault_env.w3,
@@ -355,7 +360,7 @@ def test_failed_charges_do_not_break_i4(vault_env) -> None:
         vault_env.attacker,
         vault,
         vault_env.chain_id,
-        default_auth(vault, vault_env.consumer.address, value=50 * ONE_USDT, nonce=401),
+        default_auth(vault, vault_env.consumer.address, value=50 * ONE_USDT, nonce=nonce_hex(401)),
     )
     receipt = submit_charge(
         vault_env.w3, vault_env.operator, vault, [charge_call(forged, vault_env.provider.address)]
@@ -378,7 +383,7 @@ def test_operator_update(vault_env) -> None:
     )
     assert vault.functions.operator().call() == vault_env.attacker.address
 
-    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=501)
+    auth = default_auth(vault, vault_env.consumer.address, value=ONE_USDT, nonce=nonce_hex(501))
     signed = sign_for_vault(vault_env.consumer, vault, vault_env.chain_id, auth)
     expect_revert_selector(
         vault.functions.chargeWithSigBatch([charge_call(signed, vault_env.provider.address)]),

@@ -12,7 +12,7 @@ from web3.contract import Contract
 from web3.exceptions import ContractLogicError
 
 from payvault.chain import call_contract
-from payvault.eip712 import Authorization, SignedAuthorization, sign_authorization
+from payvault.eip712 import Authorization, SignedAuthorization, nonce_from, sign_authorization
 
 
 def selector_of(signature: str) -> str:
@@ -24,7 +24,7 @@ def default_auth(
     consumer: str,
     *,
     value: int,
-    nonce: int,
+    nonce: str | bytes,  # bytes32（EIP-3009 正典）：0x-hex 32 字节或 bytes
     to: str | None = None,
     valid_after: int = 0,
     valid_before: int = 4102444800,  # 2100-01-01 UTC
@@ -36,7 +36,7 @@ def default_auth(
         value=value,
         valid_after=valid_after,
         valid_before=valid_before,
-        nonce=nonce,
+        nonce=nonce_from(nonce),
     )
 
 
