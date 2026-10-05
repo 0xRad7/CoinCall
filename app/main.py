@@ -1,9 +1,16 @@
-"""coincall-core 应用工厂：管理面（端口 8020）。"""
+"""coincall-core 应用工厂：管理面（端口 8020）。
+
+依赖注入约定：create_app 的可选关键字参数即单测替身入口
+（identity/chain/gateway 客户端），生产路径在 lifespan 装配真实实现
+（httpx → 8010 bot-chain-api 与 8030 gateway；trust_env=False 防 C-07 代理劫持）。
+"""
 
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -21,21 +28,39 @@ from app.core.errors import (
 )
 from app.modules.apikey import router as apikey_router
 from app.modules.catalog import router as catalog_router
+from app.modules.identity import BotChainIdentityClient, IdentityClient
+from app.modules.providers import router as providers_router
 from app.storage.db import CoreStore
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    identity_client: IdentityClient | None = None,
+    chain_client: Any | None = None,  # noqa: ANN401  # 排行榜数据源注入口（leaderboard 落地时收紧）
+    gateway_client: Any | None = None,  # noqa: ANN401  # 同上
+) -> FastAPI:
+    """chain_client/gateway_client 形参为排行榜数据源注入口（leaderboard 模块落地时收紧类型）。"""
     app_settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.store = CoreStore(app_settings.duckdb_path)  # C-14：单进程单写者
+        # trust_env=False：8010/8030 都是本机服务（gateway C-07 同源纪律）
+        http = httpx.Client(timeout=10.0, trust_env=False)
+        app.state.identities = identity_client or BotChainIdentityClient(
+            http, app_settings.bot_chain_api_base_url, app_settings.identity_cache_ttl
+        )
         yield
+        http.close()
         app.state.store.close()
 
     app = FastAPI(
         title="coincall-core",
-        description="CoinCall 管理面：ServiceManifest 目录 + api key 签发/校验",
+        description=(
+            "CoinCall 管理面：ServiceManifest 目录 + api key 生命周期 + Provider 登记"
+            " + 排行榜（链上 Charged 收入真相 + 网关活跃度双源）"
+        ),
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -59,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(catalog_router)
     app.include_router(apikey_router)
+    app.include_router(providers_router)
     return app
 
 
