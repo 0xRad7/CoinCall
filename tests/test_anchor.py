@@ -36,13 +36,13 @@ OPERATOR = "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a"
 PENDING_BODY = {
     "pending": [
         {
-            "anchor_id": "anc_0001",
+            "provider_agent_id": 162,
             "token_id": 162,
             "digest": "sha256:" + "ab" * 32,
             "pointer": "http://127.0.0.1:8020/decision/explain/svc_translate",
         },
         {  # 无 pointer：value 退化为纯 digest
-            "anchor_id": "anc_0002",
+            "provider_agent_id": 137,
             "token_id": 137,
             "digest": "sha256:" + "cd" * 32,
         },
@@ -82,13 +82,11 @@ async def test_anchor_happy_path_submits_and_reports() -> None:
     assert first_send["args"][2] == "0x" + expected_value.encode().hex()
     second_send = json.loads(send_route.calls[1].request.content)
     assert second_send["args"][2] == "0x" + ("sha256:" + "cd" * 32).encode().hex()
-    # 回执上报：anchor_id + tx_hash 指针
+    # 回执上报：core 契约 {agent_id, digest, tx_hash}
     first_result = json.loads(result_route.calls[0].request.content)
-    assert first_result["anchor_id"] == "anc_0001"
+    assert first_result["agent_id"] == 162
+    assert first_result["digest"] == "sha256:" + "ab" * 32
     assert first_result["tx_hash"] == "0xabc"
-    assert first_result["token_id"] == 162
-    assert first_result["key"] == ANCHOR_KEY
-    assert first_result["value"] == expected_value
     assert report == {
         "pending": 2,
         "submitted": 2,

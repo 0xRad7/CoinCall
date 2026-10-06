@@ -66,10 +66,14 @@ class AnchorPending:
 
     @classmethod
     def from_json(cls, row: dict[str, Any]) -> "AnchorPending":
+        # core 契约（10 §2 联调冻结 2026-10-06）：行={provider_agent_id, digest, payload}；
+        # anchor_id 本地派生（provider_agent_id:digest）仅作日志/幂等展示，上报以 core 字段为准
+        agent_id = int(row["provider_agent_id"])
+        digest = str(row["digest"])
         return cls(
-            anchor_id=str(row["anchor_id"]),
-            token_id=int(row["token_id"]),
-            digest=str(row["digest"]),
+            anchor_id=f"{agent_id}:{digest[:16]}",
+            token_id=agent_id,
+            digest=digest,
             pointer=row.get("pointer"),
             key=str(row.get("key") or ANCHOR_KEY),
         )
@@ -93,15 +97,10 @@ class DecisionCoreClient:
         return [AnchorPending.from_json(row) for row in rows if isinstance(row, dict)]
 
     async def anchor_result(
-        self, *, anchor_id: str, tx_hash: str, token_id: int, key: str, value: str
+        self, *, digest: str, tx_hash: str, token_id: int, key: str, value: str
     ) -> None:
-        payload = {
-            "anchor_id": anchor_id,
-            "tx_hash": tx_hash,
-            "token_id": token_id,
-            "key": key,
-            "value": value,
-        }
+        del key, value  # core 契约仅收 {agent_id, digest, tx_hash}（锚定值链上已写，无需回传）
+        payload = {"agent_id": token_id, "digest": digest, "tx_hash": tx_hash}
         try:
             resp = await self._http.post(
                 f"{self.base_url}/internal/decision/anchor-result", json=payload
@@ -255,7 +254,7 @@ class AnchorTask:
             report["submitted"] += 1
             try:
                 await self.core.anchor_result(
-                    anchor_id=item.anchor_id,
+                    digest=item.digest,
                     tx_hash=tx_hash,
                     token_id=item.token_id,
                     key=item.key,
