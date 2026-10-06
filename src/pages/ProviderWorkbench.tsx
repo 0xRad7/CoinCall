@@ -5,6 +5,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { coreApi, credentialsApi, type ServiceManifest } from "../api/core";
 import { CredentialHeadersEditor, rowsToHeaders, type CredentialRow } from "../components/CredentialHeadersEditor";
+import { ExampleRequestEditor } from "../components/ExampleRequestEditor";
+import { ProbeDialog } from "../components/ProbeDialog";
+import { schemaHasNestedObjects, type ExampleParam } from "../lib/schema-infer";
 import { agentWalletSetTypedData, botChainApi, type AgentIdentity } from "../api/gateway";
 import { ApiError } from "../api/client";
 import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY_VAULT, fromRaw, toRaw } from "../chain/constants";
@@ -183,6 +186,12 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
   const [version, setVersion] = useState("1.0.0");
   const [amount, setAmount] = useState("0.01");
   const [endpointType, setEndpointType] = useState<"internal" | "http_json">("internal");
+  const [endpointMethod, setEndpointMethod] = useState<"GET" | "POST">("POST");
+  const [exampleParams, setExampleParams] = useState<ExampleParam[]>([{ name: "", value: "" }]);
+  const [exampleJson, setExampleJson] = useState('{\n  "text": "hello"\n}');
+  const [probeOpen, setProbeOpen] = useState(false);
+  const [outputAutoNote, setOutputAutoNote] = useState(false);
+  const [inputAutoNote, setInputAutoNote] = useState(false);
   const [endpointUrl, setEndpointUrl] = useState("");
   const [timeoutMs, setTimeoutMs] = useState(30000);
   const [inputSchema, setInputSchema] = useState('{\n  "type": "object",\n  "properties": {\n    "text": { "type": "string" }\n  },\n  "required": ["text"]\n}');
@@ -245,6 +254,7 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
         type: endpointType,
         url: endpointType === "http_json" ? endpointUrl.trim() : null,
         timeout_ms: timeoutMs,
+        ...(endpointType === "http_json" ? { method: endpointMethod } : {}),
       },
       pricing: { token: "USDT", model: "per_call", amount, amount_raw: conv.ok ? conv.raw.toString() : "0" },
       chain: { network: CHAIN_ID },
@@ -357,8 +367,27 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
         </div>
         {endpointType === "http_json" && (
           <div style={{ marginTop: 10 }}>
-            <input type="text" className={urlInvalid || fieldErr("endpoint.url") ? "invalid" : ""} value={endpointUrl} placeholder="https://your-host/endpoint（POST JSON→JSON）" onChange={(e) => setEndpointUrl(e.target.value)} />
-            <div className="help">网关会以 POST JSON 代理调用该 URL；请确保公网可达且返回 2xx。</div>
+            <input type="text" className={urlInvalid || fieldErr("endpoint.url") ? "invalid" : ""} value={endpointUrl} placeholder="https://your-host/endpoint" onChange={(e) => setEndpointUrl(e.target.value)} />
+            <div className="help">网关会代理调用该 URL；请确保公网可达。method={endpointMethod} 时 {endpointMethod === "GET" ? "参数映射为上游 query（标量直传、数组同 key 重复）" : "参数以 JSON body 转发"}。</div>
+            <div className="flex" style={{ marginTop: 10, alignItems: "center" }}>
+              <label className="dim" style={{ fontWeight: 600, marginRight: 8 }}>请求方式</label>
+              <div className="seg">
+                <button type="button" className={endpointMethod === "POST" ? "active" : ""} onClick={() => setEndpointMethod("POST")}>
+                  POST（默认）
+                </button>
+                <button type="button" className={endpointMethod === "GET" ? "active" : ""} onClick={() => setEndpointMethod("GET")}>
+                  GET
+                </button>
+              </div>
+              <button type="button" className="btn small secondary" onClick={() => setProbeOpen(true)} disabled={!/^https?:\/\//.test(endpointUrl.trim())}>
+                探测接口
+              </button>
+            </div>
+            {endpointMethod === "GET" && (
+              <div className="alert info" style={{ marginTop: 8, fontSize: 13 }}>
+                GET 模式：消费者仍 POST JSON 给网关，网关把参数映射成上游 query——仅支持<b>标量与标量数组</b>（嵌套对象请用 POST）。
+              </div>
+            )}
           </div>
         )}
         {endpointType === "internal" && <div className="help">internal 端点由平台内置模块实现（无需 URL），适合演示与兜底。</div>}
@@ -380,8 +409,39 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
         <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value) || 30000)} />
       </div>
 
-      <JsonEditor label="input_schema（消费端参数校验，决定调用表单）" value={inputSchema} onChange={setInputSchema} fieldError={fieldErr("input_schema")} rows={8} />
-      <JsonEditor label="output_schema" value={outputSchema} onChange={setOutputSchema} fieldError={fieldErr("output_schema")} rows={5} />
+      {endpointType === "http_json" && endpointMethod === "GET" && schemaHasNestedObjects(inputSchema) && (
+        <div className="alert warn">
+          <b>GET 模式不支持嵌套对象参数</b>：input_schema 里有 type 为 object 的属性——发布会被 422 拒绝。请改用 POST，或把参数拍平为标量/标量数组。
+        </div>
+      )}
+      <JsonEditor
+        label="input_schema（消费端参数校验，决定调用表单）"
+        value={inputSchema}
+        onChange={(v) => {
+          setInputSchema(v);
+          setInputAutoNote(false);
+        }}
+        fieldError={fieldErr("input_schema")}
+        rows={8}
+        badge={inputAutoNote ? "自动识别，请核对" : undefined}
+        help={endpointType === "http_json" ? "示例请求区（探测 / 生成 input_schema 用）：" : undefined}
+      />
+      {endpointType === "http_json" && (
+        <div style={{ marginBottom: 16 }}>
+          <ExampleRequestEditor method={endpointMethod} params={exampleParams} onParamsChange={setExampleParams} json={exampleJson} onJsonChange={setExampleJson} />
+        </div>
+      )}
+      <JsonEditor
+        label="output_schema"
+        value={outputSchema}
+        onChange={(v) => {
+          setOutputSchema(v);
+          setOutputAutoNote(false);
+        }}
+        fieldError={fieldErr("output_schema")}
+        rows={5}
+        badge={outputAutoNote ? "自动识别，请核对" : undefined}
+      />
 
       {error && <ErrorBox error={error} />}
       {ok && (
@@ -400,6 +460,29 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
         </div>
       )}
       {ok && credError != null && credState?.kind === "warn" && <ErrorBox error={credError} />}
+
+      {endpointType === "http_json" && (
+        <ProbeDialog
+          open={probeOpen}
+          onClose={() => setProbeOpen(false)}
+          initialUrl={endpointUrl.trim()}
+          method={endpointMethod}
+          params={exampleParams}
+          exampleJson={exampleJson}
+          formCredHeaders={rowsToHeaders(credRows)}
+          onApplySchema={({ outputSchemaText, inputSchemaText }) => {
+            if (outputSchemaText) {
+              setOutputSchema(outputSchemaText);
+              setOutputAutoNote(true);
+            }
+            if (inputSchemaText) {
+              setInputSchema(inputSchemaText);
+              setInputAutoNote(true);
+            }
+            setProbeOpen(false);
+          }}
+        />
+      )}
 
       <div className="btn-row">
         <button className="btn secondary" onClick={onBack}>
@@ -485,7 +568,12 @@ export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null
                     <tr>
                     <td>
                       <div>
-                        <b>{m.name}</b>
+                        <b>{m.name}</b>{" "}
+                        {m.endpoint.type === "http_json" && (
+                          <span className="badge muted" title="上游请求方式">
+                            {m.endpoint.method ?? "POST"}
+                          </span>
+                        )}
                       </div>
                       <div className="mono dim">{s.service_id} · v{m.version}</div>
                     </td>
