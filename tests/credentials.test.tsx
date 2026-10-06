@@ -81,7 +81,7 @@ async function fillPublishForm() {
   fireEvent.change(screen.getByPlaceholderText("例如 svc_my_translate"), { target: { value: "svc_new" } });
   fireEvent.change(screen.getByPlaceholderText("例如 中英技术翻译"), { target: { value: "Demo HTTP" } });
   fireEvent.change(screen.getByPlaceholderText(/https:\/\/your-host\/endpoint/), { target: { value: "https://httpbin.org/headers" } });
-  fireEvent.change(screen.getByPlaceholderText(/^0x…（未连接钱包/), { target: { value: ADDR } });
+  fireEvent.change(screen.getByLabelText("服务收款钱包地址"), { target: { value: ADDR } });
 }
 
 describe("发布表单：上游认证头区块显隐", () => {

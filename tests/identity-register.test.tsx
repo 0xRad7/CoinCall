@@ -260,7 +260,9 @@ describe("PublishStep 服务收款钱包（默认=连接的钱包）", () => {
     );
     // 未连接：留空 + 提示先连钱包或手填（提示在 placeholder 属性里）
     expect(screen.getByText(/服务收款钱包（收入到账地址）/)).toBeTruthy();
-    expect(screen.getByPlaceholderText(/未连接钱包——先连接，或手动填写/)).toBeTruthy();
+    expect(screen.getByPlaceholderText(/连接钱包自动填入，或手动填写/)).toBeTruthy();
+    // 未连接：字段旁是内联「连接钱包自动填」按钮（不再指路别的页面）
+    expect(screen.getByRole("button", { name: "连接钱包自动填" })).toBeTruthy();
 
     // 连接后默认 = 连接地址
     announce(mockWalletProvider());
