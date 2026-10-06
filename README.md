@@ -26,7 +26,7 @@ dev server 内置**同源代理**（避免后端跨域问题）：
 | 前缀 | 目标 | 服务 |
 |---|---|---|
 | `/api/core/*` | `http://127.0.0.1:8020` | coincall-core（目录/登记/manifest/apikey/榜单） |
-| `/api/gw/*` | `http://127.0.0.1:8030` | coincall-gateway（/call、keeper 观测） |
+| `/api/gw/*` | `http://127.0.0.1:8030` | coincall-gateway（/call、keeper 观测）；跨机访问走同源代理，目录卡调用端点动态生成（可用 VITE_GATEWAY_PUBLIC_URL 覆盖，见 .env.example） |
 | `/api/chain/*` | `http://127.0.0.1:8010` | coincall-bot-chain-api（身份/钱包绑定） |
 | （浏览器直连） | `https://rpc.bohr.life/` | BOT Chain RPC（CORS=*，chainId 968） |
 
