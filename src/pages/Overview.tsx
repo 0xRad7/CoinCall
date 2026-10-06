@@ -12,6 +12,9 @@ export default function Overview() {
   const catalog = useAsync(() => coreApi.catalog(), []);
   const [poll, setPoll] = useState(true);
   const keeper = useAsync(() => gatewayApi.keeperStatus(), [], { pollMs: poll ? 10_000 : 0 });
+  // 决策徽章数据（一次拉取映射到目录卡）
+  const decision = useAsync(() => decisionApi.services({ window_hours: 168, sort: "score" }), []);
+  const decisionMap = new Map((decision.data?.services ?? []).map((r) => [r.service_id, r]));
 
   return (
     <div>
@@ -79,6 +82,9 @@ export default function Overview() {
         </AsyncSection>
       </div>
 
+      {/* 同类比价（决策视图） */}
+      <DecisionView />
+
       {/* 服务目录 */}
       <div className="card">
         <h3>服务目录</h3>
@@ -101,6 +107,24 @@ export default function Overview() {
                   <div className="dim" style={{ marginBottom: 6 }}>
                     {s.manifest.endpoint.type === "http_json" ? `上游请求方式 ${s.manifest.endpoint.method ?? "POST"}` : "internal（平台内置实现）"} · Provider {s.manifest.provider.display_name}
                   </div>
+                  {(() => {
+                    const dr = decisionMap.get(s.service_id);
+                    if (!dr) return null;
+                    const anchor = typeof dr.components.fulfillment.proof === "object" ? dr.components.fulfillment.proof : null;
+                    return (
+                      <div className="flex" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }} title="决策层履约信号（付费窗口内实测）">
+                        <span className="badge ok">✓ {pct(dr.components.fulfillment.success_rate)}</span>
+                        {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
+                        {dr.components.feedback.count > 0 && <span className="badge warn">★{dr.components.feedback.avg?.toFixed(1)}（{dr.components.feedback.count}）</span>}
+                        <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
+                        {anchor && (
+                          <a className="badge muted" style={{ textDecoration: "none" }} href={`https://scan.bohr.life/tx/${anchor.anchor_tx}`} target="_blank" rel="noreferrer" title={`锚定 ${anchor.digest.slice(0, 16)}…`}>
+                            🔗 {anchor.digest.slice(7, 15)}
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="call-endpoint-box">
                     <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
                     <div className="flex" style={{ gap: 6 }}>
@@ -235,5 +259,144 @@ function ProviderRow(props: { idx: number; wallet: string; name: string | null; 
         </tr>
       )}
     </>
+  );
+}
+import { decisionApi, type DecisionRow } from "../api/core";
+
+function pct(x: number | null | undefined): string {
+  return x == null ? "-" : `${Math.round(x * 100)}%`;
+}
+
+/** 四分量迷你条形（rev/ful/fb/fresh 各自 score_component） */
+function ScoreBars({ row }: { row: DecisionRow }) {
+  const parts: Array<{ key: string; label: string; v: number | null; w: number; color: string }> = [
+    { key: "rev", label: `收入 ${(row.components.revenue.score_component * 100).toFixed(0)}%`, v: row.components.revenue.score_component, w: 0.4, color: "#2f5fe0" },
+    { key: "ful", label: `履约 ${pct(row.components.fulfillment.score_component)}`, v: row.components.fulfillment.score_component, w: 0.25, color: "#178a50" },
+    { key: "fb", label: `反馈 ${pct(row.components.feedback.score_component)}`, v: row.components.feedback.score_component, w: 0.2, color: "#f5a623" },
+    { key: "fresh", label: `新鲜 ${pct(row.components.freshness.score_component)}`, v: row.components.freshness.score_component, w: 0.15, color: "#9b59b6" },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 1, alignItems: "center", height: 8, width: 140, borderRadius: 4, overflow: "hidden", background: "var(--code-bg)" }} title={parts.map((p) => `${p.label}（权重 ${p.w}）`).join(" · ")}>
+      {parts.map((p) => (
+        <div key={p.key} style={{ width: `${p.w * 100}%`, height: "100%", display: "flex" }}>
+          <div style={{ width: "100%", background: "var(--code-bg)" }}>
+            <div style={{ width: `${Math.max(0, Math.min(1, p.v ?? 0)) * 100}%`, height: "100%", background: p.color, opacity: 0.75 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "从未";
+  const h = (Date.now() - new Date(iso).getTime()) / 3_600_000;
+  if (h < 1) return `${Math.round(h * 60)} 分钟前`;
+  if (h < 48) return `${h.toFixed(1)} 小时前`;
+  return `${(h / 24).toFixed(1)} 天前`;
+}
+
+/** 决策视图：类目 chips + score 排序 + 时间拨针 */
+export function DecisionView() {
+  const [cat, setCat] = useState<string | null>(null);
+  const [asOf, setAsOf] = useState<string>(""); // 空=现在
+  const cats = useAsync(() => decisionApi.categories(), []);
+  const rows = useAsync(
+    () => decisionApi.services({ category: cat ?? undefined, window_hours: 168, as_of: asOf || undefined, sort: "score" }),
+    [cat, asOf]
+  );
+
+  return (
+    <div className="card">
+      <div className="flex" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <h3 className="mb-0">同类比价（决策视图）</h3>
+        <div className="flex" style={{ gap: 6 }}>
+          <label className="dim" style={{ fontSize: 12 }}>时间拨针：</label>
+          <input
+            type="datetime-local"
+            value={asOf}
+            onChange={(e) => setAsOf(e.target.value)}
+            aria-label="时间拨针（as_of）"
+            style={{ width: 200 }}
+          />
+          {asOf && (
+            <button className="btn small secondary" onClick={() => setAsOf("")}>
+              回到现在
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="card-desc" style={{ marginTop: 6 }}>
+        按综合分排序：score = 0.4×收入 + 0.25×履约 + 0.2×反馈 + 0.15×新鲜度（详见帮助页「决策层怎么算的」）。拖动时间拨针看排序随时间衰减重排。
+      </p>
+
+      {cats.data && (
+        <div className="flex" style={{ marginBottom: 10, gap: 6, flexWrap: "wrap" }} role="group" aria-label="类目筛选">
+          <button className={`btn small ${cat === null ? "" : "secondary"}`} onClick={() => setCat(null)}>
+            全部（{cats.data.total_active}）
+          </button>
+          {cats.data.categories.map((c) => (
+            <button key={c} className={`btn small ${cat === c ? "" : "secondary"}`} onClick={() => setCat(c)}>
+              {c}（{cats.data!.counts[c] ?? 0}）
+            </button>
+          ))}
+        </div>
+      )}
+
+      <AsyncSection state={rows} empty="该类目暂无在售服务">
+        {(d) => (
+          <table className="list">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>服务</th>
+                <th>价格</th>
+                <th>综合分</th>
+                <th>四分量</th>
+                <th>关键徽章</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.services.map((r, i) => (
+                <tr key={r.service_id}>
+                  <td className="num">{i + 1}</td>
+                  <td>
+                    <b>{r.name}</b>
+                    <div className="mono dim" style={{ fontSize: 11 }}>{r.service_id} · {r.category}</div>
+                  </td>
+                  <td className="num">{r.price}</td>
+                  <td className="num">
+                    <b>{r.score.toFixed(4)}</b>
+                  </td>
+                  <td>
+                    <ScoreBars row={r} />
+                  </td>
+                  <td>
+                    <span className="flex" style={{ gap: 4, flexWrap: "wrap" }}>
+                      <span className="badge ok" title="网关侧履约成功率">
+                        ✓ {pct(r.components.fulfillment.success_rate)}
+                      </span>
+                      {r.components.fulfillment.p95_ms != null && (
+                        <span className="badge muted" title="p95 延迟">
+                          p95 {r.components.fulfillment.p95_ms}ms
+                        </span>
+                      )}
+                      {r.components.feedback.count > 0 && (
+                        <span className="badge warn" title="验证付费的评价（贝叶斯均值防小样本刷分）">
+                          ★{r.components.feedback.avg?.toFixed(1) ?? "-"}（{r.components.feedback.count}）
+                        </span>
+                      )}
+                      <span className="badge muted" title={`最近活跃 ${timeAgo(r.components.freshness.last_activity_at)}（48h 半衰期）`}>
+                        🕐 {timeAgo(r.components.freshness.last_activity_at)}（衰减 {pct(r.components.freshness.score_component)}）
+                      </span>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </AsyncSection>
+    </div>
   );
 }
