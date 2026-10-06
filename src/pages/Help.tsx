@@ -42,17 +42,36 @@ export default function Help() {
           <div className="diagram">
             <div className="node" style={{ borderColor: "var(--success)" }}>
               <h4>本控制台 · Provider 工作台</h4>
-              <p>写 core（登记/manifest）· 写 8010（钱包绑定）· 读 PayVault credits · providerWithdraw</p>
+              <p>写 core（登记/manifest）· 写 8010（身份注册/钱包绑定）· 读 PayVault credits · providerWithdraw</p>
             </div>
             <div className="arrow">+</div>
             <div className="node" style={{ borderColor: "var(--success)" }}>
               <h4>本控制台 · 消费端工作台</h4>
-              <p>本地钱包 EIP-712 签名 → X-PAYMENT → 网关 /call；mint/approve 测试资金</p>
+              <p>钱包扩展 EIP-712 签名 → X-PAYMENT → 网关 /call；mint/approve 测试资金</p>
             </div>
             <div className="arrow">→</div>
             <div className="node">
               <h4>keeper（网关内置）</h4>
               <p>settle 队列 → PayVault.chargeWithSigBatch 批量上链 → 总览页 GMV/proof</p>
+            </div>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <div className="dim" style={{ marginBottom: 6 }}>Provider 接入向导（第 0 步可选，身份注册内置于第 ① 步）：</div>
+            <div className="diagram">
+              <div className="node" style={{ borderColor: "var(--text-3)" }}>
+                <h4>⓪ 注册身份（可选）</h4>
+                <p>没有 ERC-8004 身份？第 ① 步展开「注册一个」<br />平台链上服务代发铸造，无需钱包签名</p>
+              </div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>① 登记 Provider</h4><p>agent_id + 名称<br />链上身份实时预检</p></div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>② 发布服务</h4><p>manifest 表单<br />定价/端点/schema</p></div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>③ 管理</h4><p>暂停/恢复/改价<br />= 重发 manifest</p></div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>④ 绑定收款钱包</h4><p>EIP-712 签名<br />5 分钟窗口</p></div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>⑤ 提现</h4><p>PayVault credits<br />providerWithdraw</p></div>
             </div>
           </div>
         </div>
