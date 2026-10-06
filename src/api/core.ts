@@ -8,7 +8,7 @@ export interface ServiceManifest {
   description: string;
   version: string;
   provider: { agent_id: number; wallet: string; display_name: string };
-  endpoint: { type: "http_json" | "internal"; url: string | null; timeout_ms: number };
+  endpoint: { type: "http_json" | "internal"; url: string | null; timeout_ms: number; method?: "GET" | "POST" };
   pricing: { token: string; model: string; amount: string; amount_raw: string };
   chain: { network: number };
   input_schema: Record<string, unknown>;
@@ -141,6 +141,27 @@ export interface ServiceCredentialsInfo {
   updated?: boolean;
   deleted?: boolean;
 }
+
+/** 上游探测结果（core 平台代发，护栏：仅 http/https、私网 403、20s、不跟随重定向）。 */
+export interface ProbeResult {
+  status_code: number;
+  content_type: string | null;
+  elapsed_ms: number;
+  body: unknown;
+}
+
+export interface ProbeRequest {
+  url: string;
+  method: "GET" | "POST";
+  query?: Record<string, string>;
+  body?: Record<string, unknown>;
+  headers?: Record<string, string>;
+}
+
+export const probeApi = {
+  probe: (req: ProbeRequest) =>
+    apiFetch<ProbeResult>(`${CORE_BASE}/services/probe`, { ...jsonInit("POST", req), timeoutMs: 30_000 }).then((r) => r.data),
+};
 
 export const credentialsApi = {
   /** 全量替换语义：headers 为空对象 = 清空全部。 */
