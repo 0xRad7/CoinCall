@@ -6,6 +6,7 @@ V1 内置两种：
 """
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -27,7 +28,12 @@ class ProviderError(Exception):
 class ProviderAdapter(Protocol):
     name: str
 
-    async def forward(self, manifest: ManifestInfo, body: Any) -> ProviderResult: ...
+    async def forward(
+        self,
+        manifest: ManifestInfo,
+        body: Any,
+        upstream_headers: Mapping[str, str] | None = None,
+    ) -> ProviderResult: ...
 
 
 class InternalEchoProvider:
@@ -35,7 +41,13 @@ class InternalEchoProvider:
 
     name = "internal-echo"
 
-    async def forward(self, manifest: ManifestInfo, body: Any) -> ProviderResult:
+    async def forward(
+        self,
+        manifest: ManifestInfo,
+        body: Any,
+        upstream_headers: Mapping[str, str] | None = None,
+    ) -> ProviderResult:
+        del upstream_headers  # internal 端点无上游凭证概念
         return ProviderResult(
             status_code=200,
             body={
@@ -57,7 +69,12 @@ class HttpJsonProvider:
     def __init__(self, http: httpx.AsyncClient) -> None:
         self.http = http
 
-    async def forward(self, manifest: ManifestInfo, body: Any) -> ProviderResult:
+    async def forward(
+        self,
+        manifest: ManifestInfo,
+        body: Any,
+        upstream_headers: Mapping[str, str] | None = None,
+    ) -> ProviderResult:
         if not manifest.manifest.endpoint.url:
             raise ProviderError("manifest.endpoint.url 缺失")
         timeout_s = manifest.manifest.endpoint.timeout_ms / 1000
@@ -67,6 +84,7 @@ class HttpJsonProvider:
                 manifest.manifest.endpoint.url,
                 json=body,
                 timeout=timeout_s,
+                headers=dict(upstream_headers) if upstream_headers else None,
             )
         except httpx.HTTPError as exc:
             raise ProviderError(f"provider 超时/网络错误: {exc}") from exc

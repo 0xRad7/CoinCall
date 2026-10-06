@@ -288,7 +288,13 @@ class InternalServicesProvider:
             }
         self._echo = InternalEchoProvider()
 
-    async def forward(self, manifest: ManifestInfo, body: Any) -> ProviderResult:
+    async def forward(
+        self,
+        manifest: ManifestInfo,
+        body: Any,
+        upstream_headers: Mapping[str, str] | None = None,
+    ) -> ProviderResult:
+        del upstream_headers  # internal 端点无上游凭证概念
         name = handler_name(manifest.manifest.endpoint.url)
         handler = self._handlers.get(name) if name is not None else None
         if handler is None:

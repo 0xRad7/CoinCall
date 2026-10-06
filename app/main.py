@@ -29,6 +29,7 @@ from app.core.shadow_gate import ShadowGate
 from app.modules.auth import CoreAuthClient
 from app.modules.call_route import router as call_router
 from app.modules.calls import CallStore
+from app.modules.credentials_client import UpstreamCredentialsClient
 from app.modules.internal_services import InternalServicesProvider
 from app.modules.keeper import BotChainSettleChain, Keeper, provider_wallet_resolver
 from app.modules.keeper_route import router as keeper_router
@@ -55,6 +56,9 @@ def create_app(
         # trust_env=False：core(8020)/keeper 通道都是直连本机地址，C-07——系统代理劫持 502
         app.state.http = httpx.AsyncClient(timeout=10.0, trust_env=False)
         app.state.auth = auth_client or CoreAuthClient(
+            base_url=app_settings.core_base_url, http=app.state.http
+        )
+        app.state.upstream_credentials = UpstreamCredentialsClient(
             base_url=app_settings.core_base_url, http=app.state.http
         )
         app.state.manifests = manifest_client or ManifestClient(

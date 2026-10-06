@@ -24,7 +24,9 @@ def _capture_client(captured: dict) -> httpx.AsyncClient:
 def test_forward_injects_credentials_and_strips_consumer_headers() -> None:
     captured: dict = {}
     provider = HttpJsonProvider(http=_capture_client(captured))
-    manifest = make_manifest(endpoint_url="https://upstream.example/api")
+    manifest = make_manifest(
+        endpoint={"type": "http_json", "url": "https://upstream.example/api", "timeout_ms": 30000}
+    )
     asyncio.run(
         provider.forward(manifest, {"q": "hi"}, upstream_headers={"X-API-KEY": "sk-upstream-1"})
     )
@@ -39,7 +41,9 @@ def test_forward_injects_credentials_and_strips_consumer_headers() -> None:
 def test_forward_without_credentials_sends_no_extra_headers() -> None:
     captured: dict = {}
     provider = HttpJsonProvider(http=_capture_client(captured))
-    manifest = make_manifest(endpoint_url="https://upstream.example/api")
+    manifest = make_manifest(
+        endpoint={"type": "http_json", "url": "https://upstream.example/api", "timeout_ms": 30000}
+    )
     asyncio.run(provider.forward(manifest, {"q": "hi"}))
     sent = {k.lower() for k in captured["headers"]}
     assert "x-api-key" not in sent

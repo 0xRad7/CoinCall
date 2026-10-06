@@ -25,6 +25,7 @@ from app.core.errors import ApiError, PaymentRequiredError
 from app.core.payment import PaymentError, XPayment, parse_x_payment
 from app.modules.auth import ApiKeyInfo, AuthError, CoreAuthClient
 from app.modules.calls import CallRecord, CallStatus, CallStore
+from app.modules.credentials_client import UpstreamCredentialsClient
 from app.modules.keeper import Keeper
 from app.modules.manifest_client import ManifestInfo, ServiceNotFoundError
 from app.modules.providers import ProviderAdapter, ProviderError, ProviderResult
@@ -234,10 +235,16 @@ async def _forward_and_finalize(  # noqa: PLR0917 —— 单请求上下文参�
     price_raw = manifest.manifest.pricing.amount_raw
     price = int(price_raw)
     provider = _provider_for(request, manifest)
+    upstream_headers = None
+    if manifest.manifest.endpoint.type == "http_json":
+        creds: UpstreamCredentialsClient = request.app.state.upstream_credentials
+        upstream_headers = await creds.get(manifest.service_id)
 
     started = time.monotonic()
     try:
-        result: ProviderResult = await provider.forward(manifest, body)
+        result: ProviderResult = await provider.forward(
+            manifest, body, upstream_headers=upstream_headers
+        )
     except ProviderError as exc:
         gate.release(key_info.key_id, price)
         store.mark_call(call_id, CallStatus.ABORTED)
