@@ -165,8 +165,8 @@ export default function Help() {
         <h3>钱包连接流（新）</h3>
         <div className="diagram">
           <div className="node">
-            <h4>点击「连接钱包」</h4>
-            <p>只调 eth_requestAccounts 读地址<br />（不请求任何私钥/权限）</p>
+            <h4>点「连接钱包」</h4>
+            <p>入口：顶栏（未连接时常驻）或任一工作台内联按钮<br />只调 eth_requestAccounts 读地址（不请求任何私钥/权限）</p>
           </div>
           <div className="arrow">→</div>
           <div className="node">
