@@ -9,6 +9,8 @@ export interface CallReceipt {
   receiptId: string | null;
   chargedRaw: string | null;
   receiptSig: string | null;
+  receiptSigEd: string | null; // X-Receipt-Sig-Ed25519（评价用，规范串 receipt_id|service_id|amount_raw|status|ts）
+  receiptTs: number | null; // X-Receipt-Ts（unix 秒）
 }
 
 export interface Gateway402Challenge {
@@ -52,6 +54,8 @@ export const gatewayApi = {
         receiptId: r.headers.get("X-Receipt-Id"),
         chargedRaw: r.headers.get("X-Charged-Raw"),
         receiptSig: r.headers.get("X-Receipt-Sig"),
+        receiptSigEd: r.headers.get("X-Receipt-Sig-Ed25519"),
+        receiptTs: r.headers.get("X-Receipt-Ts") ? Number(r.headers.get("X-Receipt-Ts")) : null,
       },
     };
   },

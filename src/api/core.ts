@@ -206,3 +206,131 @@ export const credentialsApi = {
       method: "DELETE",
     }).then((r) => r.data),
 };
+
+// ---- 决策层（G1 core）----
+
+export interface DecisionCategories {
+  categories: string[];
+  counts: Record<string, number>;
+  total_active: number;
+}
+
+export interface DecisionWeights {
+  revenue: number;
+  fulfillment: number;
+  feedback: number;
+  freshness: number;
+}
+
+export interface DecisionRow {
+  service_id: string;
+  name: string;
+  status: string;
+  category: string;
+  tags: string[];
+  provider_wallet: string;
+  provider_agent_id: number | null;
+  price_raw: string;
+  price: string;
+  score: number;
+  components: {
+    revenue: {
+      total_raw: number;
+      total: string;
+      charged_count: number;
+      distinct_payers: number;
+      score_component: number;
+      formula?: string;
+      proof?: string;
+    };
+    fulfillment: {
+      available: boolean;
+      calls_success?: number;
+      calls_settled?: number;
+      calls_aborted?: number;
+      success_rate: number | null;
+      p50_ms?: number;
+      p95_ms?: number | null;
+      window_hours?: number;
+      score_component: number | null;
+      formula?: string;
+      proof?: { digest: string; anchor_tx: string } | string | null;
+    };
+    feedback: {
+      count: number;
+      avg: number | null;
+      bayesian_avg?: number;
+      score_component: number | null;
+      formula?: string;
+      proof?: string;
+    };
+    freshness: {
+      last_activity_at: string | null;
+      age_h?: number;
+      half_life_h?: number;
+      score_component: number | null;
+      formula?: string;
+    };
+  };
+}
+
+export interface DecisionServicesResponse {
+  category: string | null;
+  window_hours: number;
+  as_of: string;
+  sort: string;
+  weights: DecisionWeights;
+  formula?: string;
+  services: DecisionRow[];
+  degraded: string[];
+}
+
+export interface FeedbackEntry {
+  receipt_id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface FeedbackSummary {
+  service_id: string;
+  count: number;
+  avg: number | null;
+  verified_paid?: boolean;
+  entries: FeedbackEntry[];
+}
+
+export const decisionApi = {
+  categories: () => apiFetch<DecisionCategories>(`${CORE_BASE}/decision/categories`).then((r) => r.data),
+  services: (q: { category?: string; window_hours?: number; as_of?: string; sort?: "score" | "price" }) => {
+    const params = new URLSearchParams();
+    if (q.category) params.set("category", q.category);
+    if (q.window_hours != null) params.set("window_hours", String(q.window_hours));
+    if (q.as_of) params.set("as_of", q.as_of);
+    if (q.sort) params.set("sort", q.sort);
+    return apiFetch<DecisionServicesResponse>(`${CORE_BASE}/decision/services?${params.toString()}`).then((r) => r.data);
+  },
+  explain: (serviceId: string) =>
+    apiFetch<DecisionServicesResponse & { feedback_entries: FeedbackEntry[]; anchor: { digest: string; anchor_tx: string; anchored_at: string } | null }>(
+      `${CORE_BASE}/decision/explain/${serviceId}`
+    ).then((r) => r.data),
+};
+
+/** 收据五元组（规范串 receipt_id|service_id|amount_raw|status|ts 的成分；sig 为 Ed25519 hex，来自响应头）。 */
+export interface ReceiptTuple {
+  receipt_id: string;
+  service_id: string;
+  amount_raw: string;
+  status: string; // 网关侧恒 "success"（feedback 核验要求）
+  ts: number;
+  receipt_sig_hex: string;
+}
+
+export const feedbackApi = {
+  submit: (serviceId: string, receipt: ReceiptTuple, rating: number, comment?: string) =>
+    apiFetch<{ ok: true }>(`${CORE_BASE}/feedback`, {
+      ...jsonInit("POST", { service_id: serviceId, receipt, rating, ...(comment ? { comment } : {}) }),
+      retries: 0, // 评价有 409/429 语义，失败不该盲目重试
+    }).then((r) => r.data),
+  summary: (serviceId: string) => apiFetch<FeedbackSummary>(`${CORE_BASE}/feedback/services/${serviceId}`).then((r) => r.data),
+};

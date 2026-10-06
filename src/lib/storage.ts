@@ -9,6 +9,10 @@ export interface CallHistoryEntry {
   amountRaw: string;
   receiptId: string | null;
   chargedRaw: string | null;
+  /** 评价用收据材料（成功调用才有；来自 X-Receipt-Sig-Ed25519 / X-Receipt-Ts） */
+  receiptSigEd?: string | null;
+  receiptTs?: number | null;
+  rated?: boolean;
   ok: boolean;
   /** 本笔之前本会话是否经历了授权步骤（演示「首单两步、复购一步」） */
   withApprove?: boolean;
@@ -33,6 +37,13 @@ export function loadHistory(): CallHistoryEntry[] {
 
 export function appendHistory(e: CallHistoryEntry): void {
   const list = [e, ...loadHistory()].slice(0, HISTORY_MAX);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  window.dispatchEvent(new CustomEvent("coincall:history"));
+}
+
+/** 标记某条历史已评价（就地更新 localStorage）。 */
+export function markHistoryRated(ts: number): void {
+  const list = loadHistory().map((e) => (e.ts === ts ? { ...e, rated: true } : e));
   localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
   window.dispatchEvent(new CustomEvent("coincall:history"));
 }
