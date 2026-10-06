@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS providers (
   agent_id     BIGINT PRIMARY KEY,
   display_name VARCHAR,
   wallet       VARCHAR,
+  claim_wallet VARCHAR,
   created_at   TIMESTAMP DEFAULT now()
 )
 """
@@ -85,6 +86,12 @@ class CoreStore:
             self.conn.execute(SERVICES_DDL)
             self.conn.execute(API_KEYS_DDL)
             self.conn.execute(PROVIDERS_DDL)
+            # 旧库迁移：providers 补 claim_wallet 列（2026-10-06 认领语义）
+            cols = self.conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='providers'"
+            ).fetchall()
+            if "claim_wallet" not in [c[0] for c in cols]:
+                self.conn.execute("ALTER TABLE providers ADD COLUMN claim_wallet VARCHAR")
             self.conn.execute(CHARGED_EVENTS_DDL)
             self.conn.execute(WATERMARKS_DDL)
             self.conn.execute(SERVICE_CREDENTIALS_DDL)
@@ -247,18 +254,23 @@ class CoreStore:
 
     # ---- providers（01 §4）----
 
-    def upsert_provider(self, agent_id: int, display_name: str, wallet: str) -> None:
+    def upsert_provider(
+        self, agent_id: int, display_name: str, wallet: str, claim_wallet: str | None = None
+    ) -> None:
         with self._lock:
             self.conn.execute(
-                "INSERT INTO providers (agent_id, display_name, wallet) VALUES (?, ?, ?) "
+                "INSERT INTO providers (agent_id, display_name, wallet, claim_wallet) "
+                "VALUES (?, ?, ?, ?) "
                 "ON CONFLICT (agent_id) DO UPDATE SET "
-                "display_name = excluded.display_name, wallet = excluded.wallet",
-                [agent_id, display_name, wallet],
+                "display_name = excluded.display_name, wallet = excluded.wallet, "
+                "claim_wallet = COALESCE(providers.claim_wallet, excluded.claim_wallet)",
+                [agent_id, display_name, wallet, claim_wallet],
             )
 
     def get_provider(self, agent_id: int) -> dict[str, Any] | None:
         row = self.conn.execute(
-            "SELECT agent_id, display_name, wallet, created_at FROM providers WHERE agent_id = ?",
+            "SELECT agent_id, display_name, wallet, claim_wallet, created_at "
+            "FROM providers WHERE agent_id = ?",
             [agent_id],
         ).fetchone()
         if row is None:
@@ -267,12 +279,13 @@ class CoreStore:
             "agent_id": row[0],
             "display_name": row[1],
             "wallet": row[2],
-            "created_at": str(row[3]),
+            "claim_wallet": row[3],
+            "created_at": str(row[4]),
         }
 
     def list_providers(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT agent_id, display_name, wallet, created_at FROM providers "
+            "SELECT agent_id, display_name, wallet, claim_wallet, created_at FROM providers "
             "ORDER BY created_at, agent_id"
         ).fetchall()
         return [
@@ -280,7 +293,8 @@ class CoreStore:
                 "agent_id": r[0],
                 "display_name": r[1],
                 "wallet": r[2],
-                "created_at": str(r[3]),
+                "claim_wallet": r[3],
+                "created_at": str(r[4]),
             }
             for r in rows
         ]

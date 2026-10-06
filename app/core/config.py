@@ -32,4 +32,6 @@ class Settings(BaseSettings):
     # 前端控制台（coincall-console，Vite 5173）跨域白名单；逗号分隔，空=关闭
     # 上游凭证静态加密密钥（Fernet 派生；生产从 env 注入）
     credential_secret: str = "coincall-dev-credential-secret"  # noqa: S105
+    # 平台代管账户（认领三态分类用；事实源=bot-chain-api 出资账户）
+    platform_custodian_address: str = "0xc37ffe97b4d2c3d0187b1ddedf273e52a461b63a"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

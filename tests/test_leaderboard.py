@@ -82,7 +82,14 @@ class TestLeaderboardUnit:
     @pytest.mark.unit
     def test_providers_revenue_first_ordering(self, tmp_path: Path) -> None:
         with _client(tmp_path, chain=_chain_with_history()) as client:
-            client.post("/providers", json={"agent_id": 137, "display_name": "Team booth-demo"})
+            client.post(
+                "/providers",
+                json={
+                    "agent_id": 137,
+                    "display_name": "Team booth-demo",
+                    "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+                },
+            )
             resp = client.get("/leaderboard/providers")
             assert resp.status_code == 200, resp.text
             body = resp.json()
@@ -231,7 +238,14 @@ class TestLeaderboardUnit:
             stats={"services": [], "totals": {"calls_success": 7, "calls_aborted": 1}}
         )
         with _client(tmp_path, chain=_chain_with_history(), gateway=gateway) as client:
-            client.post("/providers", json={"agent_id": 137, "display_name": "t"})
+            client.post(
+                "/providers",
+                json={
+                    "agent_id": 137,
+                    "display_name": "t",
+                    "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+                },
+            )
             assert client.post("/manifests", json=VALID_MANIFEST).status_code == 201
             ov = client.get("/stats/overview").json()
             assert ov["gmv_raw"] == KNOWN_ONCHAIN_GMV

@@ -21,7 +21,7 @@ class FakeIdentityClient:
         self.known = known if known is not None else dict(KNOWN_IDENTITIES)
         self.calls: list[int] = []
 
-    def get(self, agent_id: int) -> IdentityInfo | None:
+    def get(self, agent_id: int, *, force: bool = False) -> IdentityInfo | None:
         self.calls.append(agent_id)
         wallet = self.known.get(agent_id)
         if wallet is None:

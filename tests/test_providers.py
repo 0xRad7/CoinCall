@@ -15,13 +15,21 @@ from app.modules.identity import BotChainIdentityClient
 from tests.conftest import VALID_MANIFEST
 
 REAL_AGENT_ID = 162  # 链上真实身份（任务书给定）
+W = "0x1234567890abcdef1234567890abcdef12345678"
 UNKNOWN_AGENT_ID = 999_999_999
 
 
 class TestProvidersUnit:
     @pytest.mark.unit
     def test_register_validates_identity_and_stores_wallet(self, client: TestClient) -> None:
-        resp = client.post("/providers", json={"agent_id": 137, "display_name": "Team booth-demo"})
+        resp = client.post(
+            "/providers",
+            json={
+                "agent_id": 137,
+                "display_name": "Team booth-demo",
+                "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+            },
+        )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["agent_id"] == 137
@@ -32,7 +40,8 @@ class TestProvidersUnit:
     @pytest.mark.unit
     def test_register_unknown_identity_422(self, client: TestClient) -> None:
         resp = client.post(
-            "/providers", json={"agent_id": UNKNOWN_AGENT_ID, "display_name": "ghost"}
+            "/providers",
+            json={"agent_id": UNKNOWN_AGENT_ID, "display_name": "ghost", "claim_wallet": W},
         )
         assert resp.status_code == 422, resp.text
         body = resp.json()
@@ -107,8 +116,22 @@ class TestProvidersUnit:
 
     @pytest.mark.unit
     def test_register_upsert_updates_display_name(self, client: TestClient) -> None:
-        client.post("/providers", json={"agent_id": 137, "display_name": "v1"})
-        resp = client.post("/providers", json={"agent_id": 137, "display_name": "v2"})
+        client.post(
+            "/providers",
+            json={
+                "agent_id": 137,
+                "display_name": "v1",
+                "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+            },
+        )
+        resp = client.post(
+            "/providers",
+            json={
+                "agent_id": 137,
+                "display_name": "v2",
+                "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+            },
+        )
         assert resp.status_code == 201
         listed = {p["agent_id"]: p for p in client.get("/providers").json()["providers"]}
         assert listed[137]["display_name"] == "v2"
@@ -116,14 +139,28 @@ class TestProvidersUnit:
     @pytest.mark.unit
     def test_list_providers_and_empty(self, client: TestClient) -> None:
         assert client.get("/providers").json()["providers"] == []
-        client.post("/providers", json={"agent_id": 137, "display_name": "t"})
+        client.post(
+            "/providers",
+            json={
+                "agent_id": 137,
+                "display_name": "t",
+                "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+            },
+        )
         body = client.get("/providers").json()["providers"]
         assert len(body) == 1
         assert set(body[0]) == {"agent_id", "display_name", "wallet", "created_at"}
 
     @pytest.mark.unit
     def test_provider_services_link_to_manifests(self, client: TestClient) -> None:
-        client.post("/providers", json={"agent_id": 137, "display_name": "t"})
+        client.post(
+            "/providers",
+            json={
+                "agent_id": 137,
+                "display_name": "t",
+                "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+            },
+        )
         resp = client.post("/manifests", json=VALID_MANIFEST)
         assert resp.status_code == 201, resp.text
         listed = client.get("/providers/137/services")
@@ -148,7 +185,15 @@ class TestProvidersUnit:
             client.post("/providers", json={"agent_id": 0, "display_name": "x"}).status_code == 422
         )
         assert (
-            client.post("/providers", json={"agent_id": 137, "display_name": ""}).status_code == 422
+            client.post(
+                "/providers",
+                json={
+                    "agent_id": 137,
+                    "display_name": "",
+                    "claim_wallet": "0x1234567890abcdef1234567890abcdef12345678",
+                },
+            ).status_code
+            == 422
         )
 
 

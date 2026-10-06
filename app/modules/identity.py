@@ -25,7 +25,7 @@ class IdentityInfo(BaseModel):
 class IdentityClient(Protocol):
     """身份查询协议：返回 None = 链上不存在（404）。"""
 
-    def get(self, agent_id: int) -> IdentityInfo | None: ...
+    def get(self, agent_id: int, *, force: bool = False) -> IdentityInfo | None: ...
 
 
 class BotChainIdentityClient:
@@ -33,17 +33,17 @@ class BotChainIdentityClient:
 
     def __init__(self, http: httpx.Client, base_url: str, ttl: float = 60.0) -> None:
         self._http = http
-        self._base = base_url.rstrip("/")
+        self._base_url = base_url.rstrip("/")
         self._ttl = ttl
         self._cache: dict[int, tuple[float, IdentityInfo | None]] = {}
 
-    def get(self, agent_id: int) -> IdentityInfo | None:
+    def get(self, agent_id: int, *, force: bool = False) -> IdentityInfo | None:
         now = time.monotonic()
         cached = self._cache.get(agent_id)
-        if cached is not None and now - cached[0] < self._ttl:
+        if not force and cached is not None and now - cached[0] < self._ttl:
             return cached[1]
         try:
-            resp = self._http.get(f"{self._base}/api/v1/agent-identity/{agent_id}")
+            resp = self._http.get(f"{self._base_url}/api/v1/agent-identity/{agent_id}")
         except httpx.HTTPError as exc:
             raise ApiError(
                 status_code=502,
