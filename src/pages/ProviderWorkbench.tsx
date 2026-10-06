@@ -527,16 +527,34 @@ export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null
 
   const mine = (catalog.data?.services ?? []).filter((s) => agentId == null || s.manifest.provider.agent_id === agentId);
 
+  // 本机管理面内部通道：全量 manifest（含真实上游 url——公开 API 恒脱敏，直接用 catalog 数据 repost 会把 url 抹掉）
+  const [fullManifests, setFullManifests] = useState<Record<string, ServiceManifest | null>>({});
+
+  useEffect(() => {
+    if (!catalog.data) return;
+    for (const s of catalog.data.services) {
+      const sid = s.service_id;
+      if (fullManifests[sid] !== undefined) continue;
+      if (agentId != null && s.manifest.provider.agent_id !== agentId) continue;
+      coreApi
+        .internalManifest(sid)
+        .then((m) => setFullManifests((prev) => ({ ...prev, [sid]: m })))
+        .catch(() => setFullManifests((prev) => ({ ...prev, [sid]: null })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog.data, agentId]);
+
   const repost = async (svc: ServiceManifest, patch: Partial<ServiceManifest>) => {
     setBusy(true);
     setError(null);
     try {
+      const base = fullManifests[svc.service_id] ?? (await coreApi.internalManifest(svc.service_id).catch(() => svc));
       const next: ServiceManifest = {
-        ...svc,
+        ...base,
         ...patch,
-        version: bumpVersion(svc.version),
+        version: bumpVersion(base.version),
       };
-      if (patch.pricing) next.pricing = { ...svc.pricing, ...patch.pricing };
+      if (patch.pricing) next.pricing = { ...base.pricing, ...patch.pricing };
       await coreApi.publishManifest(next);
       setConfirm(null);
       catalog.reload();
@@ -593,6 +611,11 @@ export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null
                         )}
                       </div>
                       <div className="mono dim">{s.service_id} · v{m.version}</div>
+                      {m.endpoint.type === "http_json" && (
+                        <div className="mono dim" style={{ fontSize: 11 }} title="你的真实上游（仅管理面可见，公开目录恒脱敏）">
+                          ↳ {fullManifests[s.service_id]?.endpoint.url ?? "…"}
+                        </div>
+                      )}
                     </td>
                     <td>
                       <Badge kind={s.status === "active" ? "ok" : "warn"}>{s.status}</Badge>
