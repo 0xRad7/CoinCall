@@ -64,7 +64,7 @@ def _seed_services(client: TestClient) -> None:
     assert client.post("/manifests", json=VALID_MANIFEST).status_code == 201
     weather = copy.deepcopy(VALID_MANIFEST)
     weather["service_id"] = OTHER_SERVICE
-    weather["provider"] = dict(weather["provider"], agent_id=138, wallet="0xee" + "ee" * 19 + "ee")
+    weather["provider"] = dict(weather["provider"], agent_id=138, wallet="0x" + "ee" * 20)
     assert client.post("/manifests", json=weather).status_code == 201
 
 
@@ -183,7 +183,9 @@ class TestFeedbackFivePaths:
             _seed_services(client)
             key = client.app.state.receipt_pubkey.key
             # 收据真实属于 svc_weather_v1（签名合法），却提交给 svc_translate_v1
-            resp = _post(client, _body(key, receipt_svc=OTHER_SERVICE))
+            resp = _post(
+                client, _body(key, receipt_svc=OTHER_SERVICE, target_svc="svc_translate_v1")
+            )
             assert resp.status_code == 422
             assert resp.json()["code"] == "receipt_service_mismatch"
 

@@ -32,6 +32,8 @@ from app.modules.catalog import router as catalog_router
 from app.modules.credentials import build_fernet
 from app.modules.credentials import router as credentials_router
 from app.modules.decision import router as decision_router
+from app.modules.feedback import ReceiptPayerSource
+from app.modules.feedback import router as feedback_router
 from app.modules.identity import BotChainIdentityClient, IdentityClient
 from app.modules.leaderboard import (
     BotChainClient,
@@ -57,9 +59,11 @@ def create_app(
     gateway_client: GatewayStatsSource | None = None,
     probe_http: httpx.Client | None = None,
     receipt_key_client: ReceiptPubkeySource | None = None,
+    feedback_payer: ReceiptPayerSource | None = None,
 ) -> FastAPI:
     """chain_client/gateway_client 即排行榜双源注入口（生产装配真实 8010/8030 客户端）；
-    receipt_key_client 为网关收据公钥源注入口（反馈面 Ed25519 验签用）。"""
+    receipt_key_client 为网关收据公钥源注入口（反馈面 Ed25519 验签用）；
+    feedback_payer 为逐收据 payer oracle（防自评 403 数据面，生产 None=规则挂起）。"""
     app_settings = settings or Settings()
 
     @asynccontextmanager
@@ -84,6 +88,8 @@ def create_app(
         app.state.receipt_pubkey = receipt_key_client or ReceiptPubkeyClient(
             http, app_settings.gateway_base_url, app_settings.receipt_pubkey_ttl
         )
+        # 防自评 oracle（10 §2）：网关统计未暴露逐收据 payer 前生产侧为 None（CONSTRAINTS §E）
+        app.state.feedback_payer = feedback_payer
         # 启动预热拉取（10 §2）；失败降级不阻塞启动（反馈面 503，其他面不受影响）
         with suppress(Exception):
             app.state.receipt_pubkey.public_key_hex()
@@ -146,6 +152,7 @@ def create_app(
     app.include_router(probe_router)
     app.include_router(leaderboard_router)
     app.include_router(decision_router)
+    app.include_router(feedback_router)
     return app
 
 
