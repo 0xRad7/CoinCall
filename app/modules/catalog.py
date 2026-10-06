@@ -25,6 +25,20 @@ def _store(request: Request) -> CoreStore:
     return store
 
 
+def _redact_row(row: dict[str, object]) -> dict[str, object]:
+    """公开面脱敏：抹去 endpoint.url——真实上游只经网关内部通道消费，
+    消费者的调用端点恒为 POST {gateway}/call/{service_id}（防绕过付费直连）。"""
+    out = dict(row)
+    manifest = out.get("manifest")
+    if isinstance(manifest, dict) and isinstance(manifest.get("endpoint"), dict):
+        manifest = dict(manifest)
+        endpoint = dict(manifest["endpoint"])
+        endpoint["url"] = None
+        manifest["endpoint"] = endpoint
+        out["manifest"] = manifest
+    return out
+
+
 @router.post("/manifests", status_code=201, response_model=ManifestAck)
 def publish_manifest(body: dict[str, object], request: Request) -> ManifestAck:
     """发布/更新 ServiceManifest（upsert by service_id）。
@@ -66,13 +80,27 @@ def get_manifest(service_id: str, request: Request) -> dict[str, object]:
             detail=f"service 不存在: {service_id}",
             code="service_not_found",
         )
+    return _redact_row(row)
+
+
+@router.get("/internal/manifests/{service_id}")
+def get_manifest_internal(service_id: str, request: Request) -> dict[str, object]:
+    """网关转发用全量 manifest（含 endpoint.url）；本机管理面 posture（同 /internal/*）。"""
+    row = _store(request).get_service(service_id)
+    if row is None:
+        raise ApiError(
+            status_code=404,
+            error="not_found",
+            detail=f"service 不存在: {service_id}",
+            code="service_not_found",
+        )
     return row
 
 
 @router.get("/catalog")
 def catalog(request: Request, status: str | None = None) -> JSONResponse:
-    """机读目录（Agent 发现服务入口）；响应附 ETag（目录版本）。"""
-    rows = _store(request).list_services(status)
+    """机读目录（Agent 发现服务入口）；响应附 ETag（目录版本）。公开面已脱敏 url。"""
+    rows = [_redact_row(r) for r in _store(request).list_services(status)]
     etag = _store(request).catalog_etag()
     return JSONResponse(
         content={"services": rows, "count": len(rows)},
