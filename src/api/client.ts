@@ -81,20 +81,46 @@ export function normalizeErrorBody(body: unknown): Normalized {
   return out;
 }
 
-export async function apiFetch<T>(
-  url: string,
-  init?: RequestInit & { timeoutMs?: number }
-): Promise<{ data: T; headers: Headers; status: number }> {
+async function fetchOnce(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), init?.timeoutMs ?? 30_000);
-  let resp: Response;
   try {
-    resp = await fetch(url, { ...init, signal: ctrl.signal });
-  } catch (e) {
-    throw networkError(e, url);
+    return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function apiFetch<T>(
+  url: string,
+  init?: RequestInit & { timeoutMs?: number; retries?: number }
+): Promise<{ data: T; headers: Headers; status: number }> {
+  const retries = init?.retries ?? 2; // core 带看门狗自愈（偶发瞬断 5s 内恢复）——网络错/52x 自动重试
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetchOnce(url, init);
+    } catch (e) {
+      lastErr = networkError(e, url);
+      if (attempt < retries) {
+        await sleep(1200 * (attempt + 1));
+        continue;
+      }
+      throw lastErr;
+    }
+    if (resp.status >= 502 && resp.status <= 599 && attempt < retries) {
+      await sleep(1200 * (attempt + 1));
+      continue; // 52x（含看门狗重启窗口）重试
+    }
+    return settle<T>(resp, url);
+  }
+  throw lastErr ?? networkError(new Error("unreachable"), url);
+}
+
+async function settle<T>(resp: Response, _url: string): Promise<{ data: T; headers: Headers; status: number }> {
   const text = await resp.text();
   let body: unknown = undefined;
   if (text) {
