@@ -16,6 +16,7 @@ import { browserProvider, isUserRejected, sendInjectedTx, waitForInjectedReceipt
 import { useWallet } from "../state/WalletContext";
 import { AmountInput } from "../components/AmountInput";
 import { IdentityRegister } from "../components/IdentityRegister";
+import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { JsonEditor } from "../components/JsonEditor";
 import { AsyncSection, Badge, ConfirmDialog, CopyButton, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeError, labelField } from "../lib/errors";
@@ -312,16 +313,32 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
 
       <div className="field">
         <label>服务收款钱包（收入到账地址）</label>
-        <input
-          type="text"
-          className={!revenueWalletValid || fieldErr("provider.wallet") ? "invalid" : ""}
-          value={revenueWallet}
-          placeholder={wctx.address ? "" : "0x…（未连接钱包——先连接，或手动填写）"}
-          onChange={(e) => setRevenueWallet(e.target.value.trim())}
-        />
+        <div className="flex">
+          <div className="grow">
+            <input
+              type="text"
+              className={!revenueWalletValid || fieldErr("provider.wallet") ? "invalid" : ""}
+              value={revenueWallet}
+              placeholder="0x…（连接钱包自动填入，或手动填写）"
+              onChange={(e) => setRevenueWallet(e.target.value.trim())}
+              aria-label="服务收款钱包地址"
+            />
+          </div>
+          {!wctx.address ? (
+            <ConnectWalletButton size="small" label="连接钱包自动填" title="连接后此字段自动填入你的钱包地址" />
+          ) : (
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => setRevenueWallet(wctx.address!)}
+              title="把字段设为当前连接的钱包地址（手动改过也能一键填回）"
+            >
+              使用当前钱包 {wctx.address.slice(0, 6)}…
+            </button>
+          )}
+        </div>
         <div className="help">
-          付费调用的收入将进入此地址（PayVault Charged 记账键），与身份钱包相互独立；默认=你当前连接的钱包
-          {wctx.address ? `（${wctx.address.slice(0, 10)}…）` : "（当前未连接——可先到消费端工作台 ① 连接，或手填一个地址）"}。
+          付费调用的收入将进入此地址（PayVault Charged 记账键），与身份钱包相互独立；连接钱包后默认自动填入你的地址，也可手动填写任意地址。
         </div>
         {walletDiffers && (
           <div className="help" style={{ color: "var(--warn)" }}>

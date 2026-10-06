@@ -11,6 +11,7 @@ import { browserProvider, isUserRejected } from "../chain/injected";
 import { CHAIN_ID, IDENTITY_REGISTRY } from "../chain/constants";
 import { useWallet } from "../state/WalletContext";
 import { ErrorBox, WarnBox } from "./ui";
+import { ConnectWalletButton } from "./ConnectWalletButton";
 
 export interface BindIdentityWalletProps {
   agentId: number;
@@ -104,9 +105,10 @@ export function BindIdentityWallet({ agentId, owner, onBound }: BindIdentityWall
   return (
     <div style={{ marginTop: 8 }}>
       {!w.address ? (
-        <WarnBox>
-          要把身份钱包绑成你自己的地址，需要浏览器钱包：先到<b>消费端工作台 ①</b>（或本页刷新后的顶栏）连接钱包，再回到这里点绑定。
-        </WarnBox>
+        <div className="flex" style={{ marginTop: 6 }}>
+          <span className="dim">把身份钱包绑成你自己的地址需要浏览器钱包（签名在扩展弹窗里完成）：</span>
+          <ConnectWalletButton size="small" />
+        </div>
       ) : (
         <div className="btn-row">
           <button className="btn" onClick={run} disabled={phase === "signing" || phase === "submitting" || expired}>

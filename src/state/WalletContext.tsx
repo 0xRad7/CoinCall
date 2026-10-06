@@ -204,7 +204,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
     const choice = resolveAutoChoice(cands, sessionStorage.getItem(WALLET_RDNS_KEY));
     if (choice.type === "none") {
-      setIssue({ title: "未检测到浏览器钱包", hint: "请安装 OKX / MetaMask（或刷新页面重试）；也可以展开「没有浏览器钱包？」创建一次性演示钱包。" });
+      setIssue({ title: "未检测到浏览器钱包", hint: "请安装 OKX / MetaMask 扩展后刷新页面重试（未装扩展的演示机可用消费端工作台 ① 的一次性演示钱包兜底）。" });
       return null;
     }
     if (choice.type === "auto") {
