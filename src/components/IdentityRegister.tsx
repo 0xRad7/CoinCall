@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { botChainApi } from "../api/gateway";
 import { ErrorBox, InfoBox, TxLink, WarnBox } from "./ui";
+import { BindIdentityWallet } from "./BindIdentityWallet";
 
 const DEFAULT_AGENT_URI = "https://coincall-bot-chain-api.local/agents/console";
 
@@ -132,9 +133,32 @@ export function IdentityRegister({ onRegistered, pollMs = 2_000, maxAttempts = 3
         )}
         {minted && (
           <div className="alert ok" style={{ marginTop: 8 }}>
-            ✓ 身份 <b>#{minted.agentId}</b> 已铸造{minted.owner ? <>，owner=<span className="mono">{minted.owner.slice(0, 10)}…</span></> : null}
-            {minted.agentWallet ? <>，当前收款钱包 <span className="mono">{minted.agentWallet.slice(0, 10)}…</span></> : null}
+            ✓ 身份 <b>#{minted.agentId}</b> 已铸造
+            {minted.owner ? (
+              <>
+                ，owner=<span className="mono">{minted.owner.slice(0, 10)}…</span>（平台代管账户）
+              </>
+            ) : null}
+            {minted.agentWallet ? (
+              minted.agentWallet.toLowerCase() === minted.owner?.toLowerCase() ? (
+                <>
+                  ，身份钱包（当前=<b>平台代管</b> <span className="mono">{minted.agentWallet.slice(0, 10)}…</span>，建议绑定你自己的）
+                </>
+              ) : (
+                <>
+                  ，身份钱包 <span className="mono">{minted.agentWallet.slice(0, 10)}…</span>（你绑定的）
+                </>
+              )
+            ) : null}
             ，已自动填入上方 Agent ID，可直接「登记」继续向导。
+            <BindIdentityWallet
+              agentId={minted.agentId}
+              owner={minted.owner}
+              onBound={(newWallet) => setMinted((m) => (m ? { ...m, agentWallet: newWallet } : m))}
+            />
+            <div className="dim" style={{ marginTop: 6 }}>
+              可跳过绑定直接登记（internal 演示服务不受影响）；但服务收入进的是「服务收款钱包」（发布表单里指定、默认=你连接的钱包），发布前建议先把身份钱包绑成自己的。
+            </div>
           </div>
         )}
         {phase === "timeout" && !minted && (
