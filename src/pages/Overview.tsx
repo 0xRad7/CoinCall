@@ -4,7 +4,7 @@ import { coreApi, type ProofResponse } from "../api/core";
 import { gatewayApi } from "../api/gateway";
 import { useAsync } from "../lib/useAsync";
 import { AsyncSection, Badge, CopyButton, ErrorBox, Spinner, TxLink } from "../components/ui";
-import { GATEWAY_PUBLIC_URL, fromRaw } from "../chain/constants";
+import { gatewayCallUrl, fromRaw } from "../chain/constants";
 
 export default function Overview() {
   const overview = useAsync(() => coreApi.overview(), []);
@@ -105,12 +105,12 @@ export default function Overview() {
                     <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
                     <div className="flex" style={{ gap: 6 }}>
                       <span className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
-                        POST {GATEWAY_PUBLIC_URL}/call/{s.service_id}
+                        POST {gatewayCallUrl(s.service_id)}
                         {s.manifest.endpoint.type === "http_json" && (s.manifest.endpoint.method ?? "POST") === "GET" && (
                           <span className="badge muted" style={{ marginLeft: 6 }}>GET 上游</span>
                         )}
                       </span>
-                      <CopyButton text={`POST ${GATEWAY_PUBLIC_URL}/call/${s.service_id}`} label="复制" />
+                      <CopyButton text={`POST ${gatewayCallUrl(s.service_id)}`} label="复制" />
                     </div>
                     <div className="dim" style={{ fontSize: 11 }}>真实上游由平台中转，消费者只看到 CoinCall 端点</div>
                   </div>
