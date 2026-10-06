@@ -16,7 +16,8 @@ import { buildCallAuthorization, buildPaymentHeader } from "../chain/signing";
 import { SchemaForm } from "../components/SchemaForm";
 import { Badge, ConfirmDialog, CopyButton, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeChallenge, humanizeError } from "../lib/errors";
-import { addSpentRaw, appendHistory, clearHistory, loadBudgetRaw, loadHistory, loadSpentRaw, saveBudgetRaw, type CallHistoryEntry } from "../lib/storage";
+import { addSpentRaw, appendHistory, clearHistory, loadBudgetRaw, loadHistory, loadSpentRaw, markHistoryRated, saveBudgetRaw, type CallHistoryEntry } from "../lib/storage";
+import { feedbackApi } from "../api/core";
 import { useAsync } from "../lib/useAsync";
 import { useWallet } from "../state/WalletContext";
 
@@ -579,6 +580,8 @@ export function TrialCallSection() {
         amountRaw: svc.manifest.pricing.amount_raw,
         receiptId: outcome.receipt.receiptId,
         chargedRaw: outcome.receipt.chargedRaw,
+        receiptSigEd: outcome.receipt.receiptSigEd,
+        receiptTs: outcome.receipt.receiptTs,
         ok: true,
         withApprove: approvedThisSession,
         resultPreview: JSON.stringify(outcome.body).slice(0, 120),
@@ -850,6 +853,7 @@ function ChallengePanel({ challenge }: { challenge: Gateway402Challenge }) {
 function HistorySection() {
   const [list, setList] = useState<CallHistoryEntry[]>(() => loadHistory());
   const [confirmClear, setConfirmClear] = useState(false);
+  const [ratingFor, setRatingFor] = useState<CallHistoryEntry | null>(null);
   useEffect(() => {
     const h = () => setList(loadHistory());
     window.addEventListener("coincall:history", h);
@@ -893,6 +897,15 @@ function HistorySection() {
                     <>
                       <Badge kind="ok">成功{e.chargedRaw ? ` · ${fromRaw(e.chargedRaw)}` : ""}</Badge>
                       {e.withApprove && <span className="badge muted" title="本会话首单：先完成了授权步骤">含授权</span>}
+                      {e.rated ? (
+                        <span className="badge info" title="该次调用的收据已提交评价">已评价</span>
+                      ) : e.receiptSigEd && e.receiptTs ? (
+                        <button className="btn small secondary" onClick={() => setRatingFor(e)}>
+                          评价
+                        </button>
+                      ) : (
+                        <span className="badge muted" title="旧记录未存签名头，无法验证评价（新调用即可评价）">不可评</span>
+                      )}
                     </>
                   ) : (
                     <Badge kind="err">{e.errorDetail?.slice(0, 40) ?? "失败"}</Badge>
@@ -904,6 +917,15 @@ function HistorySection() {
           </tbody>
         </table>
       )}
+      <RatingDialog
+        entry={ratingFor}
+        onClose={() => setRatingFor(null)}
+        onRated={() => {
+          if (ratingFor) markHistoryRated(ratingFor.ts);
+          setRatingFor(null);
+        }}
+      />
+
       <ConfirmDialog
         open={confirmClear}
         title="清空调用历史"
@@ -915,6 +937,95 @@ function HistorySection() {
         }}
         onCancel={() => setConfirmClear(false)}
       />
+    </div>
+  );
+}
+
+/** 评价弹层：星级 1-5 + 可选一句话 → 收据五元组（历史存的签名头）→ POST /feedback。 */
+function RatingDialog({ entry, onClose, onRated }: { entry: CallHistoryEntry | null; onClose: () => void; onRated: () => void }) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+
+  if (!entry) return null;
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    setConflict(null);
+    try {
+      await feedbackApi.submit(
+        entry.serviceId,
+        {
+          receipt_id: entry.receiptId ?? "",
+          service_id: entry.serviceId,
+          amount_raw: entry.amountRaw,
+          status: "success", // 网关收据五元组口径：成功计费
+          ts: entry.receiptTs ?? 0,
+          receipt_sig_hex: entry.receiptSigEd ?? "",
+        },
+        rating,
+        comment.trim() || undefined,
+      );
+      onRated();
+    } catch (e) {
+      const ae = e as { status?: number; error?: string };
+      if (ae?.status === 409) setConflict("该次调用已评价过（一收据一评）。");
+      else if (ae?.status === 401) setConflict("收据签名验证未通过——该记录的收据材料无效，无法评价。");
+      else if (ae?.status === 429) setConflict("提交太频繁，请稍后再试。");
+      else setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="评价服务"
+      style={{ position: "fixed", inset: 0, background: "rgba(10,16,28,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="card" style={{ maxWidth: 440, margin: 20, width: "94vw" }}>
+        <h3 className="mt-0">评价「{entry.serviceName}」</h3>
+        <p className="card-desc">
+          付费即发言权：评价会用该次调用的链上收据验证（收据 {entry.receiptId?.slice(0, 14)}…），一收据一评。
+        </p>
+        <div className="field">
+          <label>星级（1-5）</label>
+          <div className="flex" style={{ gap: 4 }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className="btn small secondary"
+                style={{ fontSize: 18, padding: "4px 10px", color: n <= rating ? "#f5a623" : undefined }}
+                onClick={() => setRating(n)}
+                aria-label={`${n} 星`}
+              >
+                ★
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="field">
+          <label>一句话（可选）</label>
+          <input type="text" value={comment} maxLength={200} placeholder="翻译质量如何？" onChange={(e) => setComment(e.target.value)} aria-label="评价内容" />
+        </div>
+        {conflict && <WarnBox>{conflict}</WarnBox>}
+        {error != null && <ErrorBox error={error} />}
+        <div className="btn-row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn secondary" onClick={onClose}>
+            取消
+          </button>
+          <button className="btn" disabled={rating < 1 || rating > 5 || busy} onClick={submit}>
+            {busy ? "提交中…" : "提交评价"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
