@@ -35,6 +35,11 @@ class CredentialsPutRequest(BaseModel):
     )
 
 
+def build_fernet(secret: str) -> Fernet:
+    """main lifespan 构建一次挂 state（credentials 与 main 共用，避免每请求派生）。"""
+    return _fernet(secret)
+
+
 def _fernet(secret: str) -> Fernet:
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
     return Fernet(key)
@@ -53,9 +58,7 @@ def put_credentials(service_id: str, body: CredentialsPutRequest, request: Reque
     for name in body.headers:
         if not _HEADER_NAME_RE.match(name):
             raise HTTPException(status_code=422, detail=f"非法头名: {name!r}")
-    cipher = _fernet(request.app.state.settings.credential_secret).encrypt(
-        _canonical_json(body.headers).encode()
-    )
+    cipher = request.app.state.credential_fernet.encrypt(_canonical_json(body.headers).encode())
     store.upsert_service_credentials(service_id, cipher, sorted(body.headers))
     return {"service_id": service_id, "header_names": sorted(body.headers), "updated": True}
 
@@ -83,9 +86,7 @@ def resolve_credentials(service_id: str, request: Request) -> dict:
         return {"service_id": service_id, "headers": {}}
     cipher, _names = row
     try:
-        headers = _loads(
-            _fernet(request.app.state.settings.credential_secret).decrypt(cipher).decode()
-        )
+        headers = _loads(request.app.state.credential_fernet.decrypt(cipher).decode())
     except InvalidToken as exc:  # pragma: no cover - 密钥轮换场景
         raise HTTPException(status_code=500, detail="credential_decrypt_failed") from exc
     return {"service_id": service_id, "headers": headers}

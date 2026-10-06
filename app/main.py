@@ -29,6 +29,7 @@ from app.core.errors import (
 )
 from app.modules.apikey import router as apikey_router
 from app.modules.catalog import router as catalog_router
+from app.modules.credentials import build_fernet
 from app.modules.credentials import router as credentials_router
 from app.modules.identity import BotChainIdentityClient, IdentityClient
 from app.modules.leaderboard import (
@@ -58,6 +59,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.store = CoreStore(app_settings.duckdb_path)  # C-14：单进程单写者
+        app.state.credential_fernet = build_fernet(app_settings.credential_secret)
         # trust_env=False：8010/8030 都是本机服务（gateway C-07 同源纪律）
         http = httpx.Client(timeout=10.0, trust_env=False)
         app.state.identities = identity_client or BotChainIdentityClient(
