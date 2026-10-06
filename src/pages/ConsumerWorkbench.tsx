@@ -9,7 +9,7 @@ import { hashSha256HexStringish } from "../lib/idempotency";
 import { ApiError } from "../api/client";
 import { coreApi } from "../api/core";
 import { gatewayApi, type Gateway402Challenge } from "../api/gateway";
-import { MOCK_USDT, PAY_VAULT as VAULT, SEL, fromRaw, toRaw } from "../chain/constants";
+import { USDT, FAUCET_URL, PAY_VAULT as VAULT, SEL, fromRaw, toRaw } from "../chain/constants";
 import { encodeAddrUint, fetchAllowance, fetchTokenBalance, type TxProgress } from "../chain/rpc";
 import { isUserRejected } from "../chain/injected";
 import { buildCallAuthorization, buildPaymentHeader } from "../chain/signing";
@@ -139,7 +139,7 @@ function ConnectSection() {
           <p style={{ fontSize: 13, color: "var(--text-2)", margin: "0 0 10px" }}>
             创建一个一次性演示钱包（随机生成、只存 sessionStorage、关闭标签页即焚毁）。
             它与「连接浏览器钱包」主路径完全隔离，仅用于没有装扩展的演示机；用它在浏览器进程内本地完成签名（黄金向量锁定的同一条 digest 路径）。
-            需要先给它充测试网 BOT 作 gas 与 MockUSDT（可用页面内 key 文件去水龙头领）。
+            需要先给它充测试网 BOT 作 gas 与 USDT（可用页面内 key 文件去水龙头领）。
           </p>
           <button className="btn danger" onClick={w.createDemo}>
             创建一次性演示钱包
@@ -161,7 +161,7 @@ function FundsSection() {
   const [busy, setBusy] = useState(false);
   const [approvePreset, setApprovePreset] = useState<string>("0.1");
   const [presetFromChallenge, setPresetFromChallenge] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<null | "mint" | "approve">(null);
+  const [confirming, setConfirming] = useState<null | "approve">(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // 402 质询跳转：预置滑条金额并滚动到本面板
@@ -183,22 +183,19 @@ function FundsSection() {
 
   const refresh = useCallback(() => setRefreshTick((t) => t + 1), []);
 
-  const runTx = async (kind: "mint" | "approve") => {
+  const runTx = async () => {
     if (!address) return;
     setBusy(true);
     setError(null);
     setCancelled(null);
     setTx({ status: "waiting" }); // 等待扩展弹窗确认
     try {
-      const data =
-        kind === "mint"
-          ? encodeAddrUint(SEL.mint, address, toRaw("10"))
-          : encodeAddrUint(SEL.approve, VAULT, toRaw(approvePreset));
-      await w.sendTransaction(MOCK_USDT, data, setTx);
+      const data = encodeAddrUint(SEL.approve, VAULT, toRaw(approvePreset));
+      await w.sendTransaction(USDT, data, setTx);
       refresh();
     } catch (e) {
       if (isUserRejected(e)) {
-        setCancelled(kind === "mint" ? "你取消了铸造交易（钱包弹窗里拒绝）" : "你取消了授权交易（钱包弹窗里拒绝）");
+        setCancelled("你取消了授权交易（钱包弹窗里拒绝）");
         setTx(null);
       } else {
         setError(e);
@@ -218,12 +215,12 @@ function FundsSection() {
   return (
     <div className="card" ref={panelRef}>
       <div className="flex" style={{ justifyContent: "space-between" }}>
-        <h3 className="mb-0">② 资金面板（MockUSDT · 6 位精度）</h3>
+        <h3 className="mb-0">② 资金面板（USDT · 6 位精度）</h3>
         <button className="btn small secondary" onClick={refresh}>
           刷新
         </button>
       </div>
-      <p className="card-desc">可用额 = min(余额, 对 PayVault 的授权额)，即当前真正能用于付费调用的额度。铸造/授权都是钱包弹窗确认的交易（gas 恒 20 gwei）。</p>
+      <p className="card-desc">可用额 = min(余额, 对 PayVault 的授权额)，即当前真正能用于付费调用的额度。授权是钱包弹窗确认的交易（gas 恒 20 gwei）。</p>
 
       {funds.loading && d == null ? (
         <Spinner label="eth_call 读链中…" />
@@ -266,10 +263,30 @@ function FundsSection() {
       )}
       {cancelled && <WarnBox>{cancelled}。没有产生任何交易，可随时重试。</WarnBox>}
 
+      <div className="card" style={{ boxShadow: "none", marginBottom: 0, padding: "12px 16px" }}>
+        <div className="flex" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+          <div>
+            <b>获取 USDT</b>
+            <div className="dim" style={{ fontSize: 12 }}>
+              计价 token 是测试网真 USDT（无公开 mint）：到{" "}
+              <a href={FAUCET_URL} target="_blank" rel="noreferrer">
+                测试网水龙头
+              </a>{" "}
+              领取到你的钱包地址，然后回来点「刷新」。
+            </div>
+          </div>
+          <div className="btn-row">
+            <CopyButton text={address ?? ""} label="复制钱包地址" />
+            <a className="btn small secondary" href={FAUCET_URL} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+              去水龙头 ↗
+            </a>
+            <button className="btn small secondary" onClick={refresh}>
+              刷新余额
+            </button>
+          </div>
+        </div>
+      </div>
       <div className="flex" style={{ alignItems: "flex-end" }}>
-        <button className="btn secondary" disabled={busy || chainBlocked} onClick={() => setConfirming("mint")}>
-          铸造 10 MockUSDT（测试网公开 mint）
-        </button>
         <div className="grow" style={{ maxWidth: 420 }}>
           <div className="field" style={{ margin: 0 }}>
             <label>授权 PayVault 可花费额度（滑条）</label>
@@ -325,14 +342,6 @@ function FundsSection() {
       {error != null && <ErrorBox error={error} />}
 
       <ConfirmDialog
-        open={confirming === "mint"}
-        title="确认铸造（上链，不可逆）"
-        body={<>向 <span className="mono">{address}</span> 铸造 <b>10 MockUSDT</b>（raw=10000000）。测试网公开 mint，无真实价值；将弹出钱包确认。</>}
-        confirmText="去钱包确认"
-        onConfirm={() => void runTx("mint")}
-        onCancel={() => setConfirming(null)}
-      />
-      <ConfirmDialog
         open={confirming === "approve"}
         title="确认授权（上链，不可逆）"
         body={
@@ -343,7 +352,7 @@ function FundsSection() {
           </>
         }
         confirmText="去钱包确认"
-        onConfirm={() => void runTx("approve")}
+        onConfirm={() => void runTx()}
         onCancel={() => setConfirming(null)}
       />
     </div>
