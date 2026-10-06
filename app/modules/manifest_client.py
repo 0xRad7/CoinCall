@@ -57,7 +57,7 @@ class ManifestView(BaseModel):
 
 
 class ManifestInfo(BaseModel):
-    """core GET /manifests/{id} 响应。"""
+    """core GET /internal/manifests/{id} 响应（公开面已脱敏 url，网关走内部通道）。"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -96,7 +96,7 @@ class ManifestClient:
             info = hit[1]
         else:
             try:
-                resp = await self.http.get(f"{self.base_url}/manifests/{service_id}")
+                resp = await self.http.get(f"{self.base_url}/internal/manifests/{service_id}")
             except httpx.HTTPError as exc:
                 raise ServiceNotFoundError(service_id) from exc
             if resp.status_code != HTTP_OK:

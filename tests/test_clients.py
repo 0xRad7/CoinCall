@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 
 CORE = "http://core.test"
 VALIDATE_URL = f"{CORE}/internal/apikeys/validate"
-MANIFEST_URL = f"{CORE}/manifests/"
+MANIFEST_URL = f"{CORE}/internal/manifests/"
 
 
 @respx.mock
