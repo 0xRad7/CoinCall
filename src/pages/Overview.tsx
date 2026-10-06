@@ -100,6 +100,7 @@ export default function Overview() {
                   </div>
                   <div className="dim">
                     端点 {s.manifest.endpoint.type}
+                    {s.manifest.endpoint.type === "http_json" ? ` · ${s.manifest.endpoint.method ?? "POST"}` : ""}
                     {s.manifest.endpoint.url ? ` · ${s.manifest.endpoint.url}` : "（平台内置）"} · Provider {s.manifest.provider.display_name}
                   </div>
                   {s.manifest.description && <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-2)" }}>{s.manifest.description}</div>}

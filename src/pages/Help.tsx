@@ -118,6 +118,16 @@ export default function Help() {
               信任模型一句话：上游凭证走的是 <b>API 网关标准模型</b>（平台可解密、代为注入），与消费者的付费钱包私钥分属两个信任域——后者自始至终只在消费者浏览器钱包里。不想交给平台？自包一层薄适配服务再上架即可。
             </InfoBox>
           </div>
+          <div className="card" style={{ marginTop: 16, marginBottom: 0 }}>
+            <h3>探测与 Schema 识别</h3>
+            <p className="card-desc">发布 http_json 服务前的「先试试上游通不通」：</p>
+            <ul style={{ paddingLeft: 18, lineHeight: 1.9 }}>
+              <li><b>为什么要平台代发</b>：浏览器直连你的上游会被 CORS 拦截，所以探测与转发都由服务端发出（护栏：仅 http/https、私网/回环地址拒绝、20 秒硬顶、不跟随重定向）。</li>
+              <li><b>method=GET 的语义</b>：消费者仍然 POST JSON 给网关；网关把参数映射成上游 query——标量直传、数组同 key 重复（?tag=a&amp;tag=b）。嵌套对象参数在<b>发布时</b>被 422 拒绝（前端也会即时预警）。</li>
+              <li><b>探测头不落盘</b>：探测弹层里临时填的认证头只随那一次请求发出；要长期保存请用发布表单的「上游认证头」。</li>
+              <li><b>用结果生成 Schema</b>：从探测响应体递归推断 output_schema（数组元素类型合并、null 并入类型并集、嵌套限 4 层）；input_schema 从示例参数/示例 JSON 生成。生成结果标注「自动识别，请核对」，可继续手改。</li>
+            </ul>
+          </div>
         </div>
         <InfoBox>
           一次付费调用的资金流：你的钱包 —（EIP-712 授权签名）→ 网关（只验签不过手资金）—（keeper 批量结算）→
