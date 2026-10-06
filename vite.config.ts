@@ -16,8 +16,9 @@ const proxy = {
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173, host: "127.0.0.1", proxy },
-  preview: { port: 5173, host: "127.0.0.1", proxy },
+  // host: true = 监听 0.0.0.0，局域网机器可访问（后端三服务仍仅本机，经此代理转发）
+  server: { port: 5173, host: true, proxy },
+  preview: { port: 5173, host: true, proxy },
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
