@@ -146,9 +146,14 @@ def validate_api_key(body: ApiKeyValidateRequest, request: Request) -> ApiKeyVal
 
 
 @router.get("/apikeys", response_model=ApiKeyListResponse)
-def list_api_keys(request: Request) -> ApiKeyListResponse:
-    """列表（03 §2）：不回显 secret——明文只在签发响应出现一次，hash 亦不外露。"""
+def list_api_keys(request: Request, wallet: str | None = None) -> ApiKeyListResponse:
+    """列表（03 §2）：不回显 secret——明文只在签发响应出现一次，hash 亦不外露。
+
+    ?wallet= 按绑定钱包过滤（小写比较）——换机场景查"我的钱包名下有哪些 key"。
+    """
     rows = _store(request).list_api_keys()
+    if wallet is not None:
+        rows = [r for r in rows if str(r.get("consumer_wallet", "")).lower() == wallet.lower()]
     return ApiKeyListResponse(keys=[ApiKeyRow(**row) for row in rows])
 
 

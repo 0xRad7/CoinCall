@@ -95,3 +95,13 @@ class TestApiKeyRebind:
         assert resp.status_code == 200
         check = client.post("/internal/apikeys/validate", json={"api_key": issue["api_key"]})
         assert check.status_code == 401  # 吊销态不因换绑复活
+
+
+def test_list_filter_by_wallet(client):
+    client.post("/apikeys", json={"consumer_wallet": "0x" + "aa" * 20})
+    client.post("/apikeys", json={"consumer_wallet": "0x" + "bb" * 20})
+    r = client.get("/apikeys", params={"wallet": "0x" + "AA" * 20})
+    assert r.status_code == 200
+    keys = r.json()["keys"]
+    assert len(keys) == 1
+    assert keys[0]["consumer_wallet"].lower() == "0x" + "aa" * 20
