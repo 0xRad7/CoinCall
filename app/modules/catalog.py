@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.errors import ApiError
-from app.modules.manifest import ServiceManifest, manifest_hash
+from app.modules.manifest import ServiceManifest, manifest_category, manifest_hash, manifest_tags
 from app.storage.db import CoreStore
 
 router = APIRouter(tags=["manifests"])
@@ -27,7 +27,8 @@ def _store(request: Request) -> CoreStore:
 
 def _redact_row(row: dict[str, object]) -> dict[str, object]:
     """公开面脱敏：抹去 endpoint.url——真实上游只经网关内部通道消费，
-    消费者的调用端点恒为 POST {gateway}/call/{service_id}（防绕过付费直连）。"""
+    消费者的调用端点恒为 POST {gateway}/call/{service_id}（防绕过付费直连）。
+    同时补 v1.2 缺省（category=other/tags=[]），旧数据目录行形态统一（10 §0.5）。"""
     out = dict(row)
     manifest = out.get("manifest")
     if isinstance(manifest, dict) and isinstance(manifest.get("endpoint"), dict):
@@ -35,6 +36,8 @@ def _redact_row(row: dict[str, object]) -> dict[str, object]:
         endpoint = dict(manifest["endpoint"])
         endpoint["url"] = None
         manifest["endpoint"] = endpoint
+        manifest.setdefault("category", manifest_category(manifest))
+        manifest.setdefault("tags", manifest_tags(manifest))
         out["manifest"] = manifest
     return out
 

@@ -47,6 +47,25 @@ class ServiceStatus(StrEnum):
     DELISTED = "delisted"
 
 
+class ServiceCategory(StrEnum):
+    """决策层类目（10 §0.5 冻结契约 v1.2）：受控词表，默认 other。"""
+
+    TRANSLATION = "translation"
+    DATA_FEED = "data-feed"
+    ON_CHAIN_QUERY = "on-chain-query"
+    ANALYSIS = "analysis"
+    AGENT_TOOL = "agent-tool"
+    OTHER = "other"
+
+
+#: 受控词表（顺序即展示顺序）；决策分区与 /decision/categories 词表与此同源
+CATEGORIES: list[str] = [c.value for c in ServiceCategory]
+
+#: tags 上限与单条长度（10 §0.5：tags ≤5）
+TAGS_MAX_COUNT = 5
+TAG_MAX_LEN = 32
+
+
 class ManifestProvider(BaseModel):
     """provider 段：8004 身份 + 收款钱包（发布时绑定校验在 P1-2，经 bot-chain-api）。"""
 
@@ -193,7 +212,27 @@ class ServiceManifest(BaseModel):
     input_schema: dict[str, Any] = Field(description="Consumer 请求体 JSON Schema")
     output_schema: dict[str, Any] = Field(description="Provider 响应体 JSON Schema")
     status: ServiceStatus = Field(default=ServiceStatus.ACTIVE)
+    category: ServiceCategory = Field(
+        default=ServiceCategory.OTHER,
+        description="受控词表类目（决策层分区排序用，10 §0.5）",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        max_length=TAGS_MAX_COUNT,
+        description="自由标签，≤5 条、每条 1~32 字符",
+    )
     created_at: datetime | None = None
+
+    @field_validator("tags")
+    @classmethod
+    def _tags_shape(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for tag in v:
+            stripped = tag.strip()
+            if not stripped or len(stripped) > TAG_MAX_LEN:
+                raise ValueError(f"tag 非法（1~{TAG_MAX_LEN} 字符）: {tag!r}")
+            out.append(stripped)
+        return out
 
     @field_validator("service_id")
     @classmethod
@@ -231,3 +270,17 @@ def canonical_json(manifest: ServiceManifest) -> str:
 def manifest_hash(manifest: ServiceManifest) -> str:
     """sha256(canonical json)，上链锚定与增量比对共用（01 §4）。"""
     return "sha256:" + hashlib.sha256(canonical_json(manifest).encode()).hexdigest()
+
+
+def manifest_category(manifest: dict[str, Any]) -> str:
+    """读取侧类目（发布兼容旧数据）：缺省/非法值一律 other（10 §0.5）。"""
+    value = manifest.get("category")
+    return value if isinstance(value, str) and value in CATEGORIES else ServiceCategory.OTHER.value
+
+
+def manifest_tags(manifest: dict[str, Any]) -> list[str]:
+    """读取侧标签（发布兼容旧数据）：非 list 缺省 []。"""
+    value = manifest.get("tags")
+    if not isinstance(value, list):
+        return []
+    return [str(t) for t in value]

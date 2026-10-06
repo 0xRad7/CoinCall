@@ -90,7 +90,7 @@ def test_invalid_category_rejected(client: TestClient, category: str) -> None:
     manifest["category"] = category
     resp = client.post("/manifests", json=manifest)
     assert resp.status_code == 422, resp.text
-    assert resp.json()["code"] == "request_invalid"
+    assert resp.json()["code"] == "manifest_invalid"
 
 
 @pytest.mark.parametrize(

@@ -20,6 +20,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from app.core.errors import ApiError
+from app.modules.manifest import manifest_category, manifest_tags
 from app.storage.db import CoreStore
 
 router = APIRouter(tags=["leaderboard"])
@@ -208,6 +209,8 @@ class ServiceStatsRow(BaseModel):
     service_id: str
     name: str
     status: str
+    category: str = "other"
+    tags: list[str] = Field(default_factory=list)
     provider_wallet: str
     provider_agent_id: int | None = None
     display_name: str | None = None
@@ -335,6 +338,8 @@ def _service_rows(request: Request, status: str | None) -> list[ServiceStatsRow]
                 service_id=svc["service_id"],
                 name=str(manifest.get("name", "")),
                 status=svc["status"],
+                category=manifest_category(manifest),
+                tags=manifest_tags(manifest),
                 provider_wallet=wallet,
                 provider_agent_id=int(agent_id) if agent_id is not None else None,
                 display_name=(
