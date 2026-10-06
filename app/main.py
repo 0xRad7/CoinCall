@@ -29,6 +29,7 @@ from app.core.errors import (
 )
 from app.modules.apikey import router as apikey_router
 from app.modules.catalog import router as catalog_router
+from app.modules.credentials import router as credentials_router
 from app.modules.identity import BotChainIdentityClient, IdentityClient
 from app.modules.leaderboard import (
     BotChainClient,
@@ -125,6 +126,7 @@ def create_app(
     app.include_router(catalog_router)
     app.include_router(apikey_router)
     app.include_router(providers_router)
+    app.include_router(credentials_router)
     app.include_router(leaderboard_router)
     return app
 

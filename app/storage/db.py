@@ -18,6 +18,15 @@ CREATE TABLE IF NOT EXISTS services (
 )
 """
 
+SERVICE_CREDENTIALS_DDL = """
+CREATE TABLE IF NOT EXISTS service_credentials (
+  service_id     VARCHAR PRIMARY KEY,
+  headers_cipher BLOB,
+  header_names   JSON,
+  updated_at     TIMESTAMP DEFAULT now()
+)
+"""
+
 API_KEYS_DDL = """
 CREATE TABLE IF NOT EXISTS api_keys (
   key_id          VARCHAR PRIMARY KEY,
@@ -78,6 +87,7 @@ class CoreStore:
             self.conn.execute(PROVIDERS_DDL)
             self.conn.execute(CHARGED_EVENTS_DDL)
             self.conn.execute(WATERMARKS_DDL)
+            self.conn.execute(SERVICE_CREDENTIALS_DDL)
 
     # ---- services / manifests ----
 
@@ -140,6 +150,27 @@ class CoreStore:
         return f'W/"{row[0]}-{row[1]}"'
 
     # ---- api keys ----
+
+    def upsert_service_credentials(self, service_id: str, cipher: bytes, names: list[str]) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO service_credentials "
+                "(service_id, headers_cipher, header_names) VALUES (?, ?, ?)",
+                [service_id, cipher, json.dumps(names)],
+            )
+
+    def get_service_credentials_cipher(self, service_id: str) -> tuple[bytes, list[str]] | None:
+        row = self.conn.execute(
+            "SELECT headers_cipher, header_names FROM service_credentials WHERE service_id = ?",
+            [service_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return bytes(row[0]), list(json.loads(row[1]))
+
+    def delete_service_credentials(self, service_id: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM service_credentials WHERE service_id = ?", [service_id])
 
     def insert_api_key(
         self, key_id: str, key_hash: str, consumer_wallet: str, quota_raw: int | None
