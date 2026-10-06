@@ -56,22 +56,20 @@ export default function Help() {
             </div>
           </div>
           <div style={{ marginTop: 16 }}>
-            <div className="dim" style={{ marginBottom: 6 }}>Provider 接入向导（第 0 步可选，身份注册内置于第 ① 步）：</div>
+            <div className="dim" style={{ marginBottom: 6 }}>Provider 接入向导（认证先行，四步；第 0 步注册内置于第 ① 步）：</div>
             <div className="diagram">
               <div className="node" style={{ borderColor: "var(--text-3)" }}>
                 <h4>⓪ 注册身份（可选）</h4>
-                <p>没有 ERC-8004 身份？第 ① 步展开「注册一个」<br />平台链上服务代发铸造，无需钱包签名</p>
+                <p>没有 ERC-8004 身份？第 ① 步展开「注册一个」<br />平台代发铸造 → 自动绑定为你的钱包</p>
               </div>
               <div className="arrow">→</div>
-              <div className="node"><h4>① 登记 Provider</h4><p>agent_id + 名称<br />链上身份实时预检<br />注册后可顺手绑定身份钱包</p></div>
+              <div className="node" style={{ borderColor: "var(--success)" }}><h4>① 认领身份</h4><p>连接钱包 → 预检认领状态<br />绑定（AgentWalletSet 签名）+登记<b>一步完成</b><br />四态引导：不存在/可认领/需先绑定/已被他人认领</p></div>
               <div className="arrow">→</div>
-              <div className="node"><h4>② 发布服务</h4><p>manifest 表单<br />定价/端点/schema<br />指定服务收款钱包</p></div>
+              <div className="node"><h4>② 发布服务</h4><p>manifest 表单<br />定价/端点/schema/上游认证头<br />服务收款钱包<b>默认=认领钱包</b></p></div>
               <div className="arrow">→</div>
-              <div className="node"><h4>③ 管理</h4><p>暂停/恢复/改价<br />= 重发 manifest</p></div>
+              <div className="node"><h4>③ 管理</h4><p>暂停/恢复/改价<br />= 重发 manifest<br />上游凭证管理</p></div>
               <div className="arrow">→</div>
-              <div className="node"><h4>④ 绑定身份钱包</h4><p>EIP-712 签名<br />5 分钟窗口</p></div>
-              <div className="arrow">→</div>
-              <div className="node"><h4>⑤ 提现</h4><p>PayVault credits<br />providerWithdraw<br />（服务收款钱包本人）</p></div>
+              <div className="node"><h4>④ 提现</h4><p>PayVault credits<br />providerWithdraw<br />（服务收款钱包本人）</p></div>
             </div>
           </div>
           <div style={{ marginTop: 16 }}>
