@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -64,18 +68,55 @@ class FakeChainClient:
 
 
 class FakeGatewayStatsClient:
-    """GatewayStatsClient 桩：可编程 stats 或故障。"""
+    """GatewayStatsClient 桩：可编程 stats 或故障；记录 window_hours 请求口径。"""
 
     def __init__(self, stats: dict[str, Any] | None = None, error: Exception | None = None) -> None:
         self.stats = stats or {"services": [], "totals": {}}
         self.error = error
         self.calls = 0
+        self.requested_windows: list[int | None] = []
 
-    def stats_view(self) -> dict[str, Any]:
+    def stats_view(self, window_hours: int | None = None) -> dict[str, Any]:
         self.calls += 1
+        self.requested_windows.append(window_hours)
         if self.error is not None:
             raise self.error
         return self.stats
+
+
+class FakeReceiptPubkeyClient:
+    """ReceiptPubkeySource 桩：测试自持 Ed25519 密钥对（可签可验）；unavailable=True 模拟降级。"""
+
+    def __init__(self, *, unavailable: bool = False) -> None:
+        self.key = Ed25519PrivateKey.generate()
+        self.unavailable = unavailable
+        self.calls = 0
+
+    def public_key_hex(self) -> str | None:
+        self.calls += 1
+        if self.unavailable:
+            return None
+        if isinstance(self.key, Ed25519PrivateKey):
+            pub: Ed25519PublicKey = self.key.public_key()
+            return pub.public_bytes_raw().hex()
+        return None
+
+
+def sign_fake_receipt(
+    key: Ed25519PrivateKey,
+    *,
+    receipt_id: str,
+    service_id: str,
+    amount_raw: str,
+    status: str,
+    ts: str,
+) -> str:
+    """按冻结契约规范串 receipt_id|service_id|amount_raw|status|ts 做 Ed25519 签名（hex）。
+
+    此处独立拼串（不 import 实现）——串形态漂移时测试侧即失配，契约双写自检。
+    """
+    message = f"{receipt_id}|{service_id}|{amount_raw}|{status}|{ts}"
+    return key.sign(message.encode()).hex()
 
 
 def make_charged_log(
@@ -105,13 +146,14 @@ def make_charged_log(
 
 @pytest.fixture()
 def client(tmp_path: Path) -> TestClient:
-    """全隔离应用实例：DuckDB 落 tmp_path，链/身份/网关客户端全 fake（零网络）。"""
+    """全隔离应用实例：DuckDB 落 tmp_path，链/身份/网关/收据公钥客户端全 fake（零网络）。"""
     settings = Settings(duckdb_path=str(tmp_path / "core.duckdb"))
     app = create_app(
         settings,
         identity_client=FakeIdentityClient(),
         chain_client=FakeChainClient(),
         gateway_client=FakeGatewayStatsClient(),
+        receipt_key_client=FakeReceiptPubkeyClient(),
     )
     with TestClient(app) as test_client:
         yield test_client
