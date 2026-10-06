@@ -26,6 +26,7 @@ from app.core.errors import (
 )
 from app.core.schemes import ChainAdapter, PaymentScheme, PayVaultScheme, register_scheme
 from app.core.shadow_gate import ShadowGate
+from app.modules.anchor import AnchorTask, BotChainAnchorChain, DecisionCoreClient
 from app.modules.auth import CoreAuthClient
 from app.modules.call_route import router as call_router
 from app.modules.calls import CallStore
@@ -38,6 +39,68 @@ from app.modules.providers import HttpJsonProvider, ProviderAdapter
 from app.modules.receipt import ReceiptSigner
 from app.modules.receipts_route import router as receipts_router
 from app.modules.stats_route import router as stats_router
+
+
+def _build_anchor(settings: Settings, http: httpx.AsyncClient) -> AnchorTask:
+    """锚定任务装配（10 §1/§2）：core 客户端走共享 http，链上提交走独立 60s 通道。"""
+    return AnchorTask(
+        core=DecisionCoreClient(base_url=settings.core_base_url, http=http),
+        chain=BotChainAnchorChain(
+            base_url=settings.bot_chain_api_base_url,
+            registry_address=settings.identity_registry_address,
+            operator_address=settings.keeper_operator_address,
+        ),
+        interval_s=settings.anchor_interval_s,
+    )
+
+
+def _build_keeper(
+    settings: Settings,
+    store: CallStore,
+    manifests: ManifestClient,
+) -> tuple[Keeper, BotChainSettleChain | None]:
+    """真实 keeper 装配（keeper_enabled=true 路径）；返回 (实例, 待关闭的链上通道)。"""
+    chain = BotChainSettleChain(
+        base_url=settings.bot_chain_api_base_url,
+        rpc_url=settings.chain_rpc_url,
+        pay_vault=settings.pay_vault_address,
+        operator_address=settings.keeper_operator_address,
+    )
+    keeper = Keeper(
+        store=store,
+        chain=chain,
+        wallet_for=provider_wallet_resolver(
+            settings.keeper_provider_wallet_overrides, store, manifests
+        ),
+        batch_size=settings.keeper_batch_size,
+        flush_interval=settings.keeper_flush_interval,
+    )
+    return keeper, chain
+
+
+def _mount_middleware(app: FastAPI, settings: Settings) -> None:
+    """CORS/trace/异常处理挂载（收据双签头一并 expose，前端直连模式可读）。"""
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+            allow_methods=["*"],
+            allow_headers=["*"],
+            allow_credentials=False,
+            expose_headers=[
+                "X-Receipt-Id",
+                "X-Charged-Raw",
+                "X-Receipt-Sig",
+                "X-Receipt-Sig-Ed25519",
+                "X-Receipt-Ts",
+                "ETag",
+            ],
+        )
+    app.middleware("http")(trace_middleware)
+    app.add_exception_handler(ApiError, api_error_handler)  # type: ignore[arg-type] # 注册处签名按异常子类收窄
+    app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(PaymentRequiredError, payment_required_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
 
 def create_app(
@@ -101,32 +164,25 @@ def create_app(
         built_chain: BotChainSettleChain | None = None
         if keeper is not None:
             app.state.keeper = keeper
-        else:
-            if app_settings.keeper_enabled:
-                built_chain = BotChainSettleChain(
-                    base_url=app_settings.bot_chain_api_base_url,
-                    rpc_url=app_settings.chain_rpc_url,
-                    pay_vault=app_settings.pay_vault_address,
-                    operator_address=app_settings.keeper_operator_address,
-                )
-            app.state.keeper = Keeper(
-                store=app.state.store,
-                chain=built_chain,
-                wallet_for=(
-                    provider_wallet_resolver(
-                        app_settings.keeper_provider_wallet_overrides,
-                        app.state.store,
-                        app.state.manifests,
-                    )
-                    if built_chain is not None
-                    else None
-                ),
-                batch_size=app_settings.keeper_batch_size,
-                flush_interval=app_settings.keeper_flush_interval,
+        elif app_settings.keeper_enabled:
+            app.state.keeper, built_chain = _build_keeper(
+                app_settings, app.state.store, app.state.manifests
             )
+        else:
+            app.state.keeper = Keeper(store=app.state.store)
         if app_settings.keeper_enabled:
             app.state.keeper.start()
+            # 决策摘要锚定任务（10 §1/§2）：与结算主循环并行的独立协程；core 依赖失败
+            # 只在 anchor 内部降级告警，绝不阻塞结算。gas 由出资账户（operator）承担。
+            app.state.anchor = _build_anchor(app_settings, app.state.http)
+            app.state.anchor.start()
+        else:
+            app.state.anchor = None
         yield
+        anchor = getattr(app.state, "anchor", None)
+        if anchor is not None:
+            await anchor.stop()
+            await anchor.chain.aclose()
         await app.state.keeper.stop()
         if built_chain is not None:
             await built_chain.aclose()
@@ -139,28 +195,7 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
-    if app_settings.cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=[o.strip() for o in app_settings.cors_origins.split(",") if o.strip()],
-            allow_methods=["*"],
-            allow_headers=["*"],
-            allow_credentials=False,
-            expose_headers=[
-                "X-Receipt-Id",
-                "X-Charged-Raw",
-                "X-Receipt-Sig",
-                "X-Receipt-Sig-Ed25519",
-                "X-Receipt-Ts",
-                "ETag",
-            ],
-        )
-
-    app.middleware("http")(trace_middleware)
-    app.add_exception_handler(ApiError, api_error_handler)  # type: ignore[arg-type] # 注册处签名按异常子类收窄
-    app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(PaymentRequiredError, payment_required_handler)  # type: ignore[arg-type]
-    app.add_exception_handler(Exception, unhandled_error_handler)
+    _mount_middleware(app, app_settings)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

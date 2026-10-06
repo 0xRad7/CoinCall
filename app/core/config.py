@@ -33,3 +33,8 @@ class Settings(BaseSettings):
     bot_chain_api_base_url: str = "http://127.0.0.1:8010"
     #: agent_id → agentWallet 静态覆盖（缺省走 core manifest 解析）
     keeper_provider_wallet_overrides: dict[str, str] = {}
+    # ---- 决策摘要锚定任务（10 §1/§2；只在 keeper_enabled 时随 keeper 启动）----
+    #: 锚定周期（秒）：每轮拉 core anchor-pending → setMetadata 上链 → 回执上报
+    anchor_interval_s: float = 1800.0
+    #: IdentityRegistry（ERC-8004，锚定目标合约）——事实源 bot-chain-api chains.py testnet 968
+    identity_registry_address: str = "0xec8fFbC3c9A34AdDCbB3A14F91db2bd26A8b99c0"
