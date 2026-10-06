@@ -80,6 +80,27 @@ export interface AgentIdentity {
   metadata: Record<string, unknown>;
 }
 
+/** 真实注册（dry_run=false）的回执摘要（8010 TxService TxReceiptSummary）。 */
+export interface IdentityRegisterReceipt {
+  dry_run: boolean;
+  tx_hash: string;
+  status: number;
+  block_number: number;
+  gas_used?: number;
+  from_address?: string;
+}
+
+/** register-result：Transfer mint 解析（未上链 found=false）。 */
+export interface IdentityRegisterResult {
+  found: boolean;
+  tx_hash: string;
+  status?: number | null;
+  block_number?: number | null;
+  agent_ids: number[];
+  owner?: string | null;
+  agent_wallet?: string | null;
+}
+
 export interface WalletBindingResult {
   tx_hash: string;
   explorer_url?: string;
@@ -101,6 +122,14 @@ export const botChainApi = {
       }),
       timeoutMs: 60_000,
     }).then((r) => r.data),
+  /** 注册新 agent 身份：接口默认 dry_run=true 仅预览，这里传 false 真实上链（服务端出资账户代发）。 */
+  registerIdentity: (agentUri: string) =>
+    apiFetch<IdentityRegisterReceipt>(`${BOTCHAIN_BASE}/api/v1/agent-identity/register`, {
+      ...jsonInit("POST", { agent_uri: agentUri, dry_run: false }),
+      timeoutMs: 60_000,
+    }).then((r) => r.data),
+  registerResult: (txHash: string) =>
+    apiFetch<IdentityRegisterResult>(`${BOTCHAIN_BASE}/api/v1/agent-identity/register-result/${txHash}`).then((r) => r.data),
 };
 
 /** EIP-712 typed data：AgentWalletSet（钱包绑定，签名者 = 新钱包本人）。 */
