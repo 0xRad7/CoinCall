@@ -1,9 +1,9 @@
 /**
- * Provider 工作台：五步向导（登记 → 发布服务 → 管理服务 → 身份钱包绑定 → 提现）。
- * 步骤间状态保持（父级 state），进度指示可点击回跳。
+ * Provider 工作台（认证先行，四步向导）：认领身份（AgentWalletSet 绑定 + 登记 One-shot）→
+ * 发布服务 → 我的服务 → 提现。步骤间状态保持（父级 state），进度指示可点击回跳。
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { coreApi, credentialsApi, type ServiceManifest } from "../api/core";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { coreApi, credentialsApi, type ClaimState, type ServiceManifest } from "../api/core";
 import { CredentialHeadersEditor, rowsToHeaders, type CredentialRow } from "../components/CredentialHeadersEditor";
 import { ExampleRequestEditor } from "../components/ExampleRequestEditor";
 import { ProbeDialog } from "../components/ProbeDialog";
@@ -18,29 +18,28 @@ import { AmountInput } from "../components/AmountInput";
 import { IdentityRegister } from "../components/IdentityRegister";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { JsonEditor } from "../components/JsonEditor";
-import { AsyncSection, Badge, ConfirmDialog, CopyButton, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
+import { AsyncSection, Badge, ConfirmDialog, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeError, labelField } from "../lib/errors";
 import { useAsync } from "../lib/useAsync";
 
 const STEPS = [
-  { key: "register", label: "① 登记 Provider" },
+  { key: "claim", label: "① 认领身份（绑定+登记）" },
   { key: "publish", label: "② 发布服务" },
   { key: "manage", label: "③ 我的服务" },
-  { key: "bind", label: "④ 身份钱包绑定" },
-  { key: "withdraw", label: "⑤ 提现" },
+  { key: "withdraw", label: "④ 提现" },
 ] as const;
 type StepKey = (typeof STEPS)[number]["key"];
 
 export default function ProviderWorkbench() {
-  const [step, setStep] = useState<StepKey>("register");
+  const [step, setStep] = useState<StepKey>("claim");
   const [done, setDone] = useState<Record<string, boolean>>({});
   const goto = (k: StepKey, ok?: boolean) => {
     setStep(k);
     if (ok !== undefined) setDone((d) => ({ ...d, [step]: ok }));
   };
 
-  // 步骤间共享状态
-  const [registered, setRegistered] = useState<{ agent_id: number; display_name: string; wallet?: string } | null>(null);
+  // 步骤间共享状态：认领结果（认证先行的锚点）
+  const [claimed, setClaimed] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(null);
 
   return (
     <div>
@@ -60,24 +59,23 @@ export default function ProviderWorkbench() {
         ))}
       </div>
 
-      {step === "register" && (
-        <RegisterStep
-          initial={registered}
+      {step === "claim" && (
+        <ClaimStep
+          initial={claimed}
           onNext={(r) => {
-            setRegistered(r);
+            setClaimed(r);
             goto("publish", true);
           }}
         />
       )}
-      {step === "publish" && <PublishStep registered={registered} onNext={() => goto("manage", true)} onBack={() => setStep("register")} />}
+      {step === "publish" && <PublishStep claimed={claimed} onNext={() => goto("manage", true)} onBack={() => setStep("claim")} />}
       {step === "manage" && (
         <ManageStep
-          agentId={registered?.agent_id ?? null}
-          onNext={() => goto("bind", true)}
+          agentId={claimed?.agent_id ?? null}
+          onNext={() => goto("withdraw", true)}
           onBack={() => setStep("publish")}
         />
       )}
-      {step === "bind" && <BindStep onNext={() => goto("withdraw", true)} onBack={() => setStep("manage")} />}
       {step === "withdraw" && <WithdrawStep />}
 
       <InfoBox>
@@ -89,95 +87,237 @@ export default function ProviderWorkbench() {
 }
 
 /* ============ 步骤 1：登记 ============ */
-export function RegisterStep({ initial, onNext }: { initial: { agent_id: number; display_name: string; wallet?: string } | null; onNext: (r: { agent_id: number; display_name: string; wallet?: string }) => void }) {
+/**
+ * ① 认领身份（认证先行）：连接钱包 → agent_id 防抖预检 claim-state → 四态：
+ *   a 身份不存在 → 注册闭环（铸造→自动绑定为连接钱包→绿态认领）；
+ *   b agentWallet/认领者=我的地址 → 绿，可直接提交认领（POST /providers 带 claim_wallet）；
+ *   c agentWallet=平台托管且无人认领 → 黄，「绑定我的钱包并认领」一键链（AgentWalletSet 签名→自动登记）；
+ *   d 被他人认领/他人非托管绑定 → 红死路（明示，不给操作）。
+ */
+export function ClaimStep({ initial, onNext }: { initial: { agent_id: number; display_name: string; wallet: string } | null; onNext: (r: { agent_id: number; display_name: string; wallet: string }) => void }) {
+  const w = useWallet();
   const [agentId, setAgentId] = useState(initial?.agent_id ? String(initial.agent_id) : "");
   const [name, setName] = useState(initial?.display_name ?? "");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ agent_id: number; display_name: string; wallet?: string } | null>(initial ?? null);
+  const [debouncedId, setDebouncedId] = useState(initial?.agent_id ? String(initial.agent_id) : "");
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [done, setDone] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(initial ?? null);
   const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState<null | "claiming" | "signing" | "submitting">(null);
+  const [cancelled, setCancelled] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState(0);
 
-  const idNum = Number(agentId);
-  const valid = Number.isInteger(idNum) && idNum >= 1 && name.trim().length >= 1 && name.trim().length <= 128;
+  // 防抖预检（400ms）
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedId(agentId.trim()), 400);
+    return () => clearTimeout(t);
+  }, [agentId]);
 
-  // 链上身份实时校验（登记前预检）
-  const identity = useAsync<AgentIdentity | null>(
+  // 签名窗口倒计时
+  useEffect(() => {
+    if (deadline == null) return;
+    const t = setInterval(() => setCountdown(Math.max(0, deadline - Math.floor(Date.now() / 1000))), 1000);
+    return () => clearInterval(t);
+  }, [deadline]);
+
+  const idNum = Number(debouncedId);
+  const cs = useAsync<ClaimState | null>(
     () =>
       Number.isInteger(idNum) && idNum >= 1
-        ? botChainApi.identity(idNum).catch((e) => {
+        ? coreApi.claimState(idNum).catch((e) => {
             if (e instanceof ApiError && e.status === 404) return null;
             throw e;
           })
         : Promise.resolve(null),
-    [agentId]
+    [debouncedId, refreshTick]
   );
 
-  const submit = async () => {
-    setBusy(true);
+  const my = w.address?.toLowerCase() ?? "";
+  const aw = cs.data?.agent_wallet?.toLowerCase() ?? null;
+  const cb = cs.data?.claimed_by_wallet?.toLowerCase() ?? null;
+  const cust = cs.data?.platform_custodian?.toLowerCase() ?? "";
+  // 四态判定
+  const state: "empty" | "loading" | "a" | "b" | "c" | "d" =
+    cs.loading && cs.data == null ? "loading" : !cs.data?.identity_found ? "a" : aw === my || cb === my ? "b" : aw === cust && (!cb || cb === my) ? "c" : "d";
+  const nameValid = name.trim().length >= 1 && name.trim().length <= 128;
+
+  const submitClaim = async () => {
+    setBusy("claiming");
     setError(null);
     try {
-      const row = await coreApi.registerProvider(idNum, name.trim());
-      setResult({ agent_id: row.agent_id, display_name: row.display_name, wallet: row.wallet });
+      const row = await coreApi.registerProvider(idNum, name.trim(), w.address!);
+      const r = { agent_id: row.agent_id, display_name: row.display_name, wallet: w.address! };
+      setDone(r);
     } catch (e) {
       setError(e);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
+  /** c 态一键链：绑定我的钱包（AgentWalletSet 签名）→ 自动登记认领。 */
+  const bindAndClaim = async () => {
+    setBusy("signing");
+    setError(null);
+    setCancelled(null);
+    try {
+      const sel = await w.requireProvider();
+      if (!sel) throw new Error("未选择浏览器钱包。");
+      const identity = await botChainApi.identity(idNum); // owner（托管期=平台代管账户）
+      const dl = Math.floor(Date.now() / 1000) + 300;
+      setDeadline(dl);
+      setCountdown(300);
+      const td = agentWalletSetTypedData({
+        agentId: idNum,
+        newWallet: w.address!,
+        owner: identity.owner,
+        deadline: dl,
+        verifyingContract: IDENTITY_REGISTRY,
+        chainId: CHAIN_ID,
+      });
+      const signer = await browserProvider(sel.provider).getSigner(w.address!);
+      const sig = await signer.signTypedData(td.domain, td.types, td.message);
+      if (!sel) return;
+      setBusy("submitting");
+      await botChainApi.bindWallet(idNum, w.address!, sig, dl);
+      const row = await coreApi.registerProvider(idNum, name.trim(), w.address!);
+      const r = { agent_id: row.agent_id, display_name: row.display_name, wallet: w.address! };
+      setDone(r);
+    } catch (e) {
+      if (isUserRejected(e)) setCancelled("你取消了绑定签名（钱包弹窗里拒绝）。身份未变更，可重试。");
+      else setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 前置：未连接 → 只给内联连接入口，不出现表单
+  if (!w.address) {
+    return (
+      <div className="card">
+        <h3>① 认领身份（认证先行）</h3>
+        <p className="card-desc">认领 = 把链上身份钱包绑定为你当前连接的钱包 + 平台登记，一步完成。先连接钱包开始。</p>
+        <div className="flex">
+          <span className="dim">认领签名（AgentWalletSet）与登记都以连接钱包为准：</span>
+          <ConnectWalletButton size="small" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
-      <h3>登记 Provider（链上身份 → 平台档案）</h3>
-      <p className="card-desc">agent_id 必须是 ERC-8004 注册表里已铸造的身份（tokenId）。提交时平台会实时到链上校验。</p>
+      <h3>① 认领身份（绑定 + 登记一步完成）</h3>
+      <p className="card-desc">
+        认领把「链上身份钱包绑定（AgentWalletSet 签名）」与「平台 Provider 登记」合并成一次引导；发布服务的收入默认进认领钱包（
+        <span className="mono">{w.address.slice(0, 10)}…</span>）。
+      </p>
+
       <div className="field">
         <label>Agent ID（ERC-8004 tokenId）</label>
-        <input type="number" value={agentId} placeholder="例如 162" onChange={(e) => setAgentId(e.target.value)} />
-        {agentId !== "" && (
+        <input type="number" value={agentId} placeholder="例如 169" onChange={(e) => setAgentId(e.target.value)} />
+        {agentId.trim() !== "" && (
           <div className="help">
-            {identity.loading ? (
-              "正在查询链上身份…"
-            ) : identity.error ? (
-              <ErrorBox error={identity.error} />
-            ) : identity.data ? (
-              <span style={{ color: "var(--success)" }}>
-                ✓ 链上身份存在 · owner {identity.data.owner.slice(0, 10)}…（平台代管）· 身份钱包 {identity.data.agent_wallet}
-              </span>
-            ) : (
-              <span style={{ color: "var(--warn)" }}>⚠ 链上没有该 tokenId 的身份记录（登记会被 422 拒绝）——可在下方注册一个</span>
-            )}
+            {state === "loading"
+              ? "查询认领状态（防抖 400ms，identity 绕缓存）…"
+              : cs.error != null
+                ? <ErrorBox error={cs.error} />
+                : null}
           </div>
         )}
+      </div>
+
+      {state === "a" && (
+        <div className="alert err">
+          <b>身份不存在</b>——链上没有 tokenId={debouncedId} 的 ERC-8004 身份。可在下方注册一个（铸造后自动绑定为当前连接钱包，随后即可认领）。
+        </div>
+      )}
+      {state === "a" && (
         <IdentityRegister
           onRegistered={(id) => {
             setAgentId(String(id));
+            setDebouncedId(String(id));
+            setRefreshTick((t) => t + 1);
           }}
         />
-      </div>
-      <div className="field">
-        <label>展示名称</label>
-        <input type="text" value={name} maxLength={128} placeholder="例如 My Translate Booth" onChange={(e) => setName(e.target.value)} />
-        <div className="help">1–128 字符，会出现在收入榜与服务目录。</div>
-      </div>
-      {error != null && <ErrorBox error={error} />}
-      {result && (
-        <SuccessBox>
-          已登记：agent_id={result.agent_id}「{result.display_name}」身份钱包 {result.wallet ?? "（读链上身份）"}
-          。下一步发布服务。
-        </SuccessBox>
       )}
-      <div className="btn-row">
-        <button className="btn" disabled={!valid || busy} onClick={submit}>
-          {busy ? <Spinner label="提交中…" /> : "登记"}
-        </button>
-        <button className="btn secondary" disabled={!result} onClick={() => onNext(result ?? { agent_id: idNum, display_name: name })}>
-          下一步：发布服务 →
-        </button>
-      </div>
+
+      {state === "b" && (
+        <div className="alert ok">
+          <b>{cb === my ? "已由你认领" : "身份钱包已是你的地址"}</b>——可直接提交认领{cb !== my && aw === my ? "（登记展示名）" : "（同钱包重复认领=改名，幂等）"}。
+        </div>
+      )}
+
+      {state === "c" && (
+        <div className="alert warn">
+          <b>需先绑定</b>——链上身份钱包还是平台代管账户（<span className="mono">{cs.data?.agent_wallet?.slice(0, 10)}…</span>），认领要求链上 agentWallet =
+          你的钱包。点下方按钮一次完成「绑定签名 + 登记」。
+        </div>
+      )}
+
+      {state === "d" && (
+        <div className="alert err">
+          <b>无法经平台认领</b>——
+          {cb && cb !== my
+            ? <>该身份已被钱包 <span className="mono">{cs.data?.claimed_by_wallet?.slice(0, 10)}…</span> 认领（一身份一认领）。</>
+            : <>该身份的链上钱包由他人绑定（<span className="mono">{cs.data?.agent_wallet?.slice(0, 10)}…</span>，非平台托管）。</>}
+          请核对你的 agent_id，或让绑定者本人操作。
+        </div>
+      )}
+
+      {(state === "b" || state === "c") && (
+        <div className="field">
+          <label>展示名称（认领后出现在目录与收入榜）</label>
+          <input type="text" value={name} maxLength={128} placeholder="例如 My Translate Booth" onChange={(e) => setName(e.target.value)} />
+          <div className="help">1–128 字符；认领钱包 = 当前连接的钱包 {w.address.slice(0, 10)}…。</div>
+        </div>
+      )}
+
+      {(state === "b" || state === "c") && (
+        <div className="btn-row">
+          {state === "b" ? (
+            <button className="btn" disabled={!nameValid || busy != null} onClick={submitClaim}>
+              {busy === "claiming" ? "认领提交中…" : "提交认领"}
+            </button>
+          ) : (
+            <>
+              <button className="btn" disabled={!nameValid || busy != null} onClick={bindAndClaim}>
+                {busy === "signing"
+                  ? "等待钱包签名确认…"
+                  : busy === "submitting"
+                    ? "绑定完成，登记中…"
+                    : "绑定我的钱包并认领"}
+              </button>
+              {deadline != null && busy != null && (
+                <span className={`badge ${countdown < 60 ? "warn" : "muted"}`}>
+                  签名窗口 {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {cancelled && <WarnBox>{cancelled}</WarnBox>}
+      {error != null && <ErrorBox error={error} />}
+
+      {done && (
+        <div className="alert ok">
+          ✓ 认领完成：身份 <b>#{done.agent_id}</b> · 认领钱包 <span className="mono">{done.wallet.slice(0, 10)}…</span> · 「{done.display_name}」。
+          可进入第 ② 步发布服务（收入默认进认领钱包）。
+          <div className="btn-row" style={{ marginTop: 8 }}>
+            <button className="btn" onClick={() => onNext(done)}>
+              下一步：发布服务 →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ============ 步骤 2：发布服务 ============ */
-export function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: number; display_name: string } | null; onNext: () => void; onBack: () => void }) {
+export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: number; display_name: string; wallet: string } | null; onNext: () => void; onBack: () => void }) {
   const wctx = useWallet();
   const [serviceId, setServiceId] = useState("");
   // 服务收款钱包（manifest.provider.wallet）：收入实际到账地址；默认=当前连接的钱包
@@ -208,14 +348,14 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
   const fieldErr = (f: string) => error?.fieldErrors?.[f];
 
   const identity = useAsync<AgentIdentity | null>(
-    () => (registered ? botChainApi.identity(registered.agent_id).catch(() => null) : Promise.resolve(null)),
-    [registered?.agent_id]
+    () => (claimed ? botChainApi.identity(claimed.agent_id).catch(() => null) : Promise.resolve(null)),
+    [claimed?.agent_id]
   );
 
-  // 连接钱包后自动填默认值（未连接则留空，用户可手填）
+  // 默认=认领钱包（认证先行：收入默认进经过认证的钱包）；认领后又连接了别的钱包不自动覆盖手填值
   useEffect(() => {
-    if (!revenueWallet && wctx.address) setRevenueWallet(wctx.address);
-  }, [wctx.address, revenueWallet]);
+    if (!revenueWallet && claimed?.wallet) setRevenueWallet(claimed.wallet);
+  }, [claimed?.wallet, revenueWallet]);
   const revenueWalletValid = /^0x[0-9a-fA-F]{40}$/.test(revenueWallet.trim());
   const identityWallet = identity.data?.agent_wallet ?? null;
   const walletDiffers = identityWallet != null && revenueWalletValid && identityWallet.toLowerCase() !== revenueWallet.trim().toLowerCase();
@@ -247,9 +387,9 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
       description: desc.trim(),
       version,
       provider: {
-        agent_id: registered?.agent_id ?? 0,
+        agent_id: claimed?.agent_id ?? 0,
         wallet: revenueWallet.trim(),
-        display_name: registered?.display_name ?? "",
+        display_name: claimed?.display_name ?? "",
       },
       endpoint: {
         type: endpointType,
@@ -290,10 +430,10 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
     }
   };
 
-  if (!registered) {
+  if (!claimed) {
     return (
       <div className="card">
-        <WarnBox>请先完成第 ① 步登记（需要 agent_id 与展示名称），发布表单会自动带上 Provider 信息。</WarnBox>
+        <WarnBox>请先完成第 ① 步认领（连接钱包 → 绑定+登记），发布表单会自动带上 Provider 信息与认领钱包。</WarnBox>
         <button className="btn secondary" onClick={onBack}>
           ← 回到登记
         </button>
@@ -307,7 +447,7 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
     <div className="card">
       <h3>发布服务（ServiceManifest 表单）</h3>
       <p className="card-desc">
-        Provider：agent_id={registered.agent_id}「{registered.display_name}」
+        Provider：agent_id={claimed.agent_id}「{claimed.display_name}」（认领钱包 {claimed.wallet.slice(0, 10)}…）
         {identityWallet ? ` · 链上身份钱包 ${identityWallet.slice(0, 10)}…` : " · 正在读取链上身份钱包…"}
       </p>
 
@@ -864,201 +1004,7 @@ function bumpVersion(v: string): string {
   return parts.join(".");
 }
 
-/* ============ 步骤 4：身份钱包绑定 ============ */
-function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
-  const [tokenId, setTokenId] = useState("162");
-  const [newWallet, setNewWallet] = useState("");
-  const [mode, setMode] = useState<"injected" | "paste">("injected");
-  const [pastedSig, setPastedSig] = useState("");
-  const [deadline, setDeadline] = useState<number | null>(null);
-  const [countdown, setCountdown] = useState(0);
-  const [typedData, setTypedData] = useState<ReturnType<typeof agentWalletSetTypedData> | null>(null);
-  const [signature, setSignature] = useState<string | null>(null);
-  const [cancelled, setCancelled] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [result, setResult] = useState<{ tx_hash: string } | null>(null);
-  const [needRebuild, setNeedRebuild] = useState(false);
-
-  const identity = useAsync<AgentIdentity | null>(
-    () => (Number.isInteger(Number(tokenId)) && Number(tokenId) > 0 ? botChainApi.identity(Number(tokenId)).catch(() => null) : Promise.resolve(null)),
-    [tokenId]
-  );
-
-  // 倒计时
-  useEffect(() => {
-    if (deadline == null) return;
-    const t = setInterval(() => {
-      const left = deadline - Math.floor(Date.now() / 1000);
-      setCountdown(left);
-      if (left <= 0) setNeedRebuild(true);
-    }, 1000);
-    return () => clearInterval(t);
-  }, [deadline]);
-
-  const build = useCallback(() => {
-    if (!identity.data) return;
-    const dl = Math.floor(Date.now() / 1000) + 300; // 链上窗口 [now, now+300s]
-    const td = agentWalletSetTypedData({
-      agentId: Number(tokenId),
-      newWallet: newWallet.trim(),
-      owner: identity.data.owner,
-      deadline: dl,
-      verifyingContract: IDENTITY_REGISTRY,
-      chainId: CHAIN_ID,
-    });
-    setTypedData(td);
-    setDeadline(dl);
-    setCountdown(dl - Math.floor(Date.now() / 1000));
-    setSignature(null);
-    setNeedRebuild(false);
-    setError(null);
-  }, [identity.data, newWallet, tokenId]);
-
-  const wctx = useWallet();
-
-  const signWithInjected = async () => {
-    setBusy(true);
-    setError(null);
-    setCancelled(false);
-    try {
-      // 与消费端同一共享路径：用户选中的 provider → BrowserProvider.signTypedData（digest 由扩展计算）
-      const sel = await wctx.requireProvider();
-      if (!sel) throw new Error("未选择浏览器钱包。");
-      const signer = await browserProvider(sel.provider).getSigner(newWallet.trim());
-      const sig = await signer.signTypedData(typedData!.domain, typedData!.types, typedData!.message);
-      setSignature(sig);
-    } catch (e) {
-      if (isUserRejected(e)) setCancelled(true);
-      else setError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await botChainApi.bindWallet(Number(tokenId), newWallet.trim(), (mode === "injected" ? signature : pastedSig.trim())!, deadline!);
-      setResult({ tx_hash: r.tx_hash });
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const sigValid = /^0x[0-9a-fA-F]{130}$/.test((mode === "injected" ? signature ?? "" : pastedSig));
-  const expired = deadline != null && countdown <= 0;
-
-  return (
-    <div className="card">
-      <h3>身份钱包绑定（进阶 · 上链，setAgentWallet）</h3>
-      <p className="card-desc">
-        setAgentWallet(agentId, newWallet, deadline, signature)：把身份钱包（agentWallet）换成新地址。签名者是<b>新钱包本人</b>（EIP-712，域 ERC8004IdentityRegistry/1/{CHAIN_ID}/代理 {IDENTITY_REGISTRY.slice(0, 8)}…），
-        deadline 链上窗口 5 分钟。
-      </p>
-
-      <div className="field">
-        <label>Token ID（agentId）</label>
-        <input type="number" value={tokenId} onChange={(e) => setTokenId(e.target.value)} />
-        {identity.data && (
-          <div className="help">
-            当前身份：owner <span className="mono">{identity.data.owner}</span>（平台代管账户）· 身份钱包 <span className="mono">{identity.data.agent_wallet}</span>
-          </div>
-        )}
-      </div>
-      <div className="field">
-        <label>新身份钱包地址</label>
-        <input type="text" value={newWallet} placeholder="0x…（签名必须用这个地址的私钥/钱包完成）" onChange={(e) => setNewWallet(e.target.value)} className={newWallet && !/^0x[0-9a-fA-F]{40}$/.test(newWallet.trim()) ? "invalid" : ""} />
-      </div>
-
-      <div className="btn-row" style={{ marginBottom: 16 }}>
-        <button className="btn" disabled={!identity.data || !/^0x[0-9a-fA-F]{40}$/.test(newWallet.trim())} onClick={build}>
-          生成待签数据
-        </button>
-        {typedData && (
-          <Badge kind={expired ? "err" : countdown < 60 ? "warn" : "ok"}>
-            {expired ? "已过期（请重新生成并签名）" : `签名窗口剩 ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, "0")}`}
-          </Badge>
-        )}
-      </div>
-
-      {typedData && (
-        <>
-          <div className="section-title">待签 EIP-712 Typed Data</div>
-          <pre className="code-box" style={{ padding: 12, borderRadius: 8, overflowX: "auto", maxHeight: 260 }}>{JSON.stringify(typedData, null, 2)}</pre>
-          <div className="flex" style={{ marginBottom: 12 }}>
-            <CopyButton text={JSON.stringify(typedData)} label="复制 typed data JSON" />
-          </div>
-
-          <div className="seg" style={{ marginBottom: 12 }}>
-            <button className={mode === "injected" ? "active" : ""} onClick={() => setMode("injected")}>
-              A · 注入钱包签名（OKX / MetaMask）
-            </button>
-            <button className={mode === "paste" ? "active" : ""} onClick={() => setMode("paste")}>
-              B · 粘贴本地签名
-            </button>
-          </div>
-
-          {mode === "injected" ? (
-            <div>
-              <div className="help" style={{ marginBottom: 8 }}>
-                用 <b>新钱包地址</b> 对应的浏览器钱包签名（window.ethereum signTypedData_v4）。钱包里需已导入该地址。
-              </div>
-              <div className="btn-row">
-                <button className="btn" disabled={busy || expired || needRebuild || wctx.candidates.length === 0} onClick={signWithInjected}>
-                  {busy ? <Spinner label="等待钱包确认…" /> : "调起钱包签名"}
-                </button>
-                {wctx.candidates.length === 0 && <span className="dim">未检测到注入钱包——改用 B 模式。</span>}
-              </div>
-            </div>
-          ) : (
-            <div className="field">
-              <label>本地签名结果（0x + 65 字节）</label>
-              <textarea className="code" rows={3} value={pastedSig} placeholder="0x…" onChange={(e) => setPastedSig(e.target.value)} />
-              <div className="help">可在任何可信环境用新钱包私钥对上方 typed data 签名后粘贴；私钥不经过本页面。</div>
-            </div>
-          )}
-
-          {signature && mode === "injected" && (
-            <SuccessBox>
-              签名完成：<span className="mono">{signature.slice(0, 34)}…</span>（65 字节）——等待提交。
-            </SuccessBox>
-          )}
-          {cancelled && (
-            <WarnBox>你取消了签名（钱包弹窗里拒绝）。没有产生任何签名，可重新点「调起钱包签名」。</WarnBox>
-          )}
-
-          {error != null && <ErrorBox error={error} />}
-
-          <div className="btn-row" style={{ marginTop: 12 }}>
-            <button className="btn danger" disabled={busy || expired || needRebuild || !sigValid} onClick={submit}>
-              {busy ? <Spinner label="提交上链…" /> : "提交绑定（dry_run=false，真实上链）"}
-            </button>
-            {expired && <span style={{ color: "var(--danger)", fontSize: 13 }}>deadline 已过——点「生成待签数据」刷新窗口并重新签名。</span>}
-          </div>
-        </>
-      )}
-
-      {result && (
-        <SuccessBox>
-          绑定交易已上链：<TxLink hash={result.tx_hash} /> （约几秒后可在身份查询里看到新 agent_wallet）。身份钱包从此指向你自己的地址（发布 http_json 服务前的收款绑定校验口径见帮助页三钱包角色图）。
-        </SuccessBox>
-      )}
-
-      <div className="btn-row" style={{ marginTop: 16 }}>
-        <button className="btn secondary" onClick={onBack}>
-          ← 上一步
-        </button>
-        <button className="btn secondary" onClick={onNext}>
-          下一步：提现视图 →
-        </button>
-      </div>
-    </div>
-  );
-}
+/* 旧独立「身份钱包绑定」步骤已并入第 ① 步认领（认证先行）；提现仍独立： */
 
 /* ============ 步骤 5：提现 ============ */
 function WithdrawStep() {

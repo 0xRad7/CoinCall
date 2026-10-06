@@ -96,7 +96,13 @@ function defaultTarget(): EventTarget {
 // ---- EIP-1193 错误分类 ----
 
 export function isUserRejected(e: unknown): boolean {
-  return (e as { code?: number })?.code === 4001;
+  const err = e as { code?: unknown; error?: { code?: number }; info?: { error?: { code?: number } } };
+  return (
+    err?.code === 4001 ||
+    err?.code === "ACTION_REJECTED" || // ethers v6 把 4001 包装成此码
+    err?.error?.code === 4001 ||
+    err?.info?.error?.code === 4001
+  );
 }
 
 /** 链未添加（4902；或被包在 -32603 内层，OKX 常见）。 */
