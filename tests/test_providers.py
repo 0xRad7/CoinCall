@@ -149,7 +149,7 @@ class TestProvidersUnit:
         )
         body = client.get("/providers").json()["providers"]
         assert len(body) == 1
-        assert set(body[0]) == {"agent_id", "display_name", "wallet", "created_at"}
+        assert set(body[0]) == {"agent_id", "display_name", "wallet", "claim_wallet", "created_at"}
 
     @pytest.mark.unit
     def test_provider_services_link_to_manifests(self, client: TestClient) -> None:
