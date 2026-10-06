@@ -50,9 +50,9 @@ export function humanizeError(e: unknown): HumanError {
     if (e.code === "identity_not_found" || /identity_not_found|未注册|not.*registered/i.test(e.detail + e.error)) {
       base.title = "链上找不到这个 Agent 身份";
       base.hint = "该 agent_id 尚未在 ERC-8004 注册表铸造身份。请先到 bot-chain-api 完成身份注册（POST /api/v1/agent-identity/register），或核对 token_id 是否填对。";
-    } else if (/agent_wallet|wallet.*not.*bind|收款钱包/i.test(e.detail + e.error)) {
-      base.title = "该身份还没有绑定收款钱包";
-      base.hint = "发布服务前须先把 agentWallet 绑定到链上身份。请到本页第 4 步「收款钱包绑定」完成绑定后再发布。";
+    } else if (/agent_wallet|agentwallet|wallet.*not.*bind|身份钱包未绑定/i.test(e.detail + e.error)) {
+      base.title = "身份钱包还未绑定为你自己的地址";
+      base.hint = "身份钱包（agentWallet）注册时默认=平台代管账户。请到 Provider 工作台第 ① 步注册成功后点「把身份钱包绑定为当前连接的钱包」，或第 ④ 步完成绑定。";
     } else if (e.code === "service_exists|duplicate" || /already exists|已存在/i.test(e.detail + e.error)) {
       base.title = "服务 ID 已被占用";
       base.hint = "service_id 全局唯一。换一个 ID，或在「我的服务」里直接改价/改状态（重新提交 manifest）。";

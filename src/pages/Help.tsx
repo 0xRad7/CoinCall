@@ -7,7 +7,7 @@ const ERRORS: Array<{ code: string; http: string; who: string; human: string; ne
   { code: "insufficient_allowance", http: "402", who: "网关(链上)", human: "对 PayVault 的授权额不够", next: "资金面板用授权滑条（如 0.01/0.1/1 USDT）重新 approve。" },
   { code: "payment_missing / 验签失败", http: "402", who: "网关", human: "X-PAYMENT 缺失或签名与 key 绑定钱包不符", next: "确认用「签发 key 的同一钱包」本地签名；本页试用调用自动保证一致。" },
   { code: "identity_not_found", http: "422", who: "core", human: "登记 Provider 时链上没有该 agent_id 身份", next: "核对 ERC-8004 tokenId；身份需先在 bot-chain-api 注册（POST /api/v1/agent-identity/register）。" },
-  { code: "agent_wallet 未绑定", http: "422", who: "core", human: "发布服务要求身份已绑定收款钱包", next: "Provider 工作台第 ④ 步完成收款钱包绑定后重发。" },
+  { code: "agent_wallet 未绑定", http: "422", who: "core", human: "身份钱包还是平台代管账户（未绑定为你自己的地址）", next: "Provider 工作台第 ① 步注册后点「把身份钱包绑定为当前连接的钱包」，或第 ④ 步完成绑定。" },
   { code: "schema 校验失败", http: "422", who: "网关", human: "请求体不符合服务 input_schema（不扣费）", next: "按参数表单的红字提示修正后重试。" },
   { code: "service_not_found / paused", http: "404", who: "网关", human: "服务不存在或已暂停", next: "刷新目录；Provider 在「我的服务」里恢复 active。" },
   { code: "idempotency_conflict", http: "409", who: "网关", human: "同一幂等键换了参数", next: "换参数后重试（本页自动生成新幂等键）。" },
@@ -63,16 +63,38 @@ export default function Help() {
                 <p>没有 ERC-8004 身份？第 ① 步展开「注册一个」<br />平台链上服务代发铸造，无需钱包签名</p>
               </div>
               <div className="arrow">→</div>
-              <div className="node"><h4>① 登记 Provider</h4><p>agent_id + 名称<br />链上身份实时预检</p></div>
+              <div className="node"><h4>① 登记 Provider</h4><p>agent_id + 名称<br />链上身份实时预检<br />注册后可顺手绑定身份钱包</p></div>
               <div className="arrow">→</div>
-              <div className="node"><h4>② 发布服务</h4><p>manifest 表单<br />定价/端点/schema</p></div>
+              <div className="node"><h4>② 发布服务</h4><p>manifest 表单<br />定价/端点/schema<br />指定服务收款钱包</p></div>
               <div className="arrow">→</div>
               <div className="node"><h4>③ 管理</h4><p>暂停/恢复/改价<br />= 重发 manifest</p></div>
               <div className="arrow">→</div>
-              <div className="node"><h4>④ 绑定收款钱包</h4><p>EIP-712 签名<br />5 分钟窗口</p></div>
+              <div className="node"><h4>④ 绑定身份钱包</h4><p>EIP-712 签名<br />5 分钟窗口</p></div>
               <div className="arrow">→</div>
-              <div className="node"><h4>⑤ 提现</h4><p>PayVault credits<br />providerWithdraw</p></div>
+              <div className="node"><h4>⑤ 提现</h4><p>PayVault credits<br />providerWithdraw<br />（服务收款钱包本人）</p></div>
             </div>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <div className="dim" style={{ marginBottom: 6 }}>三个钱包角色（别混成一个词）：</div>
+            <div className="diagram">
+              <div className="node" style={{ borderColor: "var(--text-3)" }}>
+                <h4>平台代管账户（0xc37f…）</h4>
+                <p>代发注册/结算交易 · PayVault operator<br /><b>不是收款地址</b>，不存放你的收入</p>
+              </div>
+              <div className="arrow">≠</div>
+              <div className="node">
+                <h4>身份钱包（agentWallet）</h4>
+                <p>ERC-8004 身份上的对外钱包<br />注册时默认 = 平台代管，<b>建议绑成你自己的</b><br />（第 ①/④ 步，EIP-712 签名）</p>
+              </div>
+              <div className="arrow">≠</div>
+              <div className="node" style={{ borderColor: "var(--success)" }}>
+                <h4>服务收款钱包（manifest.provider.wallet）</h4>
+                <p><b>收入实际到账地址</b>（Charged 记账键）<br />发布服务时指定，默认=你连接的钱包<br />提现（providerWithdraw）用它本人发起</p>
+              </div>
+            </div>
+            <InfoBox>
+              一句话资金流：付费调用的 USDT 由 keeper 划入 PayVault，按<b>服务收款钱包</b>记账；Provider 用该地址本人发起 providerWithdraw 提现。身份钱包只是链上身份的对外属性，平台代管账户只是交易代发方。
+            </InfoBox>
           </div>
         </div>
         <InfoBox>
@@ -158,7 +180,7 @@ export default function Help() {
             与「连接浏览器钱包」主路径完全隔离。
           </li>
           <li>
-            <b>Provider 提现</b>：providerWithdraw 只能由收款钱包本人发起，路径恒开、无平台托管（铁律 P8）。
+            <b>Provider 提现</b>：providerWithdraw 只能由服务收款钱包本人发起，路径恒开、无平台托管（铁律 P8）。
           </li>
         </ul>
         <WarnBox>
