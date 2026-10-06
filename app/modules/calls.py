@@ -17,6 +17,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field
 
 #: 02 §5 calls 表（status: inflight|success|aborted|settled|bad_debt）
+#: latency_ms 口径 BIGINT（10 §1 决策层冻结契约；W3 旧库 INTEGER 起库时自动 SET TYPE）
 CALLS_DDL = """
 CREATE TABLE IF NOT EXISTS calls (
   call_id             VARCHAR PRIMARY KEY,
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS calls (
   amount_raw          BIGINT,
   status              VARCHAR,
   http_status         INTEGER,
-  latency_ms          INTEGER,
+  latency_ms          BIGINT,
   result_hash         VARCHAR,
   payment_nonce       VARCHAR,
   created_at          TIMESTAMP DEFAULT now()
@@ -100,6 +101,27 @@ class CallStore:
         with self._lock:
             self.conn.execute(CALLS_DDL)
             self.conn.execute(SETTLE_QUEUE_DDL)
+            self._migrate_calls()
+
+    def _migrate_calls(self) -> None:
+        """旧库补列迁移（10 §1 决策层）：consumer_wallet 补列 + latency_ms 归一 BIGINT。
+
+        information_schema 模式（参照 coincall-core db.py claim_wallet 迁移），幂等：
+        新库现行 DDL 下三步全 no-op。A4 冻结的是对外签名，本迁移只加不改。
+        """
+        cols = {
+            str(name): str(dtype)
+            for name, dtype in self.conn.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = 'calls'"
+            ).fetchall()
+        }
+        if "consumer_wallet" not in cols:
+            self.conn.execute("ALTER TABLE calls ADD COLUMN consumer_wallet VARCHAR")
+        if "latency_ms" not in cols:
+            self.conn.execute("ALTER TABLE calls ADD COLUMN latency_ms BIGINT")
+        elif cols["latency_ms"].upper() != "BIGINT":
+            self.conn.execute("ALTER TABLE calls ALTER latency_ms SET TYPE BIGINT")
 
     # ---- calls ----
 
