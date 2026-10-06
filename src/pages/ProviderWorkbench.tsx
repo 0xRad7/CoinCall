@@ -2,7 +2,7 @@
  * Provider 工作台（认证先行，四步向导）：认领身份（AgentWalletSet 绑定 + 登记 One-shot）→
  * 发布服务 → 我的服务 → 提现。步骤间状态保持（父级 state），进度指示可点击回跳。
  */
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { coreApi, credentialsApi, type ClaimState, type ServiceManifest } from "../api/core";
 import { CredentialHeadersEditor, rowsToHeaders, type CredentialRow } from "../components/CredentialHeadersEditor";
 import { ExampleRequestEditor } from "../components/ExampleRequestEditor";
@@ -71,7 +71,7 @@ export default function ProviderWorkbench() {
       {step === "publish" && <PublishStep claimed={claimed} onNext={() => goto("manage", true)} onBack={() => setStep("claim")} />}
       {step === "manage" && (
         <ManageStep
-          agentId={claimed?.agent_id ?? null}
+          claimedAgentId={claimed?.agent_id ?? null}
           onNext={() => goto("withdraw", true)}
           onBack={() => setStep("publish")}
         />
@@ -657,32 +657,55 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
 }
 
 /* ============ 步骤 3：我的服务管理 ============ */
-export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNext: () => void; onBack: () => void }) {
+export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId: number | null; onNext: () => void; onBack: () => void }) {
+  const w = useWallet();
   const catalog = useAsync(() => coreApi.catalog(), [], { pollMs: 20_000 });
+  // 认领身份集合的权威来源：GET /providers 过滤 claim_wallet == 我的地址（向导①认领的 agent_id 只作加速兜底）
+  const providers = useAsync(() => (w.address ? coreApi.providers() : Promise.resolve(null)), [w.address]);
   const [confirm, setConfirm] = useState<null | { kind: "status" | "price"; svc: ServiceManifest; nextStatus?: string; nextAmount?: string }>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [credOpen, setCredOpen] = useState<Record<string, boolean>>({});
 
-  const mine = (catalog.data?.services ?? []).filter((s) => agentId == null || s.manifest.provider.agent_id === agentId);
+  // 所有权 = 收款所有权 ∪ 身份所有权：wallet==连接地址，或 agent_id ∈ 我认领的集合
+  const my = w.address?.toLowerCase() ?? "";
+  const claimedIds = useMemo(() => {
+    const set = new Set<number>();
+    if (claimedAgentId != null) set.add(claimedAgentId); // ①认领完成即默认纳入（加速；权威仍看 providers.claim_wallet）
+    for (const p of providers.data?.providers ?? []) {
+      if ((p.claim_wallet ?? "").toLowerCase() === my) set.add(p.agent_id);
+    }
+    return set;
+  }, [providers.data, my, claimedAgentId]);
 
-  // 本机管理面内部通道：全量 manifest（含真实上游 url——公开 API 恒脱敏，直接用 catalog 数据 repost 会把 url 抹掉）
+  const mine = useMemo(
+    () =>
+      (catalog.data?.services ?? []).filter((s) => {
+        const walletHit = s.manifest.provider.wallet?.toLowerCase() === my;
+        return walletHit || claimedIds.has(s.manifest.provider.agent_id);
+      }),
+    [catalog.data, my, claimedIds]
+  );
+
+  // 本机管理面内部通道：全量 manifest（含真实上游 url——公开 API 恒脱敏）。只对 mine 集合预取。
   const [fullManifests, setFullManifests] = useState<Record<string, ServiceManifest | null>>({});
+  const prefetchQueuedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!catalog.data) return;
+    const mineIds = new Set(mine.map((s) => s.service_id));
     for (const s of catalog.data.services) {
       const sid = s.service_id;
-      if (fullManifests[sid] !== undefined) continue;
-      if (agentId != null && s.manifest.provider.agent_id !== agentId) continue;
+      if (!mineIds.has(sid) || fullManifests[sid] !== undefined || prefetchQueuedRef.current.has(sid)) continue;
+      prefetchQueuedRef.current.add(sid); // 入队即去重（mine 集合异步扩张时避免重复请求）
       coreApi
         .internalManifest(sid)
         .then((m) => setFullManifests((prev) => ({ ...prev, [sid]: m })))
         .catch(() => setFullManifests((prev) => ({ ...prev, [sid]: null })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [catalog.data, agentId]);
+  }, [catalog.data, mine]);
 
   const repost = async (svc: ServiceManifest, patch: Partial<ServiceManifest>) => {
     setBusy(true);
@@ -705,17 +728,36 @@ export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null
     }
   };
 
+  // 前置：所有权以连接钱包为准——未连接只给内联引导，没有全量兜底视图
+  if (!w.address) {
+    return (
+      <div className="card">
+        <h3>③ 我的服务</h3>
+        <p className="card-desc">「我的服务」= 服务收款钱包是你的、或身份由你认领的服务——需要连接钱包判定所有权。</p>
+        <div className="flex">
+          <span className="dim">连接后按「收款所有权 ∪ 认领身份」过滤：</span>
+          <ConnectWalletButton size="small" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="flex" style={{ justifyContent: "space-between" }}>
-        <h3>我的服务{agentId ? `（agent_id=${agentId}）` : "（未指定 agent_id，显示全部）"}</h3>
+        <h3>
+          我的服务
+          <span className="dim" style={{ fontWeight: 400, fontSize: 12, marginLeft: 6 }}>
+            服务收款钱包=你 或 身份=你认领（{w.address.slice(0, 8)}…）
+          </span>
+        </h3>
         <button className="btn small secondary" onClick={catalog.reload}>
           刷新
         </button>
       </div>
       <p className="card-desc">状态切换与改价都是「重新提交 manifest」：改价立即对新调用生效；paused 服务调用会 404。</p>
       {error != null && <ErrorBox error={error} />}
-      <AsyncSection state={catalog} empty="目录里还没有你的服务——回到第 ② 步发布">
+      <AsyncSection state={catalog} empty="目录里还没有你的服务——去第 ② 步发布，或确认认领的身份与服务收款钱包">
         {() => (
           <table className="list">
             <thead>
@@ -749,6 +791,29 @@ export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null
                             {m.endpoint.method ?? "POST"}
                           </span>
                         )}
+                        {(() => {
+                          const walletHit = m.provider.wallet?.toLowerCase() === my;
+                          const identityHit = claimedIds.has(m.provider.agent_id);
+                          return (
+                            <>
+                              {walletHit && (
+                                <span className="badge ok" title="manifest.provider.wallet = 你的连接钱包">
+                                  服务收款钱包=你
+                                </span>
+                              )}{" "}
+                              {identityHit && (
+                                <span className="badge info" title="agent_id 在你认领的身份集合里">
+                                  身份 #{m.provider.agent_id}=你认领
+                                </span>
+                              )}
+                              {identityHit && !walletHit && (
+                                <span className="badge warn" title="他人可能冒用你的 agent_id 发布——收入进的不是你的地址">
+                                  ⚠ 此服务收款钱包非你，请核实
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div className="mono dim">{s.service_id} · v{m.version}</div>
                       {m.endpoint.type === "http_json" && (
