@@ -1,13 +1,8 @@
-/** 幂等键：service_id + 规范化参数的 SHA-256（浏览器/Node 双端可用）。 */
+/** 幂等键：service_id + 规范化参数的 SHA-256。
+ * 用 ethers 的 sha256（纯 JS）——不依赖 crypto.subtle：
+ * 局域网 http 访问（非安全上下文）下 subtle 为 undefined，node:crypto 桩会炸。 */
+import { sha256, toUtf8Bytes } from "ethers";
+
 export async function hashSha256HexStringish(input: string): Promise<string> {
-  const bytes = new TextEncoder().encode(input);
-  if (typeof crypto !== "undefined" && crypto.subtle) {
-    const buf = await crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(buf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-  // Node（vitest）兜底
-  const { createHash } = await import("node:crypto");
-  return createHash("sha256").update(bytes).digest("hex");
+  return sha256(toUtf8Bytes(input)).slice(2);  // 去 0x 前缀，保持 64 位 hex 契约
 }
