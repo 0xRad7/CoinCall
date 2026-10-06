@@ -82,11 +82,17 @@ def assert_chain_id(w3: Web3, expected: int = TESTNET_CHAIN_ID) -> None:
 
 
 def build_tx(
-    w3: Web3, from_address: str, to_address: str | None, data: bytes, gas: int | None = None
+    w3: Web3,
+    from_address: str,
+    to_address: str | None,
+    data: bytes,
+    gas: int | None = None,
+    *,
+    value_wei: int = 0,
 ) -> TxParams:
-    """恒定 20 gwei 的 legacy 交易模板（gas = estimate * 1.2）。"""
+    """恒定 20 gwei 的 legacy 交易模板（gas = estimate * 1.2；value_wei 可带原生币转账）。"""
     from_addr = Web3.to_checksum_address(from_address)
-    call = {"from": from_addr, "to": to_address, "data": data}
+    call = {"from": from_addr, "to": to_address, "data": data, "value": value_wei}
     estimate = gas or max(
         MIN_GAS, int(w3.eth.estimate_gas(cast("TxParams", call)) * GAS_MARGIN_RATIO)
     )
@@ -95,7 +101,7 @@ def build_tx(
         {
             "from": from_addr,
             "to": to_address,
-            "value": 0,
+            "value": value_wei,
             "gas": estimate,
             "gasPrice": GAS_PRICE_WEI,
             "nonce": w3.eth.get_transaction_count(from_addr, "pending"),
@@ -106,10 +112,16 @@ def build_tx(
 
 
 def sign_send_wait(
-    w3: Web3, account: LocalAccount, to_address: str | None, data: bytes, gas: int | None = None
+    w3: Web3,
+    account: LocalAccount,
+    to_address: str | None,
+    data: bytes,
+    gas: int | None = None,
+    *,
+    value_wei: int = 0,
 ) -> dict[str, Any]:
     """签名 → 发送 → 等回执；status=0 视为失败抛错。日志安全：只含地址与哈希。"""
-    tx = build_tx(w3, account.address, to_address, data, gas=gas)
+    tx = build_tx(w3, account.address, to_address, data, gas=gas, value_wei=value_wei)
     signed = account.sign_transaction(cast("dict[str, Any]", dict(tx)))
     tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=RECEIPT_TIMEOUT_S)
