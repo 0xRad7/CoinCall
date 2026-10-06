@@ -4,7 +4,7 @@ import { InfoBox, WarnBox } from "../components/ui";
 const ERRORS: Array<{ code: string; http: string; who: string; human: string; next: string }> = [
   { code: "missing_api_key", http: "402", who: "网关", human: "调用没带 X-Api-Key", next: "到「消费端工作台 → API key」签发并保存，再调用。" },
   { code: "insufficient_balance", http: "402", who: "网关(链上)", human: "钱包 USDT 余额不够本次价格", next: "资金面板「获取 USDT」——从测试网水龙头领取后重试。" },
-  { code: "insufficient_allowance", http: "402", who: "网关(链上)", human: "对 PayVault 的授权额不够", next: "资金面板用授权滑条（如 0.01/0.1/1 USDT）重新 approve。" },
+  { code: "insufficient_allowance", http: "402", who: "网关(链上)", human: "对 PayVault 的授权额不够", next: "试用调用里的「① 授权额度」会内联展开并预置金额（默认=单价×10，一次授权可供多次调用），完成钱包授权后回来支付。" },
   { code: "payment_missing / 验签失败", http: "402", who: "网关", human: "X-PAYMENT 缺失或签名与 key 绑定钱包不符", next: "确认用「签发 key 的同一钱包」本地签名；本页试用调用自动保证一致。" },
   { code: "identity_not_found", http: "422", who: "core", human: "登记 Provider 时链上没有该 agent_id 身份", next: "核对 ERC-8004 tokenId；身份需先在 bot-chain-api 注册（POST /api/v1/agent-identity/register）。" },
   { code: "agent_wallet 未绑定", http: "422", who: "core", human: "身份钱包还是平台代管账户（未绑定为你自己的地址）", next: "Provider 工作台第 ① 步注册后点「把身份钱包绑定为当前连接的钱包」，或第 ④ 步完成绑定。" },
@@ -47,7 +47,7 @@ export default function Help() {
             <div className="arrow">+</div>
             <div className="node" style={{ borderColor: "var(--success)" }}>
               <h4>本控制台 · 消费端工作台</h4>
-              <p>钱包扩展 EIP-712 签名 → X-PAYMENT → 网关 /call；mint/approve 测试资金</p>
+              <p>资金状态面板（三数+水龙头）；试用调用内「① 授权额度 → ② 支付调用」一条动线</p>
             </div>
             <div className="arrow">→</div>
             <div className="node">
