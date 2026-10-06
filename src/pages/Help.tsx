@@ -117,6 +117,9 @@ export default function Help() {
             <InfoBox>
               信任模型一句话：上游凭证走的是 <b>API 网关标准模型</b>（平台可解密、代为注入），与消费者的付费钱包私钥分属两个信任域——后者自始至终只在消费者浏览器钱包里。不想交给平台？自包一层薄适配服务再上架即可。
             </InfoBox>
+            <InfoBox>
+              <b>公开面零上游地址</b>：公开目录与 manifest 查询里的 endpoint.url 恒为 null（type/method 保留）——消费者只见「CoinCall 调用端点」POST 网关/call/&#123;service_id&#125;，无法绕过付费直连你的上游。完整 url 只在本机管理面内部通道（Provider 自己的「我的服务」）与网关内部取数时可见。
+            </InfoBox>
           </div>
           <div className="card" style={{ marginTop: 16, marginBottom: 0 }}>
             <h3>探测与 Schema 识别</h3>
