@@ -3,7 +3,7 @@ import { InfoBox, WarnBox } from "../components/ui";
 
 const ERRORS: Array<{ code: string; http: string; who: string; human: string; next: string }> = [
   { code: "missing_api_key", http: "402", who: "网关", human: "调用没带 X-Api-Key", next: "到「消费端工作台 → API key」签发并保存，再调用。" },
-  { code: "insufficient_balance", http: "402", who: "网关(链上)", human: "钱包 USDT 余额不够本次价格", next: "资金面板点「铸造 10 MockUSDT」（测试网）。" },
+  { code: "insufficient_balance", http: "402", who: "网关(链上)", human: "钱包 USDT 余额不够本次价格", next: "资金面板「获取 USDT」——从测试网水龙头领取后重试。" },
   { code: "insufficient_allowance", http: "402", who: "网关(链上)", human: "对 PayVault 的授权额不够", next: "资金面板用授权滑条（如 0.01/0.1/1 USDT）重新 approve。" },
   { code: "payment_missing / 验签失败", http: "402", who: "网关", human: "X-PAYMENT 缺失或签名与 key 绑定钱包不符", next: "确认用「签发 key 的同一钱包」本地签名；本页试用调用自动保证一致。" },
   { code: "identity_not_found", http: "422", who: "core", human: "登记 Provider 时链上没有该 agent_id 身份", next: "核对 ERC-8004 tokenId；身份需先在 bot-chain-api 注册（POST /api/v1/agent-identity/register）。" },
@@ -219,7 +219,7 @@ export default function Help() {
           </li>
         </ul>
         <WarnBox>
-          本控制台面向测试网（BOT Chain 968）演示：MockUSDT 公开 mint、无真实价值。请勿在演示钱包以外的场合使用主网私钥习惯（本页也根本没有输入私钥的地方）。
+          本控制台面向测试网（BOT Chain 968）：计价 token 是测试网真 USDT（水龙头领取，无公开 mint）。请勿在演示钱包以外的场合使用主网私钥习惯（本页也根本没有输入私钥的地方）。
         </WarnBox>
       </div>
     </div>

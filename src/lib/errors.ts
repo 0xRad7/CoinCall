@@ -101,7 +101,7 @@ export function humanizeChallenge(c: Gateway402Challenge): { title: string; hint
     case "insufficient_balance":
       return {
         title: `钱包余额不足（需 ${price.amount} USDT）`,
-        hint: "到「资金面板」铸造测试 MockUSDT 后重试。",
+        hint: "到「资金面板 → 获取 USDT」按指引从测试网水龙头领取后重试。",
         action: "approve",
         amount: price.amount,
       };
