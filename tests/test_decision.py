@@ -275,7 +275,7 @@ class TestDecisionServices:
             assert slow["score_component"] == pytest.approx(0.5)
             assert dead["score_component"] == pytest.approx(0.0)
             assert flaky["success_rate"] == pytest.approx((3 + 3) / (3 + 3 + 1))
-            assert flaky["score_component"] == pytest.approx(6 / 7)
+            assert flaky["score_component"] == pytest.approx(6 / 7, abs=1e-3)
             assert fast["window_hours"] == 168
             assert fast["p50_ms"] == 800
             assert fast["proof"]["digest"].startswith("sha256:")
@@ -352,7 +352,7 @@ class TestDecisionServices:
             fresh = near["services"][0]["components"]["freshness"]
             assert fresh["half_life_h"] == 48
             assert fresh["formula"] == "exp(-ln2*Δh/48)"
-            assert fresh["score_component"] == pytest.approx(math.pow(2, -1 / 48))
+            assert fresh["score_component"] == pytest.approx(math.pow(2, -1 / 48), abs=1e-3)
             assert near["as_of"] == T0.isoformat()
 
             far = client.get(

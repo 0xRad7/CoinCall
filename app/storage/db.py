@@ -69,6 +69,34 @@ CREATE TABLE IF NOT EXISTS sync_watermarks (
 )
 """
 
+FEEDBACK_NULLIFIERS_DDL = """
+CREATE TABLE IF NOT EXISTS feedback_nullifiers (
+  receipt_id VARCHAR PRIMARY KEY,
+  service_id VARCHAR,
+  created_at TIMESTAMP DEFAULT now()
+)
+"""
+
+FEEDBACK_DDL = """
+CREATE TABLE IF NOT EXISTS feedback (
+  receipt_id VARCHAR PRIMARY KEY,
+  service_id VARCHAR,
+  rating     INTEGER,
+  comment    VARCHAR,
+  created_at TIMESTAMP DEFAULT now()
+)
+"""
+
+ANCHOR_RECORDS_DDL = """
+CREATE TABLE IF NOT EXISTS anchor_records (
+  provider_agent_id BIGINT,
+  digest            VARCHAR,
+  tx_hash           VARCHAR,
+  anchored_at       TIMESTAMP DEFAULT now(),
+  PRIMARY KEY (provider_agent_id, digest)
+)
+"""
+
 
 class CoreStore:
     """coincall-core 自有 DuckDB 库。
@@ -95,6 +123,10 @@ class CoreStore:
             self.conn.execute(CHARGED_EVENTS_DDL)
             self.conn.execute(WATERMARKS_DDL)
             self.conn.execute(SERVICE_CREDENTIALS_DDL)
+            # 决策层（10 篇）：反馈核销/反馈原始/聚合摘要锚定记录
+            self.conn.execute(FEEDBACK_NULLIFIERS_DDL)
+            self.conn.execute(FEEDBACK_DDL)
+            self.conn.execute(ANCHOR_RECORDS_DDL)
 
     # ---- services / manifests ----
 
@@ -402,6 +434,118 @@ class CoreStore:
                 "block_number = excluded.block_number, updated_at = now()",
                 [stream, block_number],
             )
+
+    # ---- feedback（10 §2：收据绑定 + 一次性核销）----
+
+    def claim_feedback(
+        self, receipt_id: str, service_id: str, rating: int, comment: str | None
+    ) -> bool:
+        """核销收据并落反馈（单锁内原子完成）；receipt_id 已核销 → False（409 语义）。"""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM feedback_nullifiers WHERE receipt_id = ?", [receipt_id]
+            ).fetchone()
+            if row is not None:
+                return False
+            self.conn.execute(
+                "INSERT INTO feedback_nullifiers (receipt_id, service_id) VALUES (?, ?)",
+                [receipt_id, service_id],
+            )
+            self.conn.execute(
+                "INSERT INTO feedback (receipt_id, service_id, rating, comment) "
+                "VALUES (?, ?, ?, ?)",
+                [receipt_id, service_id, rating, comment],
+            )
+            return True
+
+    def list_feedback(self, service_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT receipt_id, rating, comment, created_at FROM feedback "
+            "WHERE service_id = ? ORDER BY created_at, receipt_id",
+            [service_id],
+        ).fetchall()
+        return [
+            {
+                "receipt_id": r[0],
+                "rating": int(r[1]),
+                "comment": r[2],
+                "created_at": str(r[3]),
+            }
+            for r in rows
+        ]
+
+    def feedback_by_service(self) -> dict[str, dict[str, Any]]:
+        """全库按服务聚合（决策反馈分量的批量取数口径）。"""
+        rows = self.conn.execute(
+            "SELECT service_id, count(*), avg(rating) FROM feedback GROUP BY service_id"
+        ).fetchall()
+        return {
+            r[0]: {"count": int(r[1]), "avg": float(r[2]) if r[2] is not None else None}
+            for r in rows
+        }
+
+    def feedback_global(self) -> dict[str, Any]:
+        """全局均值=贝叶斯先验（10 §3）。"""
+        row = self.conn.execute("SELECT count(*), avg(rating) FROM feedback").fetchone()
+        if row is None:  # 聚合查询恒有返回，防御分支
+            return {"count": 0, "avg": None}
+        return {"count": int(row[0]), "avg": float(row[1]) if row[1] is not None else None}
+
+    def feedback_count_since(self, service_id: str, since: str) -> int:
+        """窗口内该服务已受理反馈数（窗口限频口径，CONSTRAINTS §E）。"""
+        row = self.conn.execute(
+            "SELECT count(*) FROM feedback WHERE service_id = ? AND created_at >= ?::TIMESTAMP",
+            [service_id, since],
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    # ---- anchor_records（10 §1：聚合摘要锚链记录）----
+
+    def anchor_record(self, provider_agent_id: int, digest: str, tx_hash: str) -> bool:
+        """幂等落锚定记录；(agent, digest) 已存在 → False（duplicate 语义）。"""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM anchor_records WHERE provider_agent_id = ? AND digest = ?",
+                [provider_agent_id, digest],
+            ).fetchone()
+            if row is not None:
+                return False
+            self.conn.execute(
+                "INSERT INTO anchor_records (provider_agent_id, digest, tx_hash) VALUES (?, ?, ?)",
+                [provider_agent_id, digest, tx_hash],
+            )
+            return True
+
+    def anchor_find(self, provider_agent_id: int, digest: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT provider_agent_id, digest, tx_hash, anchored_at FROM anchor_records "
+            "WHERE provider_agent_id = ? AND digest = ?",
+            [provider_agent_id, digest],
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "provider_agent_id": int(row[0]),
+            "digest": row[1],
+            "tx_hash": row[2],
+            "anchored_at": str(row[3]),
+        }
+
+    def anchor_latest_map(self) -> dict[int, dict[str, Any]]:
+        """agent_id → 最新一条锚定记录（决策行 anchor_tx 透出口径）。"""
+        rows = self.conn.execute(
+            "SELECT provider_agent_id, digest, tx_hash, anchored_at FROM anchor_records "
+            "ORDER BY anchored_at"
+        ).fetchall()
+        out: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            out[int(r[0])] = {
+                "provider_agent_id": int(r[0]),
+                "digest": r[1],
+                "tx_hash": r[2],
+                "anchored_at": str(r[3]),
+            }
+        return out
 
     def close(self) -> None:
         with self._lock:

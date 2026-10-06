@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     charged_sync_safety: int = 64
     #: 两次增量同步的最小间隔（秒）——防排行榜请求打爆链通道
     leaderboard_min_sync_interval: float = 3.0
+    # ---- 决策层（10 篇）----
+    #: 网关收据公钥缓存 TTL（秒，10 §2：启动拉取+5min 缓存）
+    receipt_pubkey_ttl: float = 300.0
+    #: 反馈权窗口限频的窗口长度（小时，CONSTRAINTS §E 实施级简化口径）
+    feedback_window_hours: int = 168
     # 前端控制台（coincall-console，Vite 5173）跨域白名单；逗号分隔，空=关闭
     # 上游凭证静态加密密钥（Fernet 派生；生产从 env 注入）
     credential_secret: str = "coincall-dev-credential-secret"  # noqa: S105

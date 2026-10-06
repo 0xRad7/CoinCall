@@ -95,20 +95,21 @@ class BotChainClient:
 
 
 class GatewayStatsSource(Protocol):
-    """活跃度源协议：网关聚合视图。"""
+    """活跃度源协议：网关聚合视图（window_hours=None 为网关默认全量口径）。"""
 
-    def stats_view(self) -> dict[str, Any]: ...
+    def stats_view(self, window_hours: int | None = None) -> dict[str, Any]: ...
 
 
 class GatewayStatsClient:
-    """真实活跃度源：8030 GET /internal/stats/calls。"""
+    """真实活跃度源：8030 GET /internal/stats/calls（决策层带 ?window_hours= 窗口口径）。"""
 
     def __init__(self, http: httpx.Client, base_url: str) -> None:
         self._http = http
         self._base = base_url.rstrip("/")
 
-    def stats_view(self) -> dict[str, Any]:
-        resp = self._http.get(f"{self._base}/internal/stats/calls")
+    def stats_view(self, window_hours: int | None = None) -> dict[str, Any]:
+        params = {} if window_hours is None else {"window_hours": window_hours}
+        resp = self._http.get(f"{self._base}/internal/stats/calls", params=params)
         resp.raise_for_status()
         return dict(resp.json())
 

@@ -8,7 +8,7 @@
 import threading
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import httpx
 from fastapi import FastAPI, Request
@@ -31,6 +31,7 @@ from app.modules.apikey import router as apikey_router
 from app.modules.catalog import router as catalog_router
 from app.modules.credentials import build_fernet
 from app.modules.credentials import router as credentials_router
+from app.modules.decision import router as decision_router
 from app.modules.identity import BotChainIdentityClient, IdentityClient
 from app.modules.leaderboard import (
     BotChainClient,
@@ -44,6 +45,7 @@ from app.modules.leaderboard import (
 )
 from app.modules.probe import router as probe_router
 from app.modules.providers import router as providers_router
+from app.modules.receiptkey import ReceiptPubkeyClient, ReceiptPubkeySource
 from app.storage.db import CoreStore
 
 
@@ -54,8 +56,10 @@ def create_app(
     chain_client: ChainSource | None = None,
     gateway_client: GatewayStatsSource | None = None,
     probe_http: httpx.Client | None = None,
+    receipt_key_client: ReceiptPubkeySource | None = None,
 ) -> FastAPI:
-    """chain_client/gateway_client 即排行榜双源注入口（生产装配真实 8010/8030 客户端）。"""
+    """chain_client/gateway_client 即排行榜双源注入口（生产装配真实 8010/8030 客户端）；
+    receipt_key_client 为网关收据公钥源注入口（反馈面 Ed25519 验签用）。"""
     app_settings = settings or Settings()
 
     @asynccontextmanager
@@ -77,6 +81,12 @@ def create_app(
         app.state.gateway_stats = gateway_client or GatewayStatsClient(
             http, app_settings.gateway_base_url
         )
+        app.state.receipt_pubkey = receipt_key_client or ReceiptPubkeyClient(
+            http, app_settings.gateway_base_url, app_settings.receipt_pubkey_ttl
+        )
+        # 启动预热拉取（10 §2）；失败降级不阻塞启动（反馈面 503，其他面不受影响）
+        with suppress(Exception):
+            app.state.receipt_pubkey.public_key_hex()
         app.state.charged_indexer = ChargedIndexer(
             store=app.state.store,
             chain=app.state.chain,
@@ -135,6 +145,7 @@ def create_app(
     app.include_router(credentials_router)
     app.include_router(probe_router)
     app.include_router(leaderboard_router)
+    app.include_router(decision_router)
     return app
 
 
