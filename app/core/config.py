@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # 计价 token = 测试网真 USDT（epoch2，PayVault 部署时锁定；事实源 contracts deployments）
     payment_token_address: str = "0x75edC9335175Fc0552D51D48439F229c10420fe3"  # noqa: S105 —— 公开合约地址，非凭据
     receipt_secret: str = "coincall-dev-receipt-secret"  # noqa: S105 —— dev 占位，生产从 env 注入
+    #: Ed25519 收据密钥种子（32 字节 hex；10 §2）。缺省随机生成（重启轮换，日志提示）
+    receipt_seed: str | None = None
     manifest_cache_ttl: float = 60.0  # 01 §5：网关侧 manifest 内存缓存
     chain_cache_ttl: float = 30.0  # 09 P0-4：链上约束短缓存
     # 前端控制台（coincall-console，Vite 5173）跨域白名单；逗号分隔，空=关闭

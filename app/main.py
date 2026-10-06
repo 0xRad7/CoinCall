@@ -35,6 +35,8 @@ from app.modules.keeper import BotChainSettleChain, Keeper, provider_wallet_reso
 from app.modules.keeper_route import router as keeper_router
 from app.modules.manifest_client import ManifestClient
 from app.modules.providers import HttpJsonProvider, ProviderAdapter
+from app.modules.receipt import ReceiptSigner
+from app.modules.receipts_route import router as receipts_router
 from app.modules.stats_route import router as stats_router
 
 
@@ -80,6 +82,8 @@ def create_app(
         app.state.scheme = scheme
         register_scheme(scheme)
         app.state.shadow_gate = ShadowGate(k=app_settings.shadow_k)
+        # 收据 Ed25519 签名器（10 §2）：seed 经 env 复现注入，缺省随机（receipt.py 内日志提示）
+        app.state.receipt_signer = ReceiptSigner(seed_hex=app_settings.receipt_seed)
         # internal 适配器：internal://<name> → demo handler（09 P1-4）；未知名/无 url → 回显兜底
         default_providers: dict[str, ProviderAdapter] = {
             "internal": InternalServicesProvider(
@@ -142,7 +146,14 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
             allow_credentials=False,
-            expose_headers=["X-Receipt-Id", "X-Charged-Raw", "X-Receipt-Sig", "ETag"],
+            expose_headers=[
+                "X-Receipt-Id",
+                "X-Charged-Raw",
+                "X-Receipt-Sig",
+                "X-Receipt-Sig-Ed25519",
+                "X-Receipt-Ts",
+                "ETag",
+            ],
         )
 
     app.middleware("http")(trace_middleware)
@@ -158,6 +169,7 @@ def create_app(
     app.include_router(call_router)
     app.include_router(keeper_router)
     app.include_router(stats_router)
+    app.include_router(receipts_router)
     return app
 
 

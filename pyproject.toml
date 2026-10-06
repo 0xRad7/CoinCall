@@ -16,6 +16,7 @@ dependencies = [
     "eth-keys>=0.5",
     "eth-utils>=5.0",
     "jsonschema>=4.23",
+    "cryptography>=43",
 ]
 
 [dependency-groups]

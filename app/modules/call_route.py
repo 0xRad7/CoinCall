@@ -29,7 +29,7 @@ from app.modules.credentials_client import UpstreamCredentialsClient
 from app.modules.keeper import Keeper
 from app.modules.manifest_client import ManifestInfo, ServiceNotFoundError
 from app.modules.providers import ProviderAdapter, ProviderError, ProviderResult
-from app.modules.receipt import build_receipt, sign_receipt
+from app.modules.receipt import ReceiptSigner, build_receipt, receipt_ts, sign_receipt
 
 router = APIRouter(tags=["call"])
 
@@ -279,10 +279,14 @@ async def _forward_and_finalize(  # noqa: PLR0917 —— 单请求上下文参�
         result_hash=result_hash,
     )
     settings = request.app.state.settings
+    signer: ReceiptSigner = request.app.state.receipt_signer
+    # 双签过渡（10 §2）：HMAC 旧头保留一个窗口；Ed25519 新头离线可验（ts 随头发布）
     headers = {
         "X-Receipt-Id": str(receipt["receipt_id"]),
         "X-Charged-Raw": price_raw,
+        "X-Receipt-Ts": str(receipt_ts(receipt)),
         "X-Receipt-Sig": sign_receipt(receipt, str(settings.receipt_secret)),
+        "X-Receipt-Sig-Ed25519": signer.sign_receipt(receipt),
     }
     if idempotency_key:
         idempotency: dict[tuple[str, str], dict[str, Any]] = request.app.state.idempotency
