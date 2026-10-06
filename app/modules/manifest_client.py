@@ -28,6 +28,7 @@ class ManifestEndpoint(BaseModel):
 
     type: str  # http_json | internal
     url: str | None = None
+    method: str = "POST"  # 上游请求方式；GET=参数映射 query
     timeout_ms: int = 30_000
 
 

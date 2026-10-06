@@ -58,6 +58,21 @@ class InternalEchoProvider:
         )
 
 
+def _query_params(body: Any) -> dict[str, Any]:
+    """GET：消费者 JSON 参数 → query。标量直传、数组同 key 重复、嵌套对象拒绝。"""
+    if not isinstance(body, dict):
+        raise ProviderError("GET 服务的请求体必须是 JSON 对象")
+    params: dict[str, Any] = {}
+    for k, v in body.items():
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            params[str(k)] = "" if v is None else v
+        elif isinstance(v, list) and all(isinstance(i, (str, int, float, bool)) for i in v):
+            params[str(k)] = v
+        else:
+            raise ProviderError(f"GET 参数 {k} 含嵌套对象/非标量数组，不支持（改用 POST）")
+    return params
+
+
 PROVIDER_2XX_BASE = 2  # 2xx 判定基数
 
 
@@ -80,12 +95,20 @@ class HttpJsonProvider:
         timeout_s = manifest.manifest.endpoint.timeout_ms / 1000
         started = time.monotonic()
         try:
-            resp = await self.http.post(
-                manifest.manifest.endpoint.url,
-                json=body,
-                timeout=timeout_s,
-                headers=dict(upstream_headers) if upstream_headers else None,
-            )
+            if manifest.manifest.endpoint.method == "GET":
+                resp = await self.http.get(
+                    manifest.manifest.endpoint.url,
+                    params=_query_params(body),
+                    timeout=timeout_s,
+                    headers=dict(upstream_headers) if upstream_headers else None,
+                )
+            else:
+                resp = await self.http.post(
+                    manifest.manifest.endpoint.url,
+                    json=body,
+                    timeout=timeout_s,
+                    headers=dict(upstream_headers) if upstream_headers else None,
+                )
         except httpx.HTTPError as exc:
             raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
         if resp.status_code // 100 != PROVIDER_2XX_BASE:
