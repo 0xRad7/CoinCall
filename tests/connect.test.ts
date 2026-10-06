@@ -377,11 +377,18 @@ describe("删除路径不残留（不留尸体）", () => {
   it("消费端页面与钱包上下文没有私钥导入入口", () => {
     for (const f of ["src/pages/ConsumerWorkbench.tsx", "src/state/WalletContext.tsx"]) {
       const s = read(f);
-      expect(s, f).not.toContain('type="password"');
       expect(s, f).not.toContain("importKey");
       expect(s, f).not.toContain("导入已有私钥");
       expect(s, f).not.toContain("粘贴私钥");
+      // password 型输入只允许出现在 API key 粘贴框（不得用于私钥语义）
+      const ls = s.split("\n");
+      for (let i = 0; i < ls.length; i++) {
+        if (ls[i]!.includes('type="password"')) {
+          expect(ls.slice(i, i + 6).join("\n"), f).toContain('aria-label="粘贴 API key"'); // password 输入必须且只能是 API key 粘贴框
+        }
+      }
     }
+    expect(read("src/state/WalletContext.tsx")).not.toContain('type="password"');
   });
   it("rpc.ts 不再承载注入钱包逻辑（已迁 injected.ts）", () => {
     const s = read("src/chain/rpc.ts");
