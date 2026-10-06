@@ -170,7 +170,11 @@ class FixedProvider:
         self.error = error
         self.forwarded: list[dict[str, Any]] = []
 
-    async def forward(self, manifest: Any, body: Any) -> Any:
+    async def forward(
+        self, manifest: Any, body: Any, upstream_headers: dict[str, str] | None = None
+    ) -> Any:
+        self.last_upstream_headers = upstream_headers
+
         from app.modules.providers import ProviderResult
 
         self.forwarded.append({"service_id": manifest.service_id, "body": body})
