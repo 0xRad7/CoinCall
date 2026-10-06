@@ -1,11 +1,20 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useWallet } from "./state/WalletContext";
 import { CHAIN_ID } from "./chain/constants";
+import { ConnectWalletButton } from "./components/ConnectWalletButton";
 
 /** 顶栏：连接后常驻地址 chip（含实际钱包名）+ 链徽标（不对时可点切链）+ 断开按钮。 */
 function WalletChipBar() {
   const w = useWallet();
-  if (!w.address || !w.mode) return null;
+  if (!w.address || !w.mode) {
+    // 未连接：顶栏常驻全局入口（与消费端工作台/发布表单同一 connect 代码路径）
+    return (
+      <div className="wallet-bar">
+        <span className="dim">未连接钱包——签名与交易需要浏览器钱包（仅读取地址）</span>
+        <ConnectWalletButton size="normal" />
+      </div>
+    );
+  }
   const chainBadge =
     w.mode === "demo" ? (
       <span className="badge warn" title="一次性演示钱包，关页即焚">
