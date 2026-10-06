@@ -14,7 +14,7 @@ artifacts/          编译产物（bytecode+ABI JSON）入库，禁止手改
 vectors/            eip712_golden.json 黄金向量（digest 字节级口径锁死）
 tests/              pytest：eth-tester 本地 EVM 行为测试（T4~T8 等）
 script/             deploy_testnet.py 测试网部署+冒烟 / generate_golden_vector.py
-deployments/        testnet-968.json 部署事实；superseded/ 废弃地址存档（nonce-type 整改）
+deployments/        testnet-968.json 部署事实（双纪元：顶层=现行 USDT 纪元，epochs=退役账本）；superseded/ 废弃地址存档
 payvault/           Python 工具链（编译/EIP-712/链上提交）
 ```
 
@@ -32,8 +32,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 `coincall-bot-chain-api/.env` 读取，永不打印）：
 
 ```bash
-uv run python script/deploy_testnet.py                                  # 全新部署
-uv run python script/deploy_testnet.py 0x4F8f...E540fb                 # 沿用已部署 MockUSDT
+uv run python script/deploy_testnet.py    # 部署 PayVault(token=测试网真 USDT) + 全量冒烟
 ```
 
 ## 合约 API 一览
@@ -55,4 +54,4 @@ struct `Authorization(address from,address to,uint256 value,uint256 validAfter,u
 ## 诚实边界
 
 合约未经第三方审计：额度上限由消费者 `approve` 自主控制 + 提现路径永开（P8）+ 演示小额。
-MockUSDT 仅限测试网与本地测试，绝不部署主网。
+MockUSDT 仅限本地测试（测试网纪元已切换真 USDT，见 deployments epochs 账本），绝不部署主网。

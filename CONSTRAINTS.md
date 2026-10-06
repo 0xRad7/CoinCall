@@ -64,3 +64,4 @@ uv run pytest --cov -q          # 覆盖率 ≥80%
 | E-5 | 事件签名对齐任务清单：`Charged(provider,from,value,nonce)` / `ChargeFailed(provider,from,reason)` / `Withdrawn(provider,to,amount)`（04 §2 为 providerTokenId 版本） | 同 E-3；keeper/网关机读口径以 deployments JSON 内 structType 与 ABI 为准 |
 | E-6 | 部署经本仓 `script/deploy_testnet.py` 直连 rpc.bohr.life，而非 04 §5 的 bot-chain-api `POST /contracts/deploy` | W2 任务边界：bot-chain-api 只读、禁止写入；提交模式（POA/20 gwei/UA/域白名单）逐字移植自其 `app/core/rpc.py`+`tx.py` |
 | E-7 | ChargeFailed 的 reason 为 string 短码而非 04 §2 的 `ChargeFailed(consumer, reason)` | 任务清单签名 `(provider, from, reason)`；短码枚举见 §B.5，keeper 按短码分支重试/拉黑 |
+| E-8 | 计价 token 切换：epoch 2 起为测试网真 USDT `0x75edC933…0fe3`（decimals=6，发起人决策） | 合约零改动（token 为构造器 immutable），重部署即切纪元；deployments 双纪元结构（顶层=现行，epochs=退役账本）；旧 MockUSDT 金库 `0xFe91…C471` 有第三方在途 credits（0.22 MockUSDT），**保持不动**（部署脚本快照前后一致断言） |

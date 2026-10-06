@@ -21,7 +21,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy   # 静态三
 
 本仓对外暴露三个"接线锚点"，其他仓（网关/keeper/SDK）按下述顺序校验：
 
-1. **部署事实**：`deployments/testnet-968.json` 是唯一事实来源——`payVault` 地址、`chainId=968`、`operator`、`domainSeparator`、`structType`、ABI 文件路径。禁止在其他仓硬编码这些值以外的来源。
+1. **部署事实**：`deployments/testnet-968.json` 是唯一事实来源——顶层 `payVault`/`token`/`tokenSymbol`（现行纪元=真 USDT）、`chainId=968`、`operator`、`domainSeparator`、`structType`、ABI 文件路径；`epochs` 数组是退役纪元账本（epoch 1=MockUSDT，reason token switch）。禁止在其他仓硬编码这些值以外的来源。
 2. **EIP-712 字节级口径**（网关验签汇合阶段必做）：用你仓自己的 digest 实现，对 `vectors/eip712_golden.json` 的每个 case 重建 digest，断言与 `case["digest"]` 逐字节一致，且 `ecrecover(digest, v, r, s) == case["address"]`。分量不一致时比对 `case["domainSeparator"]`（域编码问题）或 `case["structHash"]`（struct 编码问题）定位。**向量文件不得手改。**
 3. **链上绑定复核**（可选，只读）：`eth_call` PayVault 的 `DOMAIN_SEPARATOR()` 应等于你在 chainId=968 + `payVault` 地址下本地计算的值（`deployments.testnet-968.json.domainSeparator` 已记录，可直接比对）。
 
