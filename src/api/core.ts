@@ -95,6 +95,14 @@ export interface ApiKeyRow {
   created_at: string;
 }
 
+/** 服务端实检结果（明文不可找回，只回元数据）。 */
+export interface ApiKeyValidateResponse {
+  key_id: string;
+  consumer_wallet: string;
+  quota_raw: number | null;
+  status: string;
+}
+
 export interface ApiKeyIssueResponse {
   key_id: string;
   api_key: string; // 明文只回一次
@@ -143,6 +151,12 @@ export const coreApi = {
   issueApiKey: (consumer_wallet: string) =>
     apiFetch<ApiKeyIssueResponse>(`${CORE_BASE}/apikeys`, jsonInit("POST", { consumer_wallet })).then((r) => r.data),
   listApiKeys: () => apiFetch<{ keys: ApiKeyRow[] }>(`${CORE_BASE}/apikeys`).then((r) => r.data),
+  /** 按钱包过滤（换机辅助信息：名下已有多少 key）。 */
+  listApiKeysForWallet: (wallet: string) =>
+    apiFetch<{ keys: ApiKeyRow[] }>(`${CORE_BASE}/apikeys?wallet=${encodeURIComponent(wallet)}`).then((r) => r.data),
+  /** 服务端实检：带明文 key 验证（只回元数据）。 */
+  validateApiKey: (api_key: string) =>
+    apiFetch<ApiKeyValidateResponse>(`${CORE_BASE}/internal/apikeys/validate`, jsonInit("POST", { api_key })).then((r) => r.data),
   /** 本机管理面内部通道：全量 manifest（含真实上游 url）。公开 API（/catalog、/manifests/{id}）恒脱敏 url。 */
   internalManifest: (serviceId: string) =>
     apiFetch<{ service_id: string; manifest: ServiceManifest }>(`${CORE_BASE}/internal/manifests/${serviceId}`).then((r) => r.data.manifest),
