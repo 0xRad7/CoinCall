@@ -44,6 +44,16 @@ def test_build_tx_pinned_20_gwei() -> None:
     assert tx["nonce"] == w3.eth.get_transaction_count(acct, "pending")
     assert tx["chainId"] == w3.eth.chain_id
     assert tx["to"] == target
+    assert tx["value"] == 0  # 默认不携带原生币
+
+
+def test_build_tx_carries_value_for_native_transfer() -> None:
+    """value_wei（keyword-only）支持原生币转账（部署脚本垫付 gas 用）。"""
+    w3 = connect_local_tester()
+    acct, target = w3.eth.accounts[0], w3.eth.accounts[1]
+    tx = build_tx(w3, acct, target, b"", value_wei=123)
+    assert tx["value"] == 123
+    assert tx["gasPrice"] == GAS_PRICE_WEI  # 带值交易仍是恒定 20 gwei legacy
 
 
 def test_account_from_key_never_leaks() -> None:
