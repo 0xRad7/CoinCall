@@ -59,11 +59,25 @@ uv run python scripts/demo_p1.py
 |---|---|---|
 | POST | `/call/{service_id}` | 统一付费调用入口（7 步时序；200/401/402/404/409/422/502） |
 | GET | `/healthz` | 存活探针 |
-| GET | `/internal/keeper/status` | keeper 可观测：队列深度 / 最近一批 / 累计 Charged / 黑名单 |
+| GET | `/internal/stats/calls` | 每服务聚合：窗口计数/p50/p95 延迟/去重付款人/最近活动（`?window_hours=` 默认 168、上限 720，10 §1 冻结契约） |
+| GET | `/internal/receipts/pubkey` | 收据 Ed25519 公钥 hex（第三方离线验签入口，10 §2） |
+| GET | `/internal/keeper/status` | keeper 可观测：队列深度 / 最近一批 / 累计 Charged / 黑名单 / anchor 段 |
 
 请求头：`X-Api-Key`（core 签发）、`X-PAYMENT`（base64 JSON：from/to/value/validAfter/
 validBefore/nonce/v/r/s）、`X-Idempotency-Key`（可选）。成功响应附
-`X-Receipt-Id / X-Charged-Raw / X-Receipt-Sig`。
+`X-Receipt-Id / X-Charged-Raw / X-Receipt-Ts / X-Receipt-Sig-Ed25519 / X-Receipt-Sig`。
+
+## 收据双签（10 §2：Ed25519 自验签 + HMAC 过渡）
+
+- **新口径（Ed25519）**：网关密钥对签名，覆盖规范串
+  `receipt_id|service_id|amount_raw|status|ts`（ts=unix 秒，随 `X-Receipt-Ts` 头发布），
+  签名在 `X-Receipt-Sig-Ed25519`（64 字节 hex）；任何持有公钥者（Agent/第三方/链下审计）
+  从 `GET /internal/receipts/pubkey` 取公钥 hex 即可离线验证收据真伪，无需网关参与。
+  密钥种子 `COINCALL_RECEIPT_SEED`（32 字节 hex）注入后跨重启复现；缺省每次启动随机
+  生成并日志告警（旧收据随之不可验，生产务必注入）。
+- **旧口径（HMAC，过渡窗口保留）**：`X-Receipt-Sig`（HMAC-SHA256，密钥在网关）继续
+  双签下发，仅本机可验；消费方迁移到 Ed25519 后该头择期下线。
+- CORS `expose_headers` 已含全部收据头（前端直连模式可读）。
 
 ## keeper 结算器（04 §3 / 09 P0-5）
 
@@ -81,6 +95,27 @@ coincall-bot-chain-api `POST /contracts/send` 提交 `chargeWithSigBatch`
 安全无关（合约 I1）。kill 后重启：pending 笔自动续批；提交后宕机的笔经
 `usedNonces` 只读探测补记，不重放不丢单。
 
+## 决策摘要锚定任务（10 §1/§2）
+
+keeper 启用时随进程常驻的独立协程（`COINCALL_ANCHOR_INTERVAL_S`，默认 1800s）：
+
+1. `GET {core}/internal/decision/anchor-pending` 拉 core 聚合好的待锚摘要；
+2. 对每条经 bot-chain-api `POST /api/v1/contracts/send` 调 ERC-8004
+   `setMetadata(tokenId, "coincall:decision:v1", bytes)`（to=IdentityRegistry
+   `0xec8fFb…99c0`，tokenId=provider 的 agent_id，value=`digest|pointer` 的 UTF-8
+   bytes——**链上只放聚合摘要**，原始数据按 digest 在 core API 可核）；
+3. 成功回 `POST {core}/internal/decision/anchor-result`；失败记日志下轮重试
+   （幂等靠 core 的 anchor_records：缺回执即重发，setMetadata 同值覆盖天然幂等）。
+
+- **gas 由出资账户（operator）承担**（每条摘要一笔交易 ≈0.0014 BOT，70k gas@20gwei
+  量级）；提交仍走 bot-chain-api keystore，本仓不持私钥（铁律 P1）。
+- core（8020）不可达只**降级为告警**（status 端点 anchor 段 `degraded:true`），
+  与结算主循环互不阻塞；
+- 锚定目标必须是 operator 名下（或获授权）的身份 token——`setMetadata` 合约侧要求
+  owner/approved；provider 自持 token 的锚定需该 provider 自签或授权（诚实边界）。
+- 真链实跑存档：`tests/test_anchor_live.py`（needs_funds）——720h 窗口真实统计
+  digest 锚到 token 162，`getMetadata` 链上回读逐字节断言。
+
 ## 模块地图（四个冻结契约点见 08 §2）
 
 | 文件 | 角色 |
@@ -94,10 +129,14 @@ coincall-bot-chain-api `POST /contracts/send` 提交 `chargeWithSigBatch`
 | `app/modules/call_route.py` | 7 步时序编排（含 bad_debt 黑名单拦截） |
 | `app/modules/auth.py` / `manifest_client.py` | core 管理面客户端（apikey 校验 / manifest 缓存） |
 | `app/modules/keeper.py` | keeper 结算器（攒批/上链/回执分支/黑名单/恢复探测） |
-| `app/modules/keeper_route.py` | `GET /internal/keeper/status` |
+| `app/modules/keeper_route.py` | `GET /internal/keeper/status`（含 anchor 段） |
+| `app/modules/anchor.py` | 决策摘要锚定任务（anchor-pending→setMetadata→anchor-result） |
+| `app/core/abis/erc8004.py` | IdentityRegistry setMetadata ABI 副本切片（锚定用） |
+| `app/modules/stats_route.py` | `GET /internal/stats/calls`（窗口化扩展统计） |
 | `app/modules/providers.py` | ProviderAdapter（InternalEchoProvider / HttpJsonProvider） |
 | `app/modules/internal_services.py` | 内置 demo 服务（internal:// 分发 + 三 handler，09 P1-4） |
-| `app/modules/receipt.py` | 收据 + HMAC 防签 |
+| `app/modules/receipt.py` | 收据 Ed25519 签名器 + HMAC 双签（10 §2） |
+| `app/modules/receipts_route.py` | `GET /internal/receipts/pubkey` |
 
 黄金向量（EIP-712，独立生成，W10 与合约侧逐字节比对）：
 `tests/vectors/eip712_golden_gateway.json`。
@@ -108,7 +147,7 @@ coincall-bot-chain-api `POST /contracts/send` 提交 `chargeWithSigBatch`
 uv run ruff check . && uv run ruff format --check . && uv run mypy app
 uv run pytest -q -m unit --cov=app --cov-fail-under=80
 uv run pytest -q -m live          # 唯一 live 冒烟：rpc.bohr.life 一次 eth_call
-uv run pytest -q -m needs_funds   # 真链结算：需 bot-chain-api(8010) 在线（T15 keeper 实跑）
+uv run pytest -q -m needs_funds   # 真链：keeper 批结算 + 决策摘要锚定（需 8010/8030 在线）
 ```
 
 绑定用例（TEST-20261005202947）：T11 `test_payment.py` / T12 `test_shadow_gate.py` /

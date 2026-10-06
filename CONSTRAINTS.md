@@ -40,6 +40,7 @@ uv run pytest -q -m unit --cov=app --cov-fail-under=80
 
 ## §D 犯错沉淀区（violation log）
 
+| C-09 | 2026-10-06 | test/impl 分型提交被合并：`git commit --amend` 被 pre-commit mypy 拒绝后，暂存区残留的 test 文件混进了下一次 impl 提交（发现后 reset 重切补救，未出本地） | pre-commit 拒绝提交时暂存区不清空，链式命令里下一步 `git add <impl> && git commit` 把残留一并带走 | **任何提交（含 amend）被 hook 拒绝后，必须先 `git status` / `git show --stat` 核对暂存区再继续**；分型提交的连续操作间禁止盲跑 |
 | C-08 | 2026-10-05 | 改 pyproject（scripts 豁免）后全量缓存失效，W3/W5 时期的潜在 I001 全部现形——此前部分"绿"是 ruff 缓存给的 | ruff 按配置哈希缓存，配置一变即全量重扫；C-06 只修了版本漂移没堵缓存 | **pyproject/ruff 配置变更后的第一次门禁必须 ruff check --no-cache**；子任务交接时主线程以 --no-cache 复核 |
 | C-06 | 2026-10-05 | 交接态复跑 ruff check 红（I001 import 排序），W3 汇报『全绿』失真 | 工具链 >= 下限约束（ruff 0.6→0.16.10 isort 行为漂移）+ ruff 缓存掩盖首跑结果；交接前未复跑 | pyproject 工具链全部钉死 ==；汇报门禁前必须当场复跑并以输出为准；升级工具链=显式决策+全量重跑 |
 | 编号 | 日期 | 违反事实 | 根因 | 新增/强化约束 |
@@ -67,3 +68,17 @@ uv run pytest -q -m unit --cov=app --cov-fail-under=80
 - keeper 的 provider 记账钱包解析：静态覆盖（`COINCALL_KEEPER_PROVIDER_WALLET_OVERRIDES`，
   agent_id→wallet）优先，缺省走 core manifest（calls.service_id → provider.wallet）；
   两者都失败该行保持 pending 并告警，不丢单。
+- （10 决策层·G2）锚定 pending 的 JSON 形状由 gateway 侧先行冻结于
+  `app/modules/anchor.py` docstring（`{pending:[{anchor_id,token_id,digest,pointer?,key?}]}`；
+  上报 `{anchor_id,tx_hash,token_id,key,value}`）——core 并行任务落地时若不一致，
+  以并行冻结契约为准回来改 gateway（幂等键=anchor_id，改动面只有 from_json/上报字段）。
+- （10 决策层·G2）`X-Receipt-Ts` 头是契约外补头：Ed25519 规范串含 ts，第三方离线
+  验签必须拿到 ts，故随响应头发布（消费方：SDK 反馈提交带 ts；core 验签用）。
+- （10 决策层·G2）stats 端点默认窗口 168h：既有消费方（core 06 §3 排行榜的无参调用）
+  从 all-time 变 7d 口径（10 冻结契约要求默认 168）；core 决策层落地后显式传窗口。
+- （10 决策层·G2）calls.latency_ms DDL 由 INTEGER 归一为 BIGINT（A4 冻结的是列集合
+  与签名，类型按 10 契约归一）；旧库起服务自动 SET TYPE（tests/test_migration.py）。
+- （10 决策层·G2）锚定目标受合约 owner/approved 约束：只锚 operator 名下 token
+  （演示 provider 162 即是）；provider 自持 token 的摘要需其自签或授权，网关侧只告警跳过。
+- 本机 `.env` 注入了随机 `COINCALL_RECEIPT_SEED`（gitignored）：演示机收据公钥跨重启
+  稳定；生产环境 seed 从密管注入。
