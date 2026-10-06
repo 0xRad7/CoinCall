@@ -9,9 +9,30 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { ManageStep, PublishStep } from "../src/pages/ProviderWorkbench";
 import { WalletProvider } from "../src/state/WalletContext";
 import type { Catalog } from "../src/api/core";
+import type { Eip1193Provider } from "../src/chain/injected";
 
 const OWNER = "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a";
 const ADDR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+
+/** 连接钱包探针（ManageStep 所有权过滤需要连接）。 */
+function mockWalletProvider(): Eip1193Provider {
+  return {
+    request: async ({ method }: { method: string }) => {
+      if (method === "eth_requestAccounts" || method === "eth_accounts") return [ADDR];
+      if (method === "eth_chainId") return "0x3c8";
+      return null;
+    },
+  };
+}
+function announce(provider: unknown) {
+  window.dispatchEvent(
+    new CustomEvent("eip6963:announceProvider", { detail: { info: { uuid: "com.okx.wallet", name: "OKX Wallet", icon: "", rdns: "com.okx.wallet" }, provider } })
+  );
+}
+function ConnectProbe() {
+  return <button onClick={() => void useWalletHack().connect()} data-testid="probe-connect">连接钱包</button>;
+}
+import { useWallet as useWalletHack } from "../src/state/WalletContext";
 
 function manifestOf(serviceId: string, type: "http_json" | "internal") {
   return {
@@ -48,6 +69,7 @@ function installFetch(catalog: Catalog) {
       return jsonResponse({ token_id: 169, owner: OWNER, token_uri: "u", agent_wallet: OWNER, metadata: {} });
     }
     if (url === "/api/core/catalog") return jsonResponse(catalog);
+    if (url === "/api/core/providers") return jsonResponse({ providers: [{ agent_id: 169, display_name: "Demo", wallet: ADDR, claim_wallet: ADDR, created_at: "t" }] });
     if (url === "/api/core/manifests") return jsonResponse({ service_id: "svc_new", status: "active", manifest_hash: "sha256:x", manifest: manifestOf("svc_new", "http_json") });
     if (/\/api\/core\/services\/[^/]+\/credentials$/.test(url)) {
       if (method === "PUT") {
@@ -157,9 +179,12 @@ describe("管理页：上游认证头管理", () => {
     installFetch(catalog);
     render(
       <WalletProvider>
-        <ManageStep agentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ManageStep claimedAgentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ConnectProbe />
       </WalletProvider>
     );
+    announce(mockWalletProvider());
+    fireEvent.click(screen.getByTestId("probe-connect"));
     // internal 行没有「上游认证头」按钮（等目录加载完）
     const allButtons = await screen.findAllByText("上游认证头");
     expect(allButtons.length).toBe(1); // 仅 svc_http
@@ -192,9 +217,12 @@ describe("管理页：上游认证头管理", () => {
     installFetch(catalog);
     render(
       <WalletProvider>
-        <ManageStep agentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ManageStep claimedAgentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ConnectProbe />
       </WalletProvider>
     );
+    announce(mockWalletProvider());
+    fireEvent.click(screen.getByTestId("probe-connect"));
     fireEvent.click(await screen.findByText("上游认证头"));
     await screen.findByText("X-API-KEY ✓");
     fireEvent.click(screen.getByText("清除凭证"));
@@ -216,9 +244,12 @@ describe("值永不回显", () => {
     installFetch(catalog);
     render(
       <WalletProvider>
-        <ManageStep agentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ManageStep claimedAgentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ConnectProbe />
       </WalletProvider>
     );
+    announce(mockWalletProvider());
+    fireEvent.click(screen.getByTestId("probe-connect"));
     fireEvent.click(await screen.findByText("上游认证头"));
     await screen.findByText("X-API-KEY ✓");
     const text = document.body.textContent ?? "";

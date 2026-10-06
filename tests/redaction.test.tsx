@@ -10,11 +10,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Overview from "../src/pages/Overview";
 import { ManageStep } from "../src/pages/ProviderWorkbench";
-import { WalletProvider } from "../src/state/WalletContext";
+import { WalletProvider, useWallet } from "../src/state/WalletContext";
 import { GATEWAY_PUBLIC_URL } from "../src/chain/constants";
+import type { Eip1193Provider } from "../src/chain/injected";
 import type { Catalog } from "../src/api/core";
 
 const SECRET_UPSTREAM = "https://upstream.secret/api";
+const ADDR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
 /** 公开 catalog：url 恒 null（服务端已脱敏；测试同时给一个「如果回归」的对照断言）。 */
 function publicCatalog(): Catalog {
@@ -58,6 +60,7 @@ function installFetch(overrides?: { catalog?: Catalog; internalUrl?: string }) {
     const url = String(input);
     calls.push({ url, method: init?.method ?? "GET", body: init?.body ? String(init.body) : undefined });
     if (url === "/api/core/catalog") return jsonResponse(catalog);
+    if (url === "/api/core/providers") return jsonResponse({ providers: [] });
     if (/\/api\/core\/internal\/manifests\/[^/]+$/.test(url)) {
       const full = JSON.parse(JSON.stringify(catalog.services[0]!.manifest));
       full.endpoint.url = internalUrl;
@@ -74,9 +77,33 @@ function installFetch(overrides?: { catalog?: Catalog; internalUrl?: string }) {
   return fetchMock as unknown as { mock: { calls: Array<{ url: string; body?: string }> } };
 }
 
+function mockWalletProviderM(): Eip1193Provider {
+  return {
+    request: async ({ method }: { method: string }) => {
+      if (method === "eth_requestAccounts" || method === "eth_accounts") return [ADDR];
+      if (method === "eth_chainId") return "0x3c8";
+      return null;
+    },
+  };
+}
+function announceM() {
+  window.dispatchEvent(
+    new CustomEvent("eip6963:announceProvider", { detail: { info: { uuid: "com.okx.wallet", name: "OKX Wallet", icon: "", rdns: "com.okx.wallet" }, provider: mockWalletProviderM() } })
+  );
+}
+function ConnectProbeM() {
+  const w = useWallet();
+  return (
+    <button onClick={() => void w.connect()} data-testid="probe-connect-m">
+      连接钱包
+    </button>
+  );
+}
+
 beforeEach(() => {
   cleanup();
   sessionStorage.clear();
+  delete (window as { ethereum?: unknown }).ethereum;
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -104,9 +131,12 @@ describe("管理页（internal 通道取全量）", () => {
     installFetch();
     render(
       <WalletProvider>
-        <ManageStep agentId={169} onNext={vi.fn()} onBack={vi.fn()} />
+        <ManageStep claimedAgentId={null} onNext={vi.fn()} onBack={vi.fn()} />
+        <ConnectProbeM />
       </WalletProvider>
     );
+    announceM();
+    fireEvent.click(screen.getByTestId("probe-connect-m"));
     // 自己的行显示真实上游 URL（internal 通道取回）
     expect(await screen.findByText(new RegExp("upstream\\.secret"))).toBeTruthy();
 
