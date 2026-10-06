@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Wallet } from "ethers";
 import { IdentityRegister } from "../src/components/IdentityRegister";
-import { PublishStep, RegisterStep } from "../src/pages/ProviderWorkbench";
+import { PublishStep } from "../src/pages/ProviderWorkbench";
 import { WalletProvider, useWallet } from "../src/state/WalletContext";
 
 const TX = "0x" + "ab".repeat(32);
@@ -230,48 +230,38 @@ describe("注册 → 绑定引导链路（连接钱包后）", () => {
   }, 20_000);
 });
 
-describe("RegisterStep 集成（自动回填 agent_id）", () => {
-  it("注册铸造成功 → 新 agentId 自动填入 Agent ID 输入框，链上预检转绿", async () => {
+describe("注册闭环回调（onRegistered 供认领步骤回填 agent_id）", () => {
+  it("注册铸造成功 → onRegistered 收到 (169, owner, agent_wallet)", async () => {
     resultResponses = [{ found: false, tx_hash: TX }, { found: true, tx_hash: TX, agent_ids: [169], owner: OWNER, agent_wallet: OWNER }];
+    const onRegistered = vi.fn();
     render(
       <WalletProvider>
-        <RegisterStep initial={null} onNext={vi.fn()} />
+        <IdentityRegister onRegistered={onRegistered} pollMs={5} maxAttempts={5} />
       </WalletProvider>
     );
-
-    const idInput = screen.getByPlaceholderText("例如 162") as HTMLInputElement;
-    expect(idInput.value).toBe("");
     fireEvent.click(screen.getByText("发起注册"));
-
-    await waitFor(() => expect(idInput.value).toBe("169"), { timeout: 5_000 }); // 默认 pollMs=2s，放宽等待
-    expect(await screen.findByText(/✓ 链上身份存在/)).toBeTruthy();
-    // 预检文案用「身份钱包」而非「收款钱包」
-    expect(document.body.textContent ?? "").not.toMatch(AMBIGUOUS);
+    await waitFor(() => expect(onRegistered).toHaveBeenCalledWith(169, OWNER, OWNER), { timeout: 5_000 });
   });
 });
 
-describe("PublishStep 服务收款钱包（默认=连接的钱包）", () => {
-  it("连接后默认填连接地址；标签与旁注用三角色术语；与身份钱包差异给提示", async () => {
+describe("PublishStep 服务收款钱包（默认=认领钱包）", () => {
+  it("挂载即默认填认领钱包；连接后出现快填按钮；与身份钱包差异给提示", async () => {
     render(
       <WalletProvider>
-        <PublishStep registered={{ agent_id: 169, display_name: "Demo Booth" }} onNext={vi.fn()} onBack={vi.fn()} />
+        <PublishStep claimed={{ agent_id: 169, display_name: "Demo Booth", wallet: ADDR }} onNext={vi.fn()} onBack={vi.fn()} />
         <ConnectProbe />
       </WalletProvider>
     );
-    // 未连接：留空 + 提示先连钱包或手填（提示在 placeholder 属性里）
-    expect(screen.getByText(/服务收款钱包（收入到账地址）/)).toBeTruthy();
-    expect(screen.getByPlaceholderText(/连接钱包自动填入，或手动填写/)).toBeTruthy();
-    // 未连接：字段旁是内联「连接钱包自动填」按钮（不再指路别的页面）
-    expect(screen.getByRole("button", { name: "连接钱包自动填" })).toBeTruthy();
-
-    // 连接后默认 = 连接地址
-    announce(mockWalletProvider());
-    fireEvent.click(screen.getByText("连接钱包"));
-    await waitFor(() => expect((screen.getByDisplayValue(ADDR) as HTMLInputElement).tagName).toBe("INPUT"), { timeout: 5_000 });
+    // 认证先行：默认 = 认领钱包（无需等连接）
+    await waitFor(() => expect((screen.getByLabelText("服务收款钱包地址") as HTMLInputElement).value).toBe(ADDR));
     expect(document.body.textContent).toContain("Charged 记账键");
     expect(document.body.textContent).toContain("与身份钱包相互独立");
     // 身份钱包（mock=平台代管）≠ 服务收款钱包 → 差异提示
     expect(document.body.textContent).toMatch(/与链上身份钱包（0xC37fFE97…）不同/);
+    // 连接后：快填按钮（=当前钱包）
+    announce(mockWalletProvider());
+    fireEvent.click(screen.getByText("连接钱包"));
+    await waitFor(() => expect(screen.getByRole("button", { name: new RegExp(`使用当前钱包 ${ADDR.slice(0, 6)}`) })).toBeTruthy(), { timeout: 5_000 });
     expect(document.body.textContent ?? "").not.toMatch(AMBIGUOUS);
   });
 });

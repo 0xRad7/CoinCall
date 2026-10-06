@@ -51,7 +51,7 @@ afterEach(() => vi.unstubAllGlobals());
 function renderPublish() {
   return render(
     <WalletProvider>
-      <PublishStep registered={{ agent_id: 169, display_name: "Demo Booth" }} onNext={vi.fn()} onBack={vi.fn()} />
+      <PublishStep claimed={{ agent_id: 169, display_name: "Demo Booth", wallet: ADDR }} onNext={vi.fn()} onBack={vi.fn()} />
     </WalletProvider>
   );
 }
