@@ -16,6 +16,8 @@ export const USDT_DECIMALS = 6;
 export const CORE_BASE = "/api/core";
 export const GATEWAY_BASE = "/api/gw";
 export const BOTCHAIN_BASE = "/api/chain";
+/** 展示给消费者的网关直连地址（SDK/调用方实际请求的入口）。 */
+export const GATEWAY_PUBLIC_URL = "http://127.0.0.1:8030";
 
 /** ERC-20 / PayVault 函数选择器（构造时由 ethers 计算，避免硬编码漂移）。 */
 import { id } from "ethers";

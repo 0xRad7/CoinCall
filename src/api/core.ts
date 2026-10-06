@@ -130,6 +130,9 @@ export const coreApi = {
   issueApiKey: (consumer_wallet: string) =>
     apiFetch<ApiKeyIssueResponse>(`${CORE_BASE}/apikeys`, jsonInit("POST", { consumer_wallet })).then((r) => r.data),
   listApiKeys: () => apiFetch<{ keys: ApiKeyRow[] }>(`${CORE_BASE}/apikeys`).then((r) => r.data),
+  /** 本机管理面内部通道：全量 manifest（含真实上游 url）。公开 API（/catalog、/manifests/{id}）恒脱敏 url。 */
+  internalManifest: (serviceId: string) =>
+    apiFetch<{ service_id: string; manifest: ServiceManifest }>(`${CORE_BASE}/internal/manifests/${serviceId}`).then((r) => r.data.manifest),
 };
 
 // ---- 上游认证头凭证（http_json 专用；Fernet 加密落盘，值永不回显） ----
