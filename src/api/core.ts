@@ -115,6 +115,7 @@ export interface ProviderRow {
   agent_id: number;
   display_name: string;
   wallet: string;
+  claim_wallet: string | null; // 认领钱包（NULL=存量未认领）
   created_at: string;
 }
 

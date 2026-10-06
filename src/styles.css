@@ -101,6 +101,7 @@ input.invalid, textarea.invalid { border-color: var(--danger); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
 .badge.err { background: var(--danger-soft); color: var(--danger); }
 .badge.muted { background: var(--code-bg); color: var(--text-2); }
+.badge.info { background: var(--primary-soft); color: var(--primary); }
 
 /* ---- 提示框 ---- */
 .alert { border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); margin: var(--space-3) 0; font-size: var(--fs-13); }
