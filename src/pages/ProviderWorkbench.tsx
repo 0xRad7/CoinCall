@@ -1072,8 +1072,13 @@ function bumpVersion(v: string): string {
 /* 旧独立「身份钱包绑定」步骤已并入第 ① 步认领（认证先行）；提现仍独立： */
 
 /* ============ 步骤 5：提现 ============ */
-function WithdrawStep() {
+export function WithdrawStep() {
+  const w = useWallet();
   const [addr, setAddr] = useState("");
+  // 「我的地址」语义：默认自动填连接钱包（提现/查余额的主场景），可改 + 快填按钮
+  useEffect(() => {
+    if (!addr && w.address) setAddr(w.address);
+  }, [w.address, addr]);
   const [credits, setCredits] = useState<bigint | null>(null);
   const [busy, setBusy] = useState(false);
   const [waitingWallet, setWaitingWallet] = useState(false);
@@ -1082,12 +1087,12 @@ function WithdrawStep() {
   const [confirming, setConfirming] = useState(false);
   const [tx, setTx] = useState<string | null>(null);
 
-  const query = async () => {
+  const queryWith = async (target: string) => {
     setBusy(true);
     setError(null);
     setTx(null);
     try {
-      setCredits(await fetchProviderCredits(addr.trim()));
+      setCredits(await fetchProviderCredits(target.trim()));
     } catch (e) {
       setError(e);
     } finally {
@@ -1095,7 +1100,7 @@ function WithdrawStep() {
     }
   };
 
-  const wctx = useWallet();
+  const query = () => queryWith(addr);
 
   const withdraw = async () => {
     setBusy(true);
@@ -1104,7 +1109,7 @@ function WithdrawStep() {
     setCancelled(false);
     try {
       // 与消费端同一共享路径：用户选中的 provider → 先确保在 968 链，再 eth_sendTransaction（20 gwei 固定费率）
-      const sel = await wctx.requireProvider();
+      const sel = await w.requireProvider();
       if (!sel) throw new Error("未选择浏览器钱包。");
       await ensureChain968(sel.provider);
       const from = (await silentAccounts(sel.provider)) ?? (await connectInjected(sel.provider)).address;
@@ -1131,12 +1136,37 @@ function WithdrawStep() {
         credits 是链上 PayVault 记账的未提现收入（I4：合约内 USDT 余额恒等于总 credits）。providerWithdraw 只能由钱包本人发起（铁律 P8：路径恒开）。
       </p>
       <div className="field">
-        <label>服务收款钱包地址（收入到账地址，持有 credits）</label>
-        <input type="text" value={addr} placeholder="0x…（持有 credits 的地址）" onChange={(e) => setAddr(e.target.value)} />
+        <label>地址（默认 = 你的连接钱包；查别人的 credits 可手填）</label>
+        <div className="flex">
+          <div className="grow">
+            <input
+              type="text"
+              value={addr}
+              placeholder={w.address ? "" : "0x…（连接钱包自动填入，或手动填写）"}
+              onChange={(e) => setAddr(e.target.value)}
+              aria-label="提现查询地址"
+            />
+          </div>
+          {w.address && (
+            <button type="button" className="btn small" onClick={() => setAddr(w.address!)} title="一键填回当前连接的钱包地址">
+              使用当前钱包 {w.address.slice(0, 6)}…
+            </button>
+          )}
+        </div>
       </div>
       <div className="btn-row">
-        <button className="btn" disabled={!/^0x[0-9a-fA-F]{40}$/.test(addr.trim()) || busy} onClick={query}>
-          {busy ? <Spinner label="eth_call 查询中…" /> : "查询 credits（eth_call）"}
+        <button
+          className="btn"
+          disabled={!w.address || busy}
+          onClick={async () => {
+            setAddr(w.address!); // 我的 credits 一键：用连接地址查（并同步输入框）
+            await queryWith(w.address!);
+          }}
+        >
+          {busy ? <Spinner label="eth_call 查询中…" /> : "查询我的 credits"}
+        </button>
+        <button className="btn secondary" disabled={!/^0x[0-9a-fA-F]{40}$/.test(addr.trim()) || busy} onClick={query}>
+          查询上面填写的地址
         </button>
       </div>
 
@@ -1160,7 +1190,7 @@ function WithdrawStep() {
       )}
 
       {credits !== null && credits > 0n && (
-        wctx.candidates.length > 0 ? (
+        w.candidates.length > 0 ? (
           <>
             <button className="btn danger" disabled={busy} onClick={() => setConfirming(true)}>
               {busy && waitingWallet ? "等待钱包确认…" : "发起 providerWithdraw（全额）"}
