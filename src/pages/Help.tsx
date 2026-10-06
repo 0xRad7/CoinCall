@@ -96,6 +96,28 @@ export default function Help() {
               一句话资金流：付费调用的 USDT 由 keeper 划入 PayVault，按<b>服务收款钱包</b>记账；Provider 用该地址本人发起 providerWithdraw 提现。身份钱包只是链上身份的对外属性，平台代管账户只是交易代发方。
             </InfoBox>
           </div>
+          <div className="card" style={{ marginTop: 16, marginBottom: 0 }}>
+            <h3>上游凭证去哪了（http_json 服务）</h3>
+            <div className="diagram">
+              <div className="node">
+                <h4>你填的键值</h4>
+                <p>发布/管理页填 X-API-KEY 等<br />值只进本页内存与加密请求</p>
+              </div>
+              <div className="arrow">→</div>
+              <div className="node">
+                <h4>core 加密落盘</h4>
+                <p>Fernet 加密存储；GET 只回头名<br />公开 manifest / 目录零泄露</p>
+              </div>
+              <div className="arrow">→</div>
+              <div className="node">
+                <h4>网关转发时注入</h4>
+                <p>调你的上游 URL 时自动带上<br />（60s 缓存；消费者请求头不透传）</p>
+              </div>
+            </div>
+            <InfoBox>
+              信任模型一句话：上游凭证走的是 <b>API 网关标准模型</b>（平台可解密、代为注入），与消费者的付费钱包私钥分属两个信任域——后者自始至终只在消费者浏览器钱包里。不想交给平台？自包一层薄适配服务再上架即可。
+            </InfoBox>
+          </div>
         </div>
         <InfoBox>
           一次付费调用的资金流：你的钱包 —（EIP-712 授权签名）→ 网关（只验签不过手资金）—（keeper 批量结算）→
