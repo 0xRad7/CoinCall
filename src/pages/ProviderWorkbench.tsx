@@ -2,8 +2,9 @@
  * Provider 工作台：五步向导（登记 → 发布服务 → 管理服务 → 身份钱包绑定 → 提现）。
  * 步骤间状态保持（父级 state），进度指示可点击回跳。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { coreApi, type ServiceManifest } from "../api/core";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { coreApi, credentialsApi, type ServiceManifest } from "../api/core";
+import { CredentialHeadersEditor, rowsToHeaders, type CredentialRow } from "../components/CredentialHeadersEditor";
 import { agentWalletSetTypedData, botChainApi, type AgentIdentity } from "../api/gateway";
 import { ApiError } from "../api/client";
 import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY_VAULT, fromRaw, toRaw } from "../chain/constants";
@@ -189,6 +190,10 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [ok, setOk] = useState<{ service_id: string; manifest_hash: string } | null>(null);
+  // 上游认证头（仅 http_json）：发布成功后链式 PUT credentials
+  const [credRows, setCredRows] = useState<CredentialRow[]>([]);
+  const [credState, setCredState] = useState<{ kind: "ok" | "warn"; names: string[] } | null>(null);
+  const [credError, setCredError] = useState<unknown>(null);
 
   const fieldErr = (f: string) => error?.fieldErrors?.[f];
 
@@ -247,9 +252,22 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
       output_schema: outputParsed as Record<string, unknown>,
       status: "active",
     };
+    setCredState(null);
+    setCredError(null);
     try {
       const ack = await coreApi.publishManifest(manifest);
       setOk({ service_id: ack.service_id, manifest_hash: ack.manifest_hash });
+      // 链式保存上游认证头（仅当填写了；失败不回滚 manifest）
+      const headers = rowsToHeaders(credRows);
+      if (Object.keys(headers).length > 0) {
+        try {
+          const info = await credentialsApi.put(ack.service_id, headers);
+          setCredState({ kind: "ok", names: info.header_names });
+        } catch (ce) {
+          setCredError(ce);
+          setCredState({ kind: "warn", names: Object.keys(headers) });
+        }
+      }
     } catch (e) {
       setError(
         e instanceof ApiError
@@ -346,6 +364,17 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
         {endpointType === "internal" && <div className="help">internal 端点由平台内置模块实现（无需 URL），适合演示与兜底。</div>}
       </div>
 
+      {endpointType === "http_json" && (
+        <div className="field">
+          <label>上游认证头（转发时注入，消费者不可见）</label>
+          <CredentialHeadersEditor rows={credRows} onChange={(rows) => { setCredRows(rows); }} />
+          <div className="help">
+            此密钥<b>加密存储于平台</b>、仅网关转发你的上游 URL 时使用（60s 缓存，消费者请求头不透传）；不会出现在目录或公开 manifest 中。
+            不想交给平台？可自包一层薄适配服务再上架。留空 = 不配置。
+          </div>
+        </div>
+      )}
+
       <div className="field">
         <label>超时 timeout_ms</label>
         <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value) || 30000)} />
@@ -358,8 +387,19 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
       {ok && (
         <SuccessBox>
           已发布 <b>{ok.service_id}</b>（manifest_hash <span className="mono">{ok.manifest_hash.slice(0, 20)}…</span>），目录立即可见，状态 active。
+          {credState?.kind === "ok" && (
+            <>
+              {" "}上游认证头已加密保存：{credState.names.join("、")}（值不回显）。
+            </>
+          )}
         </SuccessBox>
       )}
+      {ok && credState?.kind === "warn" && (
+        <div className="alert warn">
+          <b>服务已发布，凭证保存失败</b>（manifest 未回滚）——可在第 ③ 步「我的服务 → 上游认证头」重试。
+        </div>
+      )}
+      {ok && credError != null && credState?.kind === "warn" && <ErrorBox error={credError} />}
 
       <div className="btn-row">
         <button className="btn secondary" onClick={onBack}>
@@ -377,12 +417,13 @@ export function PublishStep({ registered, onNext, onBack }: { registered: { agen
 }
 
 /* ============ 步骤 3：我的服务管理 ============ */
-function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNext: () => void; onBack: () => void }) {
+export function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNext: () => void; onBack: () => void }) {
   const catalog = useAsync(() => coreApi.catalog(), [], { pollMs: 20_000 });
   const [confirm, setConfirm] = useState<null | { kind: "status" | "price"; svc: ServiceManifest; nextStatus?: string; nextAmount?: string }>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState<Record<string, string>>({});
+  const [credOpen, setCredOpen] = useState<Record<string, boolean>>({});
 
   const mine = (catalog.data?.services ?? []).filter((s) => agentId == null || s.manifest.provider.agent_id === agentId);
 
@@ -440,7 +481,8 @@ function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNex
                 }
                 const priceChanged = newRaw !== null && newRaw.toString() !== m.pricing.amount_raw;
                 return (
-                  <tr key={s.service_id}>
+                  <Fragment key={s.service_id}>
+                    <tr>
                     <td>
                       <div>
                         <b>{m.name}</b>
@@ -471,9 +513,30 @@ function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNex
                         <button className="btn small" disabled={busy || !priceChanged} onClick={() => setConfirm({ kind: "price", svc: m, nextAmount: newAmount! })}>
                           应用改价
                         </button>
+                        {m.endpoint.type === "http_json" && (
+                          <button
+                            className="btn small secondary"
+                            onClick={() => {
+                              const next = !credOpen[s.service_id];
+                              setCredOpen((o) => ({ ...o, [s.service_id]: next }));
+                            }}
+                          >
+                            上游认证头
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
+                  {m.endpoint.type === "http_json" && credOpen[s.service_id] && (
+                    <tr>
+                      <td colSpan={5} style={{ background: "var(--surface-2)" }}>
+                        <div style={{ padding: "8px 10px" }}>
+                          <ServiceCredentialsPanel serviceId={s.service_id} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -518,6 +581,151 @@ function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNex
           进阶：身份钱包绑定 →
         </button>
       </div>
+    </div>
+  );
+}
+
+/** 上游认证头管理面板（仅 http_json；internal 无上游概念不显示）。值永不回显，只有头名。 */
+function ServiceCredentialsPanel({ serviceId }: { serviceId: string }) {
+  const [names, setNames] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState<CredentialRow[]>([]);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const info = await credentialsApi.list(serviceId);
+      setNames(info.header_names);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 展开即自动加载已配置头名
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceId]);
+
+  const currentCount = names?.length ?? 0;
+
+  const doReplace = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await credentialsApi.put(serviceId, rowsToHeaders(rows));
+      setConfirmReplace(false);
+      setEditing(false);
+      setRows([]);
+      await load();
+    } catch (e) {
+      setError(e);
+      setConfirmReplace(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doClear = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await credentialsApi.remove(serviceId);
+      setConfirmClear(false);
+      await load();
+    } catch (e) {
+      setError(e);
+      setConfirmClear(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="dim" style={{ marginBottom: 6 }}>
+        上游认证头（仅网关转发时注入，消费者不可见；值加密存储、永不回显）——服务 {serviceId}：
+      </div>
+
+      {loading ? (
+        <Spinner label="读取已配置头名…" />
+      ) : names == null ? null : names.length === 0 ? (
+        <div className="dim">尚未配置任何认证头。</div>
+      ) : (
+        <div className="flex" style={{ marginBottom: 8 }}>
+          {names.map((n) => (
+            <span key={n} className="badge ok">
+              {n} ✓
+            </span>
+          ))}
+          <span className="dim">（仅头名，值不回显）</span>
+        </div>
+      )}
+
+      {!editing ? (
+        <div className="btn-row">
+          <button
+            className="btn small"
+            onClick={() => {
+              setEditing(true);
+              setRows([]);
+            }}
+          >
+            更新凭证
+          </button>
+          <button className="btn small danger" disabled={currentCount === 0 || busy} onClick={() => setConfirmClear(true)}>
+            清除凭证
+          </button>
+          <button className="btn small secondary" onClick={() => void load()}>
+            刷新
+          </button>
+        </div>
+      ) : (
+        <div style={{ maxWidth: 640 }}>
+          <div className="alert warn" style={{ fontSize: 13 }}>
+            <b>全量替换语义</b>：保存时以这里的内容<b>完全替换</b>现有凭证——留空保存 = 清空全部；要保留的头必须在这里重新填写（出于安全，旧值不回显）。
+          </div>
+          <CredentialHeadersEditor rows={rows} onChange={setRows} />
+          <div className="btn-row" style={{ marginTop: 8 }}>
+            <button className="btn small" disabled={busy} onClick={() => setConfirmReplace(true)}>
+              替换全部 {currentCount} 个头
+            </button>
+            <button className="btn small secondary" onClick={() => setEditing(false)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+      {error != null && <ErrorBox error={error} />}
+
+      <ConfirmDialog
+        open={confirmReplace}
+        title={`替换全部 ${currentCount} 个认证头`}
+        body={
+          <div>
+            将用编辑器里的 <b>{Object.keys(rowsToHeaders(rows)).length}</b> 个头完全替换服务 <b>{serviceId}</b> 现有的 {currentCount} 个认证头（留空保存即清空；旧值不回显，要保留的需重填）。替换后网关约 60s 内生效。
+          </div>
+        }
+        confirmText="确认替换"
+        onConfirm={() => void doReplace()}
+        onCancel={() => setConfirmReplace(false)}
+      />
+      <ConfirmDialog
+        open={confirmClear}
+        title={`清空 ${currentCount} 个认证头`}
+        body={<div>将删除服务 <b>{serviceId}</b> 的全部上游认证头（不可恢复，需重新填写）。清除后网关转发不再携带这些头，约 60s 内生效。</div>}
+        confirmText="确认清除"
+        onConfirm={() => void doClear()}
+        onCancel={() => setConfirmClear(false)}
+      />
     </div>
   );
 }
