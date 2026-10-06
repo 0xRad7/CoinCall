@@ -14,7 +14,7 @@ import { encodeAddrUint, fetchAllowance, fetchTokenBalance, type TxProgress } fr
 import { isUserRejected } from "../chain/injected";
 import { buildCallAuthorization, buildPaymentHeader } from "../chain/signing";
 import { SchemaForm } from "../components/SchemaForm";
-import { AsyncSection, Badge, ConfirmDialog, CopyButton, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
+import { Badge, ConfirmDialog, CopyButton, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeChallenge, humanizeError } from "../lib/errors";
 import { addSpentRaw, appendHistory, clearHistory, loadBudgetRaw, loadHistory, loadSpentRaw, saveBudgetRaw, type CallHistoryEntry } from "../lib/storage";
 import { useAsync } from "../lib/useAsync";
@@ -230,54 +230,172 @@ export function FundsSection() {
   );
 }
 
-/* ============ 3. API key ============ */
-function ApiKeySection() {
+/* ============ 3. API key（三层：本机已保存 / 粘贴旧 key / 为当前钱包签发） ============ */
+export function ApiKeySection() {
   const { address } = useWallet();
+  const [storedKey, setStoredKey] = useState<string | null>(() => localStorage.getItem(APIKEY_STORE));
+  const [pasted, setPasted] = useState("");
   const [issued, setIssued] = useState<{ key_id: string; api_key: string } | null>(null);
   const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"issue" | "validate-local" | "validate-paste" | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const [storedKey, setStoredKey] = useState<string | null>(() => localStorage.getItem(APIKEY_STORE));
 
-  const existing = useAsync(() => coreApi.listApiKeys(), []);
-  const mine = (existing.data?.keys ?? []).filter((k) => address && k.consumer_wallet.toLowerCase() === address.toLowerCase());
+  // 本机 key 的服务端实检结果
+  const [localCheck, setLocalCheck] = useState<{ ok: boolean; info?: { key_id: string; consumer_wallet: string; status: string } } | null>(null);
+  // 粘贴 key 的实检结果
+  const [pasteCheck, setPasteCheck] = useState<{ ok: boolean; info?: { key_id: string; consumer_wallet: string; status: string } } | null>(null);
+
+  useEffect(() => {
+    const h = () => setStoredKey(localStorage.getItem(APIKEY_STORE));
+    window.addEventListener("coincall:apikey", h);
+    return () => window.removeEventListener("coincall:apikey", h);
+  }, []);
+
+  // 名下 key 数（换机辅助信息：为什么不能找回、只能重签）
+  const walletKeys = useAsync(() => (address ? coreApi.listApiKeysForWallet(address).catch(() => null) : Promise.resolve(null)), [address]);
+
+  const mask = (k: string) => (k.length > 10 ? `${k.slice(0, 4)}…${k.slice(-4)}` : "…");
+  const saveKey = (k: string) => {
+    localStorage.setItem(APIKEY_STORE, k);
+    window.dispatchEvent(new CustomEvent("coincall:apikey"));
+  };
+
+  const validate = async (key: string, which: "local" | "paste") => {
+    setBusy(which === "local" ? "validate-local" : "validate-paste");
+    setError(null);
+    try {
+      const info = await coreApi.validateApiKey(key.trim());
+      const ok = info.status === "active";
+      if (which === "local") setLocalCheck({ ok, info });
+      else setPasteCheck({ ok, info });
+    } catch (e) {
+      if (which === "local") setLocalCheck({ ok: false });
+      else setPasteCheck({ ok: false });
+      setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const issue = async () => {
-    setBusy(true);
+    setBusy("issue");
     setError(null);
     setSaved(false);
     try {
       const r = await coreApi.issueApiKey(address!);
       setIssued({ key_id: r.key_id, api_key: r.api_key });
-      existing.reload();
+      walletKeys.reload();
     } catch (e) {
       setError(e);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
   const confirmSaved = () => {
-    localStorage.setItem(APIKEY_STORE, issued?.api_key ?? "");
+    saveKey(issued?.api_key ?? "");
     setStoredKey(issued?.api_key ?? null);
     setSaved(true);
+    setLocalCheck(null); // 稍后可实检
+    void validate(issued?.api_key ?? "", "local");
   };
+
+  const walletMismatch =
+    localCheck?.ok && address && localCheck.info && localCheck.info.consumer_wallet.toLowerCase() !== address.toLowerCase();
 
   return (
     <div className="card">
       <h3>③ API key（X-Api-Key）</h3>
       <p className="card-desc">
-        key 与当前连接的钱包地址绑定（<span className="mono">{address ?? "-"}</span>）；付费授权签名人必须是这个地址，否则网关 402。
+        key 与钱包地址绑定——付费授权的签名人必须是这个地址。明文只在签发时显示一次（服务端只存 hash，不可找回）；
+        换机器不用慌：从原机器复制 key 粘贴过来，或直接为当前钱包签发新 key。
       </p>
-      <div className="btn-row" style={{ marginBottom: 12 }}>
-        <button className="btn" disabled={!address || busy} onClick={issue}>
-          {busy ? <Spinner label="签发中…" /> : "签发新 key"}
-        </button>
-        {storedKey && (
-          <span className="dim">
-            本机已保存 key：<span className="mono">{storedKey.slice(0, 14)}…</span>（用于试用调用）
-          </span>
+
+      {walletKeys.data && (
+        <div className="dim" style={{ marginBottom: 10 }}>
+          你的钱包名下已有 <b>{walletKeys.data.keys.length}</b> 个 key（明文只在签发时显示一次）。
+        </div>
+      )}
+
+      {/* 第一层：本机已保存 */}
+      {storedKey && (
+        <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginBottom: 12 }}>
+          <div className="flex" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+            <span>
+              <b>本机已保存</b>：<span className="mono">{mask(storedKey)}</span>
+            </span>
+            <div className="btn-row">
+              <button className="btn small secondary" disabled={busy != null} onClick={() => void validate(storedKey, "local")}>
+                {busy === "validate-local" ? "实检中…" : "服务端实检"}
+              </button>
+              <button className="btn small danger" onClick={() => { localStorage.removeItem(APIKEY_STORE); window.dispatchEvent(new CustomEvent("coincall:apikey")); setStoredKey(null); setLocalCheck(null); }}>
+                移除
+              </button>
+            </div>
+          </div>
+          {localCheck?.ok && (
+            <div className="alert ok" style={{ marginTop: 8, marginBottom: 0 }}>
+              ✓ 有效 · 绑定钱包 <span className="mono">{localCheck.info!.consumer_wallet.slice(0, 10)}…</span>
+              {walletMismatch ? null : <>（=当前连接钱包，可直接支付）</>}
+            </div>
+          )}
+          {walletMismatch && (
+            <div className="alert warn" style={{ marginTop: 8, marginBottom: 0 }}>
+              <b>该 key 绑定的钱包 ≠ 当前连接钱包</b>：支付时签名人不符会被网关 402——请断开后用绑定钱包连接，或为当前钱包签发新 key。
+            </div>
+          )}
+          {localCheck && !localCheck.ok && (
+            <div className="alert err" style={{ marginTop: 8, marginBottom: 0 }}>
+              实检未通过（key 可能已吊销/不存在）。可刷新重试，或用下方粘贴/签发路径。
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 第二层：粘贴已有 key */}
+      <div className="field">
+        <label>从原机器粘贴已有 key</label>
+        <div className="flex">
+          <input
+            type="password"
+            style={{ maxWidth: 420 }}
+            value={pasted}
+            placeholder="cck_…（明文只进本机与请求头，不外显）"
+            onChange={(e) => { setPasted(e.target.value.trim()); setPasteCheck(null); }}
+            aria-label="粘贴 API key"
+            autoComplete="off"
+          />
+          <button className="btn secondary" disabled={pasted.length < 8 || busy != null} onClick={() => void validate(pasted, "paste")}>
+            {busy === "validate-paste" ? "实检中…" : "验证并启用"}
+          </button>
+        </div>
+        {pasteCheck?.ok && (
+          <div className="alert ok" style={{ marginTop: 8 }}>
+            ✓ 有效 · 绑定钱包 <span className="mono">{pasteCheck.info!.consumer_wallet.slice(0, 10)}…</span>
+            {pasteCheck.info!.consumer_wallet.toLowerCase() !== address?.toLowerCase() ? (
+              <b>（≠当前连接钱包，支付会 402——建议改用当前钱包签发新 key）</b>
+            ) : (
+              <span>（=当前连接钱包，可直接支付）</span>
+            )}
+            <div className="btn-row" style={{ marginTop: 6 }}>
+              <button className="btn small" onClick={() => { saveKey(pasted); setStoredKey(pasted); setPasteCheck(null); setPasted(""); setLocalCheck(null); }}>
+                存入本机并启用
+              </button>
+            </div>
+          </div>
         )}
+        {pasteCheck && !pasteCheck.ok && (
+          <div className="alert err" style={{ marginTop: 8 }}>
+            验证未通过（key 不存在/已吊销）。确认从原机器复制的是完整明文，或直接为当前钱包签发新 key。
+          </div>
+        )}
+      </div>
+
+      {/* 第三层（换机主推）：为当前钱包签发新 key */}
+      <div className="btn-row" style={{ marginTop: 4, marginBottom: 12 }}>
+        <button className="btn" disabled={!address || busy != null} onClick={issue}>
+          {busy === "issue" ? <Spinner label="签发中…" /> : `为当前钱包签发新 key${address ? `（${address.slice(0, 8)}…）` : ""}`}
+        </button>
       </div>
 
       {error != null && <ErrorBox error={error} />}
@@ -291,51 +409,46 @@ function ApiKeySection() {
           <div className="btn-row" style={{ marginTop: 12 }}>
             <CopyButton text={issued.api_key} />
             <button className="btn" onClick={confirmSaved}>
-              我已保存（存入本机供试用调用）
+              我已保存（存入本机并实检）
             </button>
           </div>
         </div>
       )}
-      {issued && saved && <SuccessBox>已确认保存。试用调用将自动携带该 key（key_id={issued.key_id}）。</SuccessBox>}
+      {issued && saved && <SuccessBox>已确认保存并实检通过，试用调用将自动携带该 key（key_id={issued.key_id}）。</SuccessBox>}
 
-      <div style={{ marginTop: 16 }}>
-        <div className="dim" style={{ marginBottom: 6 }}>
-          该钱包的历史 key（服务端视角，明文不可见）：
+      {walletKeys.data && walletKeys.data.keys.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="dim" style={{ marginBottom: 6 }}>
+            该钱包的历史 key（服务端视角，明文不可见）：
+          </div>
+          <table className="list">
+            <thead>
+              <tr>
+                <th>key_id</th>
+                <th>状态</th>
+                <th>签发时间</th>
+                <th>配额</th>
+              </tr>
+            </thead>
+            <tbody>
+              {walletKeys.data.keys.map((k) => (
+                <tr key={k.key_id}>
+                  <td className="mono">{k.key_id}</td>
+                  <td>
+                    <Badge kind={k.status === "active" ? "ok" : "muted"}>{k.status}</Badge>
+                  </td>
+                  <td className="num">{k.created_at.slice(0, 19)}</td>
+                  <td className="num">{k.quota_raw ?? "不限"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <AsyncSection state={existing} empty="尚无 key">
-          {() =>
-            mine.length === 0 ? (
-              <Empty text="当前钱包还没有签发记录" />
-            ) : (
-              <table className="list">
-                <thead>
-                  <tr>
-                    <th>key_id</th>
-                    <th>状态</th>
-                    <th>签发时间</th>
-                    <th>配额</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mine.map((k) => (
-                    <tr key={k.key_id}>
-                      <td className="mono">{k.key_id}</td>
-                      <td>
-                        <Badge kind={k.status === "active" ? "ok" : "muted"}>{k.status}</Badge>
-                      </td>
-                      <td className="num">{k.created_at.slice(0, 19)}</td>
-                      <td className="num">{k.quota_raw ?? "不限"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )
-          }
-        </AsyncSection>
-      </div>
+      )}
     </div>
   );
 }
+
 
 /* ============ 4. 试用调用 ============ */
 export function TrialCallSection() {
@@ -362,7 +475,12 @@ export function TrialCallSection() {
   const [result, setResult] = useState<{ ok: boolean; body: unknown; receipt: { receiptId: string | null; chargedRaw: string | null }; challenge?: Gateway402Challenge } | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const apiKey = localStorage.getItem(APIKEY_STORE);
+  const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem(APIKEY_STORE));
+  useEffect(() => {
+    const h = () => setApiKey(localStorage.getItem(APIKEY_STORE));
+    window.addEventListener("coincall:apikey", h);
+    return () => window.removeEventListener("coincall:apikey", h);
+  }, []);
   const svc = services.find((s) => s.service_id === svcId) ?? null;
   const priceRaw = svc ? BigInt(svc.manifest.pricing.amount_raw) : null;
   const priceHuman = svc?.manifest.pricing.amount ?? "0";
@@ -645,7 +763,11 @@ export function TrialCallSection() {
           </button>
         </WarnBox>
       )}
-      {!apiKey && svc && <WarnBox>本机没有 API key——先到第 ③ 步签发（否则网关会 402 payment_missing）。</WarnBox>}
+      {!apiKey && svc && (
+        <WarnBox>
+          API key 未就绪（网关会 402 payment_missing）——到第 ③ 步任选其一：<b>粘贴原机器的 key</b>（验证并启用）、或<b>为当前钱包签发新 key</b>。
+        </WarnBox>
+      )}
       {overBudget && (
         <div className="alert warn">
           <b>预算拦截</b>：本会话已花费 {fromRaw(spent)} USDT（raw={spent.toString()}）+ 本次 {svc?.manifest.pricing.amount ?? "-"}{" "}
