@@ -11,10 +11,11 @@ from tests.conftest import VALID_MANIFEST
 pytestmark = pytest.mark.unit
 
 
-def _client(tmp_path, **kw) -> TestClient:
-    settings = Settings(duckdb_path=str(tmp_path / "core.duckdb"), **kw)
+@pytest.fixture
+def client(tmp_path):
+    settings = Settings(duckdb_path=str(tmp_path / "core.duckdb"))
     with TestClient(create_app(settings)) as c:
-        return c
+        yield c
 
 
 def _manifest(**endpoint_over):
@@ -25,46 +26,37 @@ def _manifest(**endpoint_over):
     return m
 
 
-@pytest.mark.unit
-def test_method_defaults_post_and_get_accepted(tmp_path):
-    c = _client(tmp_path)
-    assert c.post("/manifests", json=_manifest()).status_code in (200, 201)
-    assert c.post("/manifests", json=_manifest(method="GET")).status_code in (200, 201)
+def test_method_defaults_post_and_get_accepted(client):
+    assert client.post("/manifests", json=_manifest()).status_code in (200, 201)
+    assert client.post("/manifests", json=_manifest(method="GET")).status_code in (200, 201)
 
 
-@pytest.mark.unit
-def test_method_invalid_rejected(tmp_path):
-    c = _client(tmp_path)
-    r = c.post("/manifests", json=_manifest(method="DELETE"))
+def test_method_invalid_rejected(client):
+    r = client.post("/manifests", json=_manifest(method="DELETE"))
     assert r.status_code == 422
     assert "method" in r.text
 
 
-@pytest.mark.unit
-def test_get_nested_object_input_rejected(tmp_path):
-    c = _client(tmp_path)
+def test_get_nested_object_input_rejected(client):
     m = _manifest(method="GET")
     m["input_schema"] = {
         "type": "object",
         "properties": {"q": {"type": "string"}, "filter": {"type": "object"}},
     }
-    r = c.post("/manifests", json=m)
+    r = client.post("/manifests", json=m)
     assert r.status_code == 422
     assert "GET" in r.text and "嵌套" in r.text
 
 
-@pytest.mark.unit
-def test_get_array_of_scalars_ok(tmp_path):
-    c = _client(tmp_path)
+def test_get_array_of_scalars_ok(client):
     m = _manifest(method="GET")
     m["input_schema"] = {
         "type": "object",
         "properties": {"tag": {"type": "array", "items": {"type": "string"}}},
     }
-    assert c.post("/manifests", json=m).status_code in (200, 201)
+    assert client.post("/manifests", json=m).status_code in (200, 201)
 
 
-@pytest.mark.unit
 def test_probe_roundtrip(tmp_path):
     captured: dict = {}
 
@@ -90,10 +82,10 @@ def test_probe_roundtrip(tmp_path):
     body = r.json()
     assert body["status_code"] == 200 and body["body"]["n"] == 3
     assert captured["method"] == "GET" and "q=hi" in captured["url"]
-    assert captured["headers"]["X-API-KEY"] == "sk-probe"
+    sent = {k.lower(): v for k, v in captured["headers"].items()}
+    assert sent.get("x-api-key") == "sk-probe"
 
 
-@pytest.mark.unit
 def test_probe_schemes_guardrail(tmp_path):
     with TestClient(create_app(Settings(duckdb_path=str(tmp_path / "core.duckdb")))) as c:
         r1 = c.post("/services/probe", json={"url": "ftp://x", "method": "GET"})

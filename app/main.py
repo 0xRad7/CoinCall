@@ -42,6 +42,7 @@ from app.modules.leaderboard import (
 from app.modules.leaderboard import (
     router as leaderboard_router,
 )
+from app.modules.probe import router as probe_router
 from app.modules.providers import router as providers_router
 from app.storage.db import CoreStore
 
@@ -52,6 +53,7 @@ def create_app(
     identity_client: IdentityClient | None = None,
     chain_client: ChainSource | None = None,
     gateway_client: GatewayStatsSource | None = None,
+    probe_http: httpx.Client | None = None,
 ) -> FastAPI:
     """chain_client/gateway_client 即排行榜双源注入口（生产装配真实 8010/8030 客户端）。"""
     app_settings = settings or Settings()
@@ -60,6 +62,7 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.store = CoreStore(app_settings.duckdb_path)  # C-14：单进程单写者
         app.state.credential_fernet = build_fernet(app_settings.credential_secret)
+        app.state.probe_http = probe_http
         # trust_env=False：8010/8030 都是本机服务（gateway C-07 同源纪律）
         http = httpx.Client(timeout=10.0, trust_env=False)
         app.state.identities = identity_client or BotChainIdentityClient(
@@ -129,6 +132,7 @@ def create_app(
     app.include_router(apikey_router)
     app.include_router(providers_router)
     app.include_router(credentials_router)
+    app.include_router(probe_router)
     app.include_router(leaderboard_router)
     return app
 

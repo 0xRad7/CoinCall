@@ -15,7 +15,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -71,6 +71,9 @@ class ManifestEndpoint(BaseModel):
 
     type: EndpointType
     url: str | None = None
+    method: Literal["GET", "POST"] = Field(
+        default="POST", description="上游请求方式；GET=参数映射 query"
+    )
     timeout_ms: int = Field(
         default=DEFAULT_ENDPOINT_TIMEOUT_MS, ge=100, le=ENDPOINT_TIMEOUT_HARD_CAP_MS
     )
@@ -87,6 +90,19 @@ class ManifestEndpoint(BaseModel):
         if self.type is EndpointType.HTTP_JSON and not self.url:
             raise ValueError("endpoint.type=http_json 必须提供 url")
         return self
+
+    def requires_flat_scalars(self, input_schema: dict) -> None:
+        """GET 型：消费者 JSON 参数映射为上游 query——只允许标量与标量数组。"""
+        if self.method != "GET":
+            return
+        for name, spec in (input_schema.get("properties") or {}).items():
+            itype = spec.get("type")
+            if itype == "array":
+                items = spec.get("items") or {}
+                if items.get("type") not in ("string", "number", "integer", "boolean"):
+                    raise ValueError(f"GET 参数 {name} 的数组元素必须是标量")
+            elif itype not in ("string", "number", "integer", "boolean"):
+                raise ValueError(f"GET 参数 {name} 不支持类型 {itype!r}（嵌套对象请改用 POST）")
 
 
 class ManifestPricing(BaseModel):
@@ -185,6 +201,11 @@ class ServiceManifest(BaseModel):
         if not SERVICE_ID_PATTERN.match(v):
             raise ValueError(f"service_id 必须匹配 {SERVICE_ID_PATTERN.pattern}: {v!r}")
         return v
+
+    @model_validator(mode="after")
+    def _get_flat_scalars(self) -> "ServiceManifest":
+        self.endpoint.requires_flat_scalars(self.input_schema)
+        return self
 
     @field_validator("input_schema")
     @classmethod
