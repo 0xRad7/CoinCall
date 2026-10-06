@@ -11,7 +11,7 @@ import { join } from "node:path";
 import Overview from "../src/pages/Overview";
 import { ManageStep } from "../src/pages/ProviderWorkbench";
 import { WalletProvider, useWallet } from "../src/state/WalletContext";
-import { GATEWAY_PUBLIC_URL } from "../src/chain/constants";
+import { gatewayCallUrl } from "../src/chain/constants";
 import type { Eip1193Provider } from "../src/chain/injected";
 import type { Catalog } from "../src/api/core";
 
@@ -116,7 +116,7 @@ describe("目录卡（公开面零上游地址）", () => {
     render(<Overview />);
 
     expect(await screen.findByText("CoinCall 调用端点")).toBeTruthy();
-    expect(document.body.textContent ?? "").toContain(`POST ${GATEWAY_PUBLIC_URL}/call/svc_http`);
+    expect(document.body.textContent ?? "").toContain(`POST ${gatewayCallUrl("svc_http")}`); // jsdom origin + /api/gw 同源代理，随访问地址动态
     expect(screen.getByText("复制")).toBeTruthy();
     expect(screen.getByText(/真实上游由平台中转，消费者只看到 CoinCall 端点/)).toBeTruthy();
     expect(screen.getByText("GET 上游")).toBeTruthy(); // method 徽标保留
