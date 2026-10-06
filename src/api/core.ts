@@ -131,3 +131,27 @@ export const coreApi = {
     apiFetch<ApiKeyIssueResponse>(`${CORE_BASE}/apikeys`, jsonInit("POST", { consumer_wallet })).then((r) => r.data),
   listApiKeys: () => apiFetch<{ keys: ApiKeyRow[] }>(`${CORE_BASE}/apikeys`).then((r) => r.data),
 };
+
+// ---- 上游认证头凭证（http_json 专用；Fernet 加密落盘，值永不回显） ----
+
+/** GET/PUT 响应：只含头名，绝不包含值。 */
+export interface ServiceCredentialsInfo {
+  service_id: string;
+  header_names: string[];
+  updated?: boolean;
+  deleted?: boolean;
+}
+
+export const credentialsApi = {
+  /** 全量替换语义：headers 为空对象 = 清空全部。 */
+  put: (serviceId: string, headers: Record<string, string>) =>
+    apiFetch<ServiceCredentialsInfo>(`${CORE_BASE}/services/${serviceId}/credentials`, {
+      ...jsonInit("PUT", { headers }),
+    }).then((r) => r.data),
+  list: (serviceId: string) =>
+    apiFetch<ServiceCredentialsInfo>(`${CORE_BASE}/services/${serviceId}/credentials`).then((r) => r.data),
+  remove: (serviceId: string) =>
+    apiFetch<ServiceCredentialsInfo & { deleted?: boolean }>(`${CORE_BASE}/services/${serviceId}/credentials`, {
+      method: "DELETE",
+    }).then((r) => r.data),
+};
