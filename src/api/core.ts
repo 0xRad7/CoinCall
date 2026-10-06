@@ -103,6 +103,14 @@ export interface ApiKeyIssueResponse {
   created_at: string;
 }
 
+export interface ClaimState {
+  agent_id: number;
+  identity_found: boolean;
+  agent_wallet: string | null;
+  claimed_by_wallet: string | null;
+  platform_custodian: string;
+}
+
 export interface ProviderRow {
   agent_id: number;
   display_name: string;
@@ -120,8 +128,12 @@ export const coreApi = {
   providerProof: (wallet: string) =>
     apiFetch<ProofResponse>(`${CORE_BASE}/leaderboard/providers/${wallet}/proof`).then((r) => r.data),
   providers: () => apiFetch<{ providers: ProviderRow[] }>(`${CORE_BASE}/providers`).then((r) => r.data),
-  registerProvider: (agent_id: number, display_name: string) =>
-    apiFetch<ProviderRow>(`${CORE_BASE}/providers`, jsonInit("POST", { agent_id, display_name })).then((r) => r.data),
+  /** 认领（认证先行）：claim_wallet 必填=连接钱包地址；一身份一认领（他人已认领 409），链上 agentWallet 须等于认领钱包（否则 422 claim_requires_binding）。 */
+  registerProvider: (agent_id: number, display_name: string, claim_wallet: string) =>
+    apiFetch<ProviderRow>(`${CORE_BASE}/providers`, jsonInit("POST", { agent_id, display_name, claim_wallet })).then((r) => r.data),
+  /** 认领三态预检（服务端对 identity 查询绕缓存）。 */
+  claimState: (agent_id: number) =>
+    apiFetch<ClaimState>(`${CORE_BASE}/providers/${agent_id}/claim-state`).then((r) => r.data),
   publishManifest: (manifest: ServiceManifest) =>
     apiFetch<{ service_id: string; status: string; manifest_hash: string; manifest: ServiceManifest }>(
       `${CORE_BASE}/manifests`,
