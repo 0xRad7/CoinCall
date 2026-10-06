@@ -6,8 +6,11 @@ export const RPC_URL = "https://rpc.bohr.life/";
 export const GAS_PRICE_GWEI = "20"; // 该链 gas 恒 20 gwei
 export const EXPLORER_TX = (hash: string) => `https://scan.bohr.life/tx/${hash}`;
 
-export const PAY_VAULT = "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471";
-export const MOCK_USDT = "0x4F8f2eaAA3988E9f59B72C93262DDC1084E540fb";
+/** epoch2（唯一事实源 ../coincall-contracts/deployments/testnet-968.json）。旧 mock 币与旧金库已退役，勿再引用。 */
+export const PAY_VAULT = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0";
+export const USDT = "0x75edC9335175Fc0552D51D48439F229c10420fe3";
+/** 测试网水龙头（权威：bot-chain-api chains.py faucet_url）。真 USDT 无公开 mint，从这里领。 */
+export const FAUCET_URL = "https://faucet.bohr.life/basic";
 export const IDENTITY_REGISTRY = "0xec8fFbC3c9A34AdDCbB3A14F91db2bd26A8b99c0"; // ERC8004 代理
 
 export const USDT_DECIMALS = 6;
@@ -25,7 +28,6 @@ export const SEL = {
   balanceOf: id("balanceOf(address)").slice(0, 10),
   allowance: id("allowance(address,address)").slice(0, 10),
   approve: id("approve(address,uint256)").slice(0, 10),
-  mint: id("mint(address,uint256)").slice(0, 10),
   credits: id("credits(address)").slice(0, 10),
   providerWithdraw: id("providerWithdraw(address,uint256)").slice(0, 10),
 } as const;

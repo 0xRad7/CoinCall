@@ -5,7 +5,7 @@
  * 扩展（OKX/MetaMask）路径见 injected.ts；控制台主路径不接触任何私钥。
  */
 import { JsonRpcProvider, TransactionReceipt, Wallet, formatEther, isHexString } from "ethers";
-import { GAS_PRICE_GWEI, MOCK_USDT, PAY_VAULT, RPC_URL, SEL } from "./constants";
+import { GAS_PRICE_GWEI, USDT, PAY_VAULT, RPC_URL, SEL } from "./constants";
 
 export interface TxProgress {
   /** waiting = 等待钱包扩展弹窗确认；pending = 已广播等待打包 */
@@ -40,14 +40,14 @@ function decodeUintResult(data: string): bigint {
 }
 
 export async function fetchTokenBalance(wallet: string): Promise<bigint> {
-  const r = await getRpcProvider().call({ to: MOCK_USDT, data: encodeAddr(SEL.balanceOf, wallet) });
+  const r = await getRpcProvider().call({ to: USDT, data: encodeAddr(SEL.balanceOf, wallet) });
   return decodeUintResult(r);
 }
 
 export async function fetchAllowance(owner: string, spender: string = PAY_VAULT): Promise<bigint> {
   const a = owner.toLowerCase().replace(/^0x/, "").padStart(64, "0");
   const b = spender.toLowerCase().replace(/^0x/, "").padStart(64, "0");
-  const r = await getRpcProvider().call({ to: MOCK_USDT, data: SEL.allowance + a + b });
+  const r = await getRpcProvider().call({ to: USDT, data: SEL.allowance + a + b });
   return decodeUintResult(r);
 }
 
@@ -78,12 +78,7 @@ export async function sendFromLocalWallet(
   return receipt;
 }
 
-/** 铸造 amountRaw MockUSDT（公开 mint，仅测试网；demo 路径 & E2E 使用）。 */
-export function mintMockUsdt(wallet: Wallet, to: string, amountRaw: bigint, onProgress?: (p: TxProgress) => void) {
-  return sendFromLocalWallet(wallet, MOCK_USDT, encodeAddrUint(SEL.mint, to, amountRaw), onProgress);
-}
-
-/** 授权 PayVault 可花费 amountRaw MockUSDT（demo 路径 & E2E 使用）。 */
+/** 授权 PayVault 可花费 amountRaw USDT（demo 路径 & E2E 使用；epoch2 真 USDT 无公开 mint，资金从水龙头领）。 */
 export function approveVault(wallet: Wallet, amountRaw: bigint, onProgress?: (p: TxProgress) => void) {
-  return sendFromLocalWallet(wallet, MOCK_USDT, encodeAddrUint(SEL.approve, PAY_VAULT, amountRaw), onProgress);
+  return sendFromLocalWallet(wallet, USDT, encodeAddrUint(SEL.approve, PAY_VAULT, amountRaw), onProgress);
 }
