@@ -1,5 +1,5 @@
 /**
- * Provider 工作台：五步向导（登记 → 发布服务 → 管理服务 → 收款钱包绑定 → 提现）。
+ * Provider 工作台：五步向导（登记 → 发布服务 → 管理服务 → 身份钱包绑定 → 提现）。
  * 步骤间状态保持（父级 state），进度指示可点击回跳。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,7 +21,7 @@ const STEPS = [
   { key: "register", label: "① 登记 Provider" },
   { key: "publish", label: "② 发布服务" },
   { key: "manage", label: "③ 我的服务" },
-  { key: "bind", label: "④ 收款钱包绑定" },
+  { key: "bind", label: "④ 身份钱包绑定" },
   { key: "withdraw", label: "⑤ 提现" },
 ] as const;
 type StepKey = (typeof STEPS)[number]["key"];
@@ -76,7 +76,7 @@ export default function ProviderWorkbench() {
       {step === "withdraw" && <WithdrawStep />}
 
       <InfoBox>
-        步骤说明：①②③ 为主流程（登记 → 发布 → 运营）；④⑤ 为进阶（链上收款钱包与提现），绑定钱包是发布 http_json
+        步骤说明：①②③ 为主流程（登记 → 发布 → 运营）；④⑤ 为进阶（链上身份钱包绑定与提现），绑定身份钱包是发布 http_json
         服务前的收款前提。顶部步骤条可随时回跳，已填内容在同页会话内保留。
       </InfoBox>
     </div>
@@ -134,7 +134,7 @@ export function RegisterStep({ initial, onNext }: { initial: { agent_id: number;
               <ErrorBox error={identity.error} />
             ) : identity.data ? (
               <span style={{ color: "var(--success)" }}>
-                ✓ 链上身份存在 · owner {identity.data.owner.slice(0, 10)}… · 当前收款钱包 {identity.data.agent_wallet}
+                ✓ 链上身份存在 · owner {identity.data.owner.slice(0, 10)}…（平台代管）· 身份钱包 {identity.data.agent_wallet}
               </span>
             ) : (
               <span style={{ color: "var(--warn)" }}>⚠ 链上没有该 tokenId 的身份记录（登记会被 422 拒绝）——可在下方注册一个</span>
@@ -155,7 +155,7 @@ export function RegisterStep({ initial, onNext }: { initial: { agent_id: number;
       {error != null && <ErrorBox error={error} />}
       {result && (
         <SuccessBox>
-          已登记：agent_id={result.agent_id}「{result.display_name}」收款钱包 {result.wallet ?? "（读链上身份）"}
+          已登记：agent_id={result.agent_id}「{result.display_name}」身份钱包 {result.wallet ?? "（读链上身份）"}
           。下一步发布服务。
         </SuccessBox>
       )}
@@ -172,8 +172,11 @@ export function RegisterStep({ initial, onNext }: { initial: { agent_id: number;
 }
 
 /* ============ 步骤 2：发布服务 ============ */
-function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: number; display_name: string } | null; onNext: () => void; onBack: () => void }) {
+export function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: number; display_name: string } | null; onNext: () => void; onBack: () => void }) {
+  const wctx = useWallet();
   const [serviceId, setServiceId] = useState("");
+  // 服务收款钱包（manifest.provider.wallet）：收入实际到账地址；默认=当前连接的钱包
+  const [revenueWallet, setRevenueWallet] = useState("");
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [version, setVersion] = useState("1.0.0");
@@ -193,6 +196,14 @@ function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: n
     () => (registered ? botChainApi.identity(registered.agent_id).catch(() => null) : Promise.resolve(null)),
     [registered?.agent_id]
   );
+
+  // 连接钱包后自动填默认值（未连接则留空，用户可手填）
+  useEffect(() => {
+    if (!revenueWallet && wctx.address) setRevenueWallet(wctx.address);
+  }, [wctx.address, revenueWallet]);
+  const revenueWalletValid = /^0x[0-9a-fA-F]{40}$/.test(revenueWallet.trim());
+  const identityWallet = identity.data?.agent_wallet ?? null;
+  const walletDiffers = identityWallet != null && revenueWalletValid && identityWallet.toLowerCase() !== revenueWallet.trim().toLowerCase();
 
   const conv = useMemo(() => {
     try {
@@ -222,7 +233,7 @@ function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: n
       version,
       provider: {
         agent_id: registered?.agent_id ?? 0,
-        wallet: identity.data?.agent_wallet ?? "",
+        wallet: revenueWallet.trim(),
         display_name: registered?.display_name ?? "",
       },
       endpoint: {
@@ -268,8 +279,31 @@ function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: n
       <h3>发布服务（ServiceManifest 表单）</h3>
       <p className="card-desc">
         Provider：agent_id={registered.agent_id}「{registered.display_name}」
-        {identity.data ? ` · 链上收款钱包 ${identity.data.agent_wallet.slice(0, 10)}…（自动校验一致）` : " · 正在读取链上收款钱包…"}
+        {identityWallet ? ` · 链上身份钱包 ${identityWallet.slice(0, 10)}…` : " · 正在读取链上身份钱包…"}
       </p>
+
+      <div className="field">
+        <label>服务收款钱包（收入到账地址）</label>
+        <input
+          type="text"
+          className={!revenueWalletValid || fieldErr("provider.wallet") ? "invalid" : ""}
+          value={revenueWallet}
+          placeholder={wctx.address ? "" : "0x…（未连接钱包——先连接，或手动填写）"}
+          onChange={(e) => setRevenueWallet(e.target.value.trim())}
+        />
+        <div className="help">
+          付费调用的收入将进入此地址（PayVault Charged 记账键），与身份钱包相互独立；默认=你当前连接的钱包
+          {wctx.address ? `（${wctx.address.slice(0, 10)}…）` : "（当前未连接——可先到消费端工作台 ① 连接，或手填一个地址）"}。
+        </div>
+        {walletDiffers && (
+          <div className="help" style={{ color: "var(--warn)" }}>
+            注意：此地址与链上身份钱包（{identityWallet!.slice(0, 10)}…）不同——收入只进上面的服务收款钱包；若想用身份钱包收款，请到第 ①/④ 步把身份钱包绑成同一地址。
+          </div>
+        )}
+        {fieldErr("provider.wallet") && (
+          <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>服务端：{fieldErr("provider.wallet")}</div>
+        )}
+      </div>
 
       <div className="field">
         <label>服务 ID（全局唯一 slug）</label>
@@ -331,7 +365,7 @@ function PublishStep({ registered, onNext, onBack }: { registered: { agent_id: n
         <button className="btn secondary" onClick={onBack}>
           ← 上一步
         </button>
-        <button className="btn" disabled={busy || !conv.ok || urlInvalid || !serviceId.trim() || !name.trim()} onClick={submit}>
+        <button className="btn" disabled={busy || !conv.ok || urlInvalid || !serviceId.trim() || !name.trim() || !revenueWalletValid} onClick={submit}>
           {busy ? <Spinner label="发布中…" /> : "发布服务"}
         </button>
         <button className="btn secondary" disabled={!ok} onClick={onNext}>
@@ -481,7 +515,7 @@ function ManageStep({ agentId, onNext, onBack }: { agentId: number | null; onNex
           ← 上一步
         </button>
         <button className="btn secondary" onClick={onNext}>
-          进阶：收款钱包绑定 →
+          进阶：身份钱包绑定 →
         </button>
       </div>
     </div>
@@ -494,7 +528,7 @@ function bumpVersion(v: string): string {
   return parts.join(".");
 }
 
-/* ============ 步骤 4：收款钱包绑定 ============ */
+/* ============ 步骤 4：身份钱包绑定 ============ */
 function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const [tokenId, setTokenId] = useState("162");
   const [newWallet, setNewWallet] = useState("");
@@ -584,9 +618,9 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
 
   return (
     <div className="card">
-      <h3>身份收款钱包绑定（进阶 · 上链）</h3>
+      <h3>身份钱包绑定（进阶 · 上链，setAgentWallet）</h3>
       <p className="card-desc">
-        setAgentWallet(agentId, newWallet, deadline, signature)：把身份的收款钱包换成新地址。签名者是<b>新钱包本人</b>（EIP-712，域 ERC8004IdentityRegistry/1/{CHAIN_ID}/代理 {IDENTITY_REGISTRY.slice(0, 8)}…），
+        setAgentWallet(agentId, newWallet, deadline, signature)：把身份钱包（agentWallet）换成新地址。签名者是<b>新钱包本人</b>（EIP-712，域 ERC8004IdentityRegistry/1/{CHAIN_ID}/代理 {IDENTITY_REGISTRY.slice(0, 8)}…），
         deadline 链上窗口 5 分钟。
       </p>
 
@@ -595,12 +629,12 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
         <input type="number" value={tokenId} onChange={(e) => setTokenId(e.target.value)} />
         {identity.data && (
           <div className="help">
-            当前身份：owner <span className="mono">{identity.data.owner}</span> · 收款钱包 <span className="mono">{identity.data.agent_wallet}</span>
+            当前身份：owner <span className="mono">{identity.data.owner}</span>（平台代管账户）· 身份钱包 <span className="mono">{identity.data.agent_wallet}</span>
           </div>
         )}
       </div>
       <div className="field">
-        <label>新收款钱包地址</label>
+        <label>新身份钱包地址</label>
         <input type="text" value={newWallet} placeholder="0x…（签名必须用这个地址的私钥/钱包完成）" onChange={(e) => setNewWallet(e.target.value)} className={newWallet && !/^0x[0-9a-fA-F]{40}$/.test(newWallet.trim()) ? "invalid" : ""} />
       </div>
 
@@ -674,8 +708,7 @@ function BindStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
 
       {result && (
         <SuccessBox>
-          绑定交易已上链：<TxLink hash={result.tx_hash} /> （约几秒后可在身份查询里看到新 agent_wallet）。发布 http_json
-          服务前的「收款地址已绑定」校验从此通过。
+          绑定交易已上链：<TxLink hash={result.tx_hash} /> （约几秒后可在身份查询里看到新 agent_wallet）。身份钱包从此指向你自己的地址（发布 http_json 服务前的收款绑定校验口径见帮助页三钱包角色图）。
         </SuccessBox>
       )}
 
@@ -751,7 +784,7 @@ function WithdrawStep() {
         credits 是链上 PayVault 记账的未提现收入（I4：合约内 USDT 余额恒等于总 credits）。providerWithdraw 只能由钱包本人发起（铁律 P8：路径恒开）。
       </p>
       <div className="field">
-        <label>Provider 收款钱包地址</label>
+        <label>服务收款钱包地址（收入到账地址，持有 credits）</label>
         <input type="text" value={addr} placeholder="0x…（持有 credits 的地址）" onChange={(e) => setAddr(e.target.value)} />
       </div>
       <div className="btn-row">
@@ -801,7 +834,7 @@ function WithdrawStep() {
           </>
         ) : (
           <WarnBox>
-            检测到可提现余额，但本浏览器没有注入钱包。操作指引：① 在 OKX/MetaMask 中导入该收款钱包的账户；② 切到 BOT Chain
+            检测到可提现余额，但本浏览器没有注入钱包。操作指引：① 在 OKX/MetaMask 中导入该服务收款钱包的账户；② 切到 BOT Chain
             （chainId 968，RPC https://rpc.bohr.life/）；③ 刷新本页后点击「发起 providerWithdraw」。也可用任意脚本以该钱包调用
             <span className="mono"> PayVault({PAY_VAULT.slice(0, 10)}…).providerWithdraw(to, amount)</span>。
           </WarnBox>
