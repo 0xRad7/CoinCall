@@ -4,7 +4,7 @@
  * API key → 试用调用（动态表单 + 扩展弹窗 EIP-712 签名 + X-PAYMENT → 402 动作化）→ 历史 / 预算。
  * 控制台不接触任何私钥；无扩展的演示机可展开「一次性演示钱包」兜底（关页即焚）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { hashSha256HexStringish } from "../lib/idempotency";
 import { ApiError } from "../api/client";
 import { coreApi } from "../api/core";
@@ -151,76 +151,31 @@ function ConnectSection() {
 }
 
 /* ============ 2. 资金面板 ============ */
-function FundsSection() {
+export function FundsSection() {
   const w = useWallet();
   const { address } = w;
+  // 资金状态面板：只读三数（余额/授权/可用）。授权操作已并入试用调用①（授权→支付一条动线）。
   const [refreshTick, setRefreshTick] = useState(0);
-  const [tx, setTx] = useState<TxProgress | null>(null);
-  const [cancelled, setCancelled] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const [approvePreset, setApprovePreset] = useState<string>("0.1");
-  const [presetFromChallenge, setPresetFromChallenge] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<null | "approve">(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // 402 质询跳转：预置滑条金额并滚动到本面板
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const amount = (e as CustomEvent<string>).detail;
-      setApprovePreset(amount);
-      setPresetFromChallenge(amount);
-      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    };
-    window.addEventListener("coincall:goto-approve", handler);
-    return () => window.removeEventListener("coincall:goto-approve", handler);
-  }, []);
+  const refreshFunds = useCallback(() => setRefreshTick((t) => t + 1), []);
 
   const funds = useAsync<{ balance: bigint; allowance: bigint } | null>(
     () => (address ? Promise.all([fetchTokenBalance(address), fetchAllowance(address)]).then(([balance, allowance]) => ({ balance, allowance })) : Promise.resolve(null)),
     [address, refreshTick]
   );
-
-  const refresh = useCallback(() => setRefreshTick((t) => t + 1), []);
-
-  const runTx = async () => {
-    if (!address) return;
-    setBusy(true);
-    setError(null);
-    setCancelled(null);
-    setTx({ status: "waiting" }); // 等待扩展弹窗确认
-    try {
-      const data = encodeAddrUint(SEL.approve, VAULT, toRaw(approvePreset));
-      await w.sendTransaction(USDT, data, setTx);
-      refresh();
-    } catch (e) {
-      if (isUserRejected(e)) {
-        setCancelled("你取消了授权交易（钱包弹窗里拒绝）");
-        setTx(null);
-      } else {
-        setError(e);
-        setTx({ status: "failed", error: humanizeError(e).title });
-      }
-    } finally {
-      setBusy(false);
-      setConfirming(null);
-      setPresetFromChallenge(null);
-    }
-  };
-
   const d = funds.data;
   const available = d ? (d.allowance < d.balance ? d.allowance : d.balance) : null;
-  const chainBlocked = w.mode === "injected" && !w.chainOk;
 
   return (
-    <div className="card" ref={panelRef}>
+    <div className="card">
       <div className="flex" style={{ justifyContent: "space-between" }}>
-        <h3 className="mb-0">② 资金面板（USDT · 6 位精度）</h3>
-        <button className="btn small secondary" onClick={refresh}>
+        <h3 className="mb-0">② 资金状态面板（USDT · 6 位精度）</h3>
+        <button className="btn small secondary" onClick={refreshFunds}>
           刷新
         </button>
       </div>
-      <p className="card-desc">可用额 = min(余额, 对 PayVault 的授权额)，即当前真正能用于付费调用的额度。授权是钱包弹窗确认的交易（gas 恒 20 gwei）。</p>
+      <p className="card-desc">
+        只读三数：可用额 = min(余额, 对 PayVault 的授权额)。授权与支付已合并为试用调用里的「① 授权额度 → ② 支付调用」一条动线。
+      </p>
 
       {funds.loading && d == null ? (
         <Spinner label="eth_call 读链中…" />
@@ -248,21 +203,6 @@ function FundsSection() {
         </div>
       ) : null}
 
-      {chainBlocked && (
-        <WarnBox>
-          钱包当前在链 {w.chainId ?? "?"}，先切到 BOT Chain（968）再操作资金。
-          <button className="btn small" style={{ marginLeft: 8 }} onClick={() => void w.ensureChain()}>
-            引导切链
-          </button>
-        </WarnBox>
-      )}
-      {presetFromChallenge && (
-        <div className="alert warn">
-          网关 402 质询提示授权不足：已为你把滑条预置到 <b>{presetFromChallenge} USDT</b>，确认后点「授权」（钱包弹窗确认）。
-        </div>
-      )}
-      {cancelled && <WarnBox>{cancelled}。没有产生任何交易，可随时重试。</WarnBox>}
-
       <div className="card" style={{ boxShadow: "none", marginBottom: 0, padding: "12px 16px" }}>
         <div className="flex" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
           <div>
@@ -280,81 +220,12 @@ function FundsSection() {
             <a className="btn small secondary" href={FAUCET_URL} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
               去水龙头 ↗
             </a>
-            <button className="btn small secondary" onClick={refresh}>
+            <button className="btn small secondary" onClick={refreshFunds}>
               刷新余额
             </button>
           </div>
         </div>
       </div>
-      <div className="flex" style={{ alignItems: "flex-end" }}>
-        <div className="grow" style={{ maxWidth: 420 }}>
-          <div className="field" style={{ margin: 0 }}>
-            <label>授权 PayVault 可花费额度（滑条）</label>
-            <div className="flex">
-              <div className="seg">
-                {["0.01", "0.1", "1"].map((v) => (
-                  <button key={v} className={approvePreset === v ? "active" : ""} onClick={() => setApprovePreset(v)}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="text"
-                style={{ width: 120 }}
-                value={approvePreset}
-                onChange={(e) => setApprovePreset(e.target.value.trim())}
-                aria-label="自定义授权额度"
-              />
-              <button className="btn" disabled={busy || chainBlocked} onClick={() => setConfirming("approve")}>
-                授权
-              </button>
-            </div>
-            <div className="help num">
-              = raw {(() => { try { return toRaw(approvePreset).toString(); } catch { return "格式错误"; } })()} ·
-              {w.mode === "injected" ? " 钱包弹窗确认（eth_sendTransaction，20 gwei 固定费率）" : " 演示钱包本地直签（20 gwei）"}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {tx && (
-        <div className={`alert ${tx.status === "confirmed" ? "ok" : tx.status === "failed" ? "err" : "info"}`}>
-          {tx.status === "waiting" && (
-            <span className="flex">
-              <span className="spin" /> 等待钱包确认…（请在扩展弹窗里确认）
-            </span>
-          )}
-          {tx.status === "pending" && (
-            <span className="flex">
-              <span className="spin" /> 交易已广播，等待打包…
-            </span>
-          )}
-          {tx.status === "confirmed" && <span>✓ 已上链确认</span>}
-          {tx.status === "failed" && <span>✗ 失败：{tx.error}</span>}
-          {tx.hash && (
-            <span>
-              {" "}
-              · <TxLink hash={tx.hash} />
-            </span>
-          )}
-        </div>
-      )}
-      {error != null && <ErrorBox error={error} />}
-
-      <ConfirmDialog
-        open={confirming === "approve"}
-        title="确认授权（上链，不可逆）"
-        body={
-          <>
-            允许 PayVault（{VAULT.slice(0, 10)}…）最多从你的钱包划走 <b className="num">{approvePreset} USDT</b>
-            （raw {(() => { try { return toRaw(approvePreset).toString(); } catch { return "?"; } })()}）。keeper
-            只按你逐笔签名的授权扣款，本授权是扣款的上限。可随时重新授权调整额度；将弹出钱包确认。
-          </>
-        }
-        confirmText="去钱包确认"
-        onConfirm={() => void runTx()}
-        onCancel={() => setConfirming(null)}
-      />
     </div>
   );
 }
@@ -467,12 +338,22 @@ function ApiKeySection() {
 }
 
 /* ============ 4. 试用调用 ============ */
-function TrialCallSection() {
+export function TrialCallSection() {
   const w = useWallet();
   const { address } = w;
   const catalog = useAsync(() => coreApi.catalog(), []);
   const services = catalog.data?.services.filter((s) => s.status === "active") ?? [];
   const [svcId, setSvcId] = useState<string>("");
+  // ① 授权额度 → ② 支付调用（同一张卡内的顺序动线）
+  const [stepOpen, setStepOpen] = useState(false); // ①用户手动展开标记；展示逻辑：额度不足自动展开、充足默认折叠直达②
+  const [approveAmount, setApproveAmount] = useState<string>(""); // 默认=单价×10（选中服务时置入）
+  const [approveTx, setApproveTx] = useState<TxProgress | null>(null);
+  const [approveBusy, setApproveBusy] = useState(false);
+  const [approveCancelled, setApproveCancelled] = useState<string | null>(null);
+  const [approveError, setApproveError] = useState<unknown>(null);
+  const [approvedThisSession, setApprovedThisSession] = useState(false); // 本会话是否经历过授权步骤（历史标记用）
+  const [fundsTick, setFundsTick] = useState(0);
+  const APPROVED_FLAG = "coincall.approvedOnce"; // localStorage：已授权过（额度仍充足时①保持折叠）
   const [paramsJson, setParamsJson] = useState("{}");
   const [parsedParams, setParsedParams] = useState<Record<string, unknown> | null>({});
   const [calling, setCalling] = useState(false);
@@ -484,6 +365,55 @@ function TrialCallSection() {
   const apiKey = localStorage.getItem(APIKEY_STORE);
   const svc = services.find((s) => s.service_id === svcId) ?? null;
   const priceRaw = svc ? BigInt(svc.manifest.pricing.amount_raw) : null;
+  const priceHuman = svc?.manifest.pricing.amount ?? "0";
+
+  // 该服务的可用授权（三数可折叠展示；充足→折叠直达②）
+  const funds = useAsync<{ balance: bigint; allowance: bigint } | null>(
+    () => (address ? Promise.all([fetchTokenBalance(address), fetchAllowance(address)]).then(([balance, allowance]) => ({ balance, allowance })) : Promise.resolve(null)),
+    [address, fundsTick]
+  );
+  const allowance = funds.data?.allowance ?? null;
+  const allowanceOk = priceRaw != null && allowance != null && allowance >= priceRaw;
+  const rememberedApproved = localStorage.getItem(APPROVED_FLAG) === "1";
+  // 折叠条件：额度充足，或（历史已授权过且数据未到/未变坏）
+  const step1Collapsed = allowanceOk || (rememberedApproved && allowance == null);
+
+  // 选中服务时预置授权金额 = 单价×10（一次授权可供多次调用）
+  useEffect(() => {
+    if (svc) {
+      try {
+        setApproveAmount((v) => v || fromRaw(toRaw(priceHuman) * 10n));
+      } catch {
+        /* 定价异常则留空手填 */
+      }
+    }
+  }, [svcId, priceHuman]);
+
+  const runApprove = async () => {
+    if (!address) return;
+    setApproveBusy(true);
+    setApproveError(null);
+    setApproveCancelled(null);
+    setApproveTx({ status: "waiting" });
+    try {
+      const data = encodeAddrUint(SEL.approve, VAULT, toRaw(approveAmount));
+      await w.sendTransaction(USDT, data, setApproveTx);
+      localStorage.setItem(APPROVED_FLAG, "1");
+      setApprovedThisSession(true);
+      setStepOpen(false); // 收起① → 动线进入②
+      setFundsTick((t) => t + 1); // 刷新授权额 → 折叠态展示最新可用授权
+    } catch (e) {
+      if (isUserRejected(e)) {
+        setApproveCancelled("你取消了授权交易（钱包弹窗里拒绝）");
+        setApproveTx(null);
+      } else {
+        setApproveError(e);
+        setApproveTx({ status: "failed", error: humanizeError(e).title });
+      }
+    } finally {
+      setApproveBusy(false);
+    }
+  };
 
   const [spent, setSpent] = useState<bigint>(() => loadSpentRaw());
   useEffect(() => {
@@ -532,6 +462,7 @@ function TrialCallSection() {
         receiptId: outcome.receipt.receiptId,
         chargedRaw: outcome.receipt.chargedRaw,
         ok: true,
+        withApprove: approvedThisSession,
         resultPreview: JSON.stringify(outcome.body).slice(0, 120),
       });
     } catch (e) {
@@ -540,6 +471,15 @@ function TrialCallSection() {
         setCancelled("你取消了支付授权签名（钱包弹窗里拒绝）。未产生任何扣款，可随时重试。");
       } else if (e instanceof ApiError && e.status === 402) {
         const challenge = e.raw as Gateway402Challenge;
+        // 授权不足：不再跨区跳转——直接展开①并预置覆盖本单的金额（单价×10）
+        if (challenge.code === "insufficient_allowance") {
+          setStepOpen(true);
+          try {
+            setApproveAmount(fromRaw((priceRaw ?? 0n) * 10n));
+          } catch {
+            /* 保留现值 */
+          }
+        }
         setResult({ ok: false, body: e.raw, receipt: { receiptId: null, chargedRaw: null }, challenge });
         appendHistory({
           ts: Date.now(),
@@ -590,6 +530,98 @@ function TrialCallSection() {
 
       {svc && (
         <>
+          {/* ① 授权额度 → ② 支付调用（同一张卡内的顺序动线） */}
+          <div className="wizard-steps" style={{ marginBottom: 12 }}>
+            <button type="button" className={`wizard-step${step1Collapsed ? " done" : stepOpen ? " active" : ""}`} onClick={() => setStepOpen((o) => !o)}>
+              <span className="n">{step1Collapsed ? "✓" : "1"}</span>
+              ① 授权额度
+            </button>
+            <span className="arrow" style={{ color: "var(--primary)", fontWeight: 700 }}>→</span>
+            <span className={`wizard-step${step1Collapsed ? " active" : ""}`}>
+              <span className="n">2</span>
+              ② 支付调用
+            </span>
+          </div>
+
+          {step1Collapsed && !stepOpen ? (
+            <div className="alert ok flex" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+              <span>
+                ✓ 已授权，可直接支付（对 PayVault 可用授权 {allowance != null ? fromRaw(allowance) : "…"} USDT
+                <span className="dim num"> raw={allowance?.toString() ?? "…"}</span>）
+              </span>
+              <button type="button" className="btn small secondary" onClick={() => setStepOpen(true)}>
+                查看/调整授权
+              </button>
+            </div>
+          ) : (
+            <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginBottom: 12 }}>
+              <div className="flex" style={{ justifyContent: "space-between" }}>
+                <h3 className="mt-0" style={{ fontSize: 14 }}>① 授权额度（approve 给 PayVault）</h3>
+                {step1Collapsed && (
+                  <button type="button" className="btn small secondary" onClick={() => setStepOpen(false)}>
+                    收起
+                  </button>
+                )}
+              </div>
+              <p className="card-desc" style={{ margin: "0 0 8px" }}>
+                keeper 只按你逐笔签名的付费授权划款，这里的 approve 是扣款上限——<b>一次授权可供多次调用</b>（默认 = 本单价格 ×10）。
+              </p>
+              <div className="flex" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+                <span className="dim" style={{ fontSize: 12 }}>当前授权 {allowance != null ? fromRaw(allowance) : "…"} USDT · 余额 {funds.data ? fromRaw(funds.data.balance) : "…"} USDT</span>
+                <button type="button" className="btn small secondary" onClick={() => setFundsTick((t) => t + 1)}>
+                  刷新
+                </button>
+              </div>
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label>授权金额（USDT）</label>
+                <div className="flex">
+                  <input
+                    type="text"
+                    style={{ width: 140 }}
+                    value={approveAmount}
+                    onChange={(e) => setApproveAmount(e.target.value.trim())}
+                    aria-label="授权金额"
+                  />
+                  <div className="seg">
+                    <button type="button" className="btn small secondary" onClick={() => setApproveAmount(fromRaw((priceRaw ?? 0n) * 10n))}>
+                      单价×10
+                    </button>
+                    <button type="button" className="btn small secondary" onClick={() => setApproveAmount("0.1")}>
+                      0.1
+                    </button>
+                    <button type="button" className="btn small secondary" onClick={() => setApproveAmount("1")}>
+                      1
+                    </button>
+                  </div>
+                </div>
+                <div className="help num">
+                  = raw {(() => { try { return toRaw(approveAmount).toString(); } catch { return "格式错误"; } })()} · 交易经钱包扩展弹窗确认（20 gwei）
+                </div>
+              </div>
+              <div className="btn-row">
+                <button className="btn" disabled={approveBusy || chainBlocked || !/^[\d.]+$/.test(approveAmount)} onClick={runApprove}>
+                  {approveBusy ? "等待钱包确认…" : "去钱包授权"}
+                </button>
+                {chainBlocked && <span className="dim">钱包不在 968 链，先在顶栏切链。</span>}
+              </div>
+              {approveTx && (
+                <div className={`alert ${approveTx.status === "confirmed" ? "ok" : approveTx.status === "failed" ? "err" : "info"}`} style={{ marginTop: 8 }}>
+                  {approveTx.status === "waiting" && (
+                    <span className="flex"><span className="spin" /> 等待钱包确认…（请在扩展弹窗里确认授权交易）</span>
+                  )}
+                  {approveTx.status === "pending" && (
+                    <span className="flex"><span className="spin" /> 授权交易已广播，等待打包…</span>
+                  )}
+                  {approveTx.status === "confirmed" && <span>✓ 授权已上链——进入 ② 支付调用。</span>}
+                  {approveTx.status === "failed" && <span>✗ 失败：{approveTx.error}</span>}
+                  {approveTx.hash && <> · <TxLink hash={approveTx.hash} /></>}
+                </div>
+              )}
+              {approveCancelled && <WarnBox>{approveCancelled}。没有产生任何交易，可随时重试。</WarnBox>}
+              {approveError != null && <ErrorBox error={approveError} />}
+            </div>
+          )}
+
           <div className="alert info">
             <b>{svc.manifest.name}</b> · 单价 <b className="num">{svc.manifest.pricing.amount} USDT</b>
             <span className="dim num">（raw={svc.manifest.pricing.amount_raw}）</span> · Provider {svc.manifest.provider.display_name} · 本次将请钱包签名授权 PayVault 划扣该金额。
@@ -671,7 +703,7 @@ function TrialCallSection() {
   );
 }
 
-/** 402 质询 → 人话 + 动作按钮（如「去授权」→ 资金面板授权滑条，钱包弹窗确认）。 */
+/** 402 质询 → 人话（授权不足已在上方①内联展开并预置金额，不再跨区跳转）。 */
 function ChallengePanel({ challenge }: { challenge: Gateway402Challenge }) {
   const h = humanizeChallenge(challenge);
   return (
@@ -680,15 +712,8 @@ function ChallengePanel({ challenge }: { challenge: Gateway402Challenge }) {
         402 · {h.title} <span className="dim">（code: {challenge.code}）</span>
       </div>
       <div>{h.hint}</div>
+      {h.action === "approve" && <div>→ 已在上方「① 授权额度」展开并预置金额，完成授权后回来支付。</div>}
       <div className="btn-row" style={{ marginTop: 8 }}>
-        {h.action === "approve" && h.amount && (
-          <button
-            className="btn"
-            onClick={() => window.dispatchEvent(new CustomEvent("coincall:goto-approve", { detail: h.amount }))}
-          >
-            去授权 {h.amount} USDT（钱包弹窗确认） →
-          </button>
-        )}
         <CopyButton text={JSON.stringify(challenge, null, 2)} label="复制质询 JSON" />
       </div>
       <details className="raw-detail">
@@ -743,7 +768,10 @@ function HistorySection() {
                 <td className="mono dim">{e.receiptId ? e.receiptId.slice(0, 16) + "…" : "-"}</td>
                 <td>
                   {e.ok ? (
-                    <Badge kind="ok">成功{e.chargedRaw ? ` · ${fromRaw(e.chargedRaw)}` : ""}</Badge>
+                    <>
+                      <Badge kind="ok">成功{e.chargedRaw ? ` · ${fromRaw(e.chargedRaw)}` : ""}</Badge>
+                      {e.withApprove && <span className="badge muted" title="本会话首单：先完成了授权步骤">含授权</span>}
+                    </>
                   ) : (
                     <Badge kind="err">{e.errorDetail?.slice(0, 40) ?? "失败"}</Badge>
                   )}

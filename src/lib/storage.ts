@@ -10,6 +10,8 @@ export interface CallHistoryEntry {
   receiptId: string | null;
   chargedRaw: string | null;
   ok: boolean;
+  /** 本笔之前本会话是否经历了授权步骤（演示「首单两步、复购一步」） */
+  withApprove?: boolean;
   errorDetail?: string;
   resultPreview?: string;
 }
