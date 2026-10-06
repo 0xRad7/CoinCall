@@ -11,6 +11,7 @@ import { fetchProviderCredits, encodeAddrUint } from "../chain/rpc";
 import { browserProvider, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureChain968, silentAccounts } from "../chain/injected";
 import { useWallet } from "../state/WalletContext";
 import { AmountInput } from "../components/AmountInput";
+import { IdentityRegister } from "../components/IdentityRegister";
 import { JsonEditor } from "../components/JsonEditor";
 import { AsyncSection, Badge, ConfirmDialog, CopyButton, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeError, labelField } from "../lib/errors";
@@ -83,7 +84,7 @@ export default function ProviderWorkbench() {
 }
 
 /* ============ 步骤 1：登记 ============ */
-function RegisterStep({ initial, onNext }: { initial: { agent_id: number; display_name: string; wallet?: string } | null; onNext: (r: { agent_id: number; display_name: string; wallet?: string }) => void }) {
+export function RegisterStep({ initial, onNext }: { initial: { agent_id: number; display_name: string; wallet?: string } | null; onNext: (r: { agent_id: number; display_name: string; wallet?: string }) => void }) {
   const [agentId, setAgentId] = useState(initial?.agent_id ? String(initial.agent_id) : "");
   const [name, setName] = useState(initial?.display_name ?? "");
   const [busy, setBusy] = useState(false);
@@ -136,10 +137,15 @@ function RegisterStep({ initial, onNext }: { initial: { agent_id: number; displa
                 ✓ 链上身份存在 · owner {identity.data.owner.slice(0, 10)}… · 当前收款钱包 {identity.data.agent_wallet}
               </span>
             ) : (
-              <span style={{ color: "var(--warn)" }}>⚠ 链上没有该 tokenId 的身份记录（登记会被 422 拒绝）</span>
+              <span style={{ color: "var(--warn)" }}>⚠ 链上没有该 tokenId 的身份记录（登记会被 422 拒绝）——可在下方注册一个</span>
             )}
           </div>
         )}
+        <IdentityRegister
+          onRegistered={(id) => {
+            setAgentId(String(id));
+          }}
+        />
       </div>
       <div className="field">
         <label>展示名称</label>
