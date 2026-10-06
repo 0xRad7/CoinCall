@@ -5,7 +5,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { apiFetch, ApiError, jsonInit, normalizeErrorBody } from "../src/api/client";
 import { agentWalletSetTypedData, buildCallHeaders } from "../src/api/gateway";
-import { fromRaw, toRaw } from "../src/chain/constants";
+import { PAY_VAULT, fromRaw, toRaw } from "../src/chain/constants";
 import { buildCallAuthorization, buildPaymentHeader, decodePaymentHeader, signAuthorization } from "../src/chain/signing";
 import { hashSha256HexStringish } from "../src/lib/idempotency";
 import { humanizeChallenge, humanizeError } from "../src/lib/errors";
@@ -114,7 +114,7 @@ describe("调用头组装（试用调用同一路径）", () => {
   const w = new Wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"); // anvil#1（公开测试账户）
 
   it("buildCallAuthorization：窗口/随机 nonce/from=to 校验", () => {
-    const a = buildCallAuthorization(w.address, "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471", 10000n, 1_000_000);
+    const a = buildCallAuthorization(w.address, PAY_VAULT, 10000n, 1_000_000);
     expect(a.from).toBe(w.address);
     expect(a.validAfter).toBe(1_000_000n);
     expect(a.validBefore).toBe(1_000_600n);
@@ -122,8 +122,8 @@ describe("调用头组装（试用调用同一路径）", () => {
   });
 
   it("X-PAYMENT：字段别名齐全且可被网关 pydantic 接受（value=十进制字符串）", () => {
-    const a = buildCallAuthorization(w.address, "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471", 10000n, 1_000_000);
-    const sig = signAuthorization(w, a, "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471");
+    const a = buildCallAuthorization(w.address, PAY_VAULT, 10000n, 1_000_000);
+    const sig = signAuthorization(w, a, PAY_VAULT);
     const header = buildPaymentHeader(a, sig);
     const d = decodePaymentHeader(header) as Record<string, unknown>;
     expect(d["value"]).toBe("10000"); // 字符串（网关 _DECIMAL_RE）

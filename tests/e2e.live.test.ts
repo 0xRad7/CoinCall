@@ -9,7 +9,7 @@ import { Wallet } from "ethers";
 import { apiFetch, jsonInit } from "../src/api/client";
 import { buildCallAuthorization, buildPaymentHeader, signAuthorization } from "../src/chain/signing";
 import { PAY_VAULT } from "../src/chain/constants";
-import { approveVault, fetchAllowance, fetchTokenBalance, mintMockUsdt } from "../src/chain/rpc";
+import { approveVault, fetchAllowance } from "../src/chain/rpc";
 import { hashSha256HexStringish } from "../src/lib/idempotency";
 
 const BASE = "http://127.0.0.1:5173"; // vite dev（同源代理 → core/gw）
@@ -26,18 +26,13 @@ describe.skipIf(process.env.CI || !process.env.COINCALL_E2E)("E2E：anvil#1 付�
     const svc = cat.services.find((s) => s.service_id === SVC);
     expect(svc).toBeTruthy();
     expect(BigInt(svc!.manifest.pricing.amount_raw)).toBe(PRICE_RAW);
-    const bal = await fetchTokenBalance(wallet.address);
     const allow = await fetchAllowance(wallet.address);
-    // UI 状态：三数展示（若缺额走 mint/approve——当前余额充足则跳过）
-    if (bal < PRICE_RAW) {
-      await mintMockUsdt(wallet, wallet.address, 10_000_000n);
-    }
+    // UI 状态：三数展示（真 USDT 无公开 mint——缺额须从水龙头领；授权不足走 approve）
     if (allow < PRICE_RAW) {
       await approveVault(wallet, PRICE_RAW * 10n);
     }
-    const bal2 = await fetchTokenBalance(wallet.address);
     const allow2 = await fetchAllowance(wallet.address);
-    expect(bal2 >= PRICE_RAW && allow2 >= PRICE_RAW).toBe(true);
+    expect(allow2 >= PRICE_RAW).toBe(true);
   });
 
   it("② 签发 API key（core POST /apikeys，绑定当前钱包）", async () => {
@@ -86,12 +81,4 @@ describe.skipIf(process.env.CI || !process.env.COINCALL_E2E)("E2E：anvil#1 付�
     console.log("keeper 批量上链完成：cumulative", before, "→", status.cumulative_charged_count, "· 总览 GMV raw:", ov.gmv_raw);
   }, 120_000);
 
-  it("⑤ 资金按钮等价路径：本地钱包直签 raw tx（mint）pending→confirmed", async () => {
-    const before = await fetchTokenBalance(wallet.address);
-    const receipt = await mintMockUsdt(wallet, wallet.address, 10_000_000n);
-    const after = await fetchTokenBalance(wallet.address);
-    expect(receipt.status).toBe(1);
-    expect(after - before).toBe(10_000_000n);
-    console.log("mint 10 MockUSDT 上链:", receipt.hash, "余额 raw:", before.toString(), "→", after.toString());
-  }, 60_000);
 });

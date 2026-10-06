@@ -144,9 +144,9 @@ describe.skipIf(!exists || !vectors)("EIP-712 黄金向量（eip712_golden.json�
   });
 
   it("生产域（PayVault@968）与向量域 domainSeparator 不同且稳定（防串域）", () => {
-    const prod = "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471";
+    const prod = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"; // epoch2 金库（deployments/testnet-968.json）
     const ds = domainSeparator(prod, 968);
     expect(ds).not.toBe(vectors!.cases[0]!.domainSeparator); // 向量用 dEaD 合约
-    expect(ds).toMatchInlineSnapshot(`"0x9492a98abfe745c032a01618ce9fa0f408f7f5a300693f13ac1dc723415584fe"`);
+    expect(ds).toMatchInlineSnapshot(`"0x00ae87cf4248afb7385a6ec05d3c4b294616dec3c0f44effecd64acb06c2d8e6"`);
   });
 });
