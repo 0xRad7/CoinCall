@@ -169,3 +169,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .right { text-align: right; }
 .dim { color: var(--text-3); font-size: var(--fs-12); }
 .copy-chip { cursor: pointer; color: var(--primary); border-bottom: 1px dashed var(--primary); }
+
+/* CoinCall 调用端点区块（公开面零上游地址） */
+.call-endpoint-box { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface-2); margin-top: 6px; }
+.call-endpoint-box .flex { align-items: center; margin: 2px 0; }

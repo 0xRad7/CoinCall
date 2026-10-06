@@ -3,8 +3,8 @@ import { useState } from "react";
 import { coreApi, type ProofResponse } from "../api/core";
 import { gatewayApi } from "../api/gateway";
 import { useAsync } from "../lib/useAsync";
-import { AsyncSection, Badge, ErrorBox, Spinner, TxLink } from "../components/ui";
-import { fromRaw } from "../chain/constants";
+import { AsyncSection, Badge, CopyButton, ErrorBox, Spinner, TxLink } from "../components/ui";
+import { GATEWAY_PUBLIC_URL, fromRaw } from "../chain/constants";
 
 export default function Overview() {
   const overview = useAsync(() => coreApi.overview(), []);
@@ -98,10 +98,21 @@ export default function Overview() {
                     </span>
                     <span className="dim"> / 次 · raw={s.manifest.pricing.amount_raw}</span>
                   </div>
-                  <div className="dim">
-                    端点 {s.manifest.endpoint.type}
-                    {s.manifest.endpoint.type === "http_json" ? ` · ${s.manifest.endpoint.method ?? "POST"}` : ""}
-                    {s.manifest.endpoint.url ? ` · ${s.manifest.endpoint.url}` : "（平台内置）"} · Provider {s.manifest.provider.display_name}
+                  <div className="dim" style={{ marginBottom: 6 }}>
+                    {s.manifest.endpoint.type === "http_json" ? `上游请求方式 ${s.manifest.endpoint.method ?? "POST"}` : "internal（平台内置实现）"} · Provider {s.manifest.provider.display_name}
+                  </div>
+                  <div className="call-endpoint-box">
+                    <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
+                    <div className="flex" style={{ gap: 6 }}>
+                      <span className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
+                        POST {GATEWAY_PUBLIC_URL}/call/{s.service_id}
+                        {s.manifest.endpoint.type === "http_json" && (s.manifest.endpoint.method ?? "POST") === "GET" && (
+                          <span className="badge muted" style={{ marginLeft: 6 }}>GET 上游</span>
+                        )}
+                      </span>
+                      <CopyButton text={`POST ${GATEWAY_PUBLIC_URL}/call/${s.service_id}`} label="复制" />
+                    </div>
+                    <div className="dim" style={{ fontSize: 11 }}>真实上游由平台中转，消费者只看到 CoinCall 端点</div>
                   </div>
                   {s.manifest.description && <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-2)" }}>{s.manifest.description}</div>}
                 </div>
