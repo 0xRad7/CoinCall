@@ -48,6 +48,7 @@ from app.modules.leaderboard import (
 from app.modules.probe import router as probe_router
 from app.modules.providers import router as providers_router
 from app.modules.receiptkey import ReceiptPubkeyClient, ReceiptPubkeySource
+from app.modules.security_scan import router as security_router
 from app.modules.teams import router as teams_router
 from app.storage.db import CoreStore
 
@@ -153,6 +154,7 @@ def create_app(
     app.include_router(providers_router)
     app.include_router(credentials_router)
     app.include_router(probe_router)
+    app.include_router(security_router)
     app.include_router(teams_router)
     app.include_router(leaderboard_router)
     app.include_router(decision_router)

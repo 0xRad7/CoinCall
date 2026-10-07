@@ -31,6 +31,7 @@ from app.modules.leaderboard import (
     to_amount,
 )
 from app.modules.manifest import CATEGORIES, manifest_category, manifest_tags
+from app.modules.security_scan import severity_counts
 from app.storage.db import CoreStore
 
 router = APIRouter(tags=["decision"])
@@ -154,7 +155,7 @@ def _to_float(value: Any) -> float | None:  # noqa: ANN401 —— 同 _to_int：
 
 @dataclass
 class _Context:
-    """决策取数快照：active 服务 + 网关窗口统计 + 链上收入 + 反馈聚合 + 锚定。"""
+    """决策取数快照：active 服务 + 网关窗口统计 + 链上收入 + 反馈聚合 + 锚定 + 安全扫描。"""
 
     services: list[dict[str, Any]]
     stats_by_service: dict[str, dict[str, Any]]
@@ -164,6 +165,7 @@ class _Context:
     payload_by_agent: dict[int, dict[str, Any]]
     digest_by_agent: dict[int, str]
     window_hours: int
+    security_by_service: dict[str, dict[str, Any]] = field(default_factory=dict)
     degraded: list[str] = field(default_factory=list)
 
 
@@ -253,6 +255,7 @@ def _build_context(request: Request, *, window_hours: int) -> _Context:
         payload_by_agent=payload_by_agent,
         digest_by_agent=digest_by_agent,
         window_hours=window_hours,
+        security_by_service=store.service_security_map(),
         degraded=degraded,
     )
 
@@ -722,6 +725,12 @@ class AdviceSecurity(BaseModel):
         description="履约数据摘要的链上锚定状态（无锚定=窗口未到，非异常）"
     )
     service_status: str = Field(description="服务当前状态（active/paused）")
+    content_scan: str = Field(
+        description=(
+            "内容扫描：最近探测的投毒/泄露扫描结论人话"
+            "（未见特征/有发现/从未探测三态，发现明细见 /services/security/{id}）"
+        )
+    )
     notes: list[str] = Field(default_factory=list, description="已核验项与未覆盖维度")
 
 
@@ -755,7 +764,9 @@ class AdviceResponse(BaseModel):
     )
     security: AdviceSecurity | None = Field(
         default=None,
-        description="平台安全评估（链上身份/收款绑定/计费真相/履约锚定/服务状态 + 披露）",
+        description=(
+            "平台安全评估（链上身份/收款绑定/计费真相/履约锚定/服务状态/内容扫描 + 披露）"
+        ),
     )
 
 
@@ -861,10 +872,44 @@ def _advice_signals(rec: DecisionRow) -> AdviceSignals:
     )
 
 
-def _advice_security(rec: DecisionRow) -> AdviceSecurity:
-    """安全评估投影：只陈述已核验事实；未覆盖维度显式披露（不伪造扫描结论）。"""
+#: content_scan 从未探测话术（诚实披露：probe 是 Provider 手动触发的采样）
+ADVICE_SCAN_NEVER_PROBED = "内容扫描：从未探测（Provider 发布后未跑过探测）"
+
+
+def _content_scan_text(service_id: str, scan: dict[str, Any] | None) -> str:
+    """服务最新扫描记录 → 人话（确定性模板；从未探测/未见特征/有发现三态）。"""
+    if scan is None:
+        return ADVICE_SCAN_NEVER_PROBED
+    if scan.get("clean"):
+        scanned_at = str(scan.get("scanned_at") or "")
+        return f"内容扫描：未见投毒/泄露特征（最近探测 {scanned_at}）"
+    findings = scan.get("findings") or []
+    counts = severity_counts(findings)
+    parts = "、".join(f"{sev} {n} 项" for sev, n in counts.items() if n)
+    summary = parts or "严重度未知"
+    return f"内容扫描：{len(findings)} 项发现（{summary}），详见 /services/security/{service_id}"
+
+
+def _advice_security(rec: DecisionRow, scan: dict[str, Any] | None) -> AdviceSecurity:
+    """安全评估投影：只陈述已核验事实；未覆盖维度显式披露（不伪造扫描结论）。
+
+    scan=None（从未探测）时内容扫描维度如实标注未覆盖；已探测时如实列出，
+    扫描边界（确定性规则、探测时点采样）单独披露。
+    """
     f = rec.components.fulfillment
     anchor_tx = (f.proof or {}).get("anchor_tx")
+    if scan is None:
+        notes = [
+            "已核验：链上身份注册 / 收款绑定 / 链上计费 / 履约锚定 / 服务状态",
+            "暂未覆盖：上游内容投毒扫描、响应数据泄露检测"
+            "（该服务从未探测；探测入口 POST /services/probe 带 service_id）",
+        ]
+    else:
+        notes = [
+            "已核验：链上身份注册 / 收款绑定 / 链上计费 / 履约锚定 / 服务状态 / "
+            "响应内容扫描（投毒/泄露）",
+            "扫描边界：确定性规则（禁 LLM）、探测时点采样；语义级对抗投毒与转发路径实时拦截未覆盖",
+        ]
     return AdviceSecurity(
         provider_identity=(
             f"链上身份 #{rec.provider_agent_id}（ERC-8004）已注册"
@@ -883,10 +928,8 @@ def _advice_security(rec: DecisionRow) -> AdviceSecurity:
             else "履约数据摘要尚未锚定（锚定窗口未到，非异常）"
         ),
         service_status=rec.status,
-        notes=[
-            "已核验：链上身份注册 / 收款绑定 / 链上计费 / 履约锚定 / 服务状态",
-            "暂未覆盖：上游内容投毒扫描、响应数据泄露检测（probe 层设计项，未接入决策）",
-        ],
+        content_scan=_content_scan_text(rec.service_id, scan),
+        notes=notes,
     )
 
 
@@ -970,5 +1013,5 @@ def advice(
         as_of=as_of_dt.isoformat(),
         category=partition,
         signals=_advice_signals(top),
-        security=_advice_security(top),
+        security=_advice_security(top, ctx.security_by_service.get(top.service_id)),
     )

@@ -97,6 +97,16 @@ CREATE TABLE IF NOT EXISTS anchor_records (
 )
 """
 
+SERVICE_SECURITY_DDL = """
+CREATE TABLE IF NOT EXISTS service_security (
+  service_id  VARCHAR PRIMARY KEY,
+  clean       BOOLEAN,
+  findings    JSON,
+  http_status INTEGER,
+  scanned_at  TIMESTAMP DEFAULT now()
+)
+"""
+
 
 class CoreStore:
     """coincall-core 自有 DuckDB 库。
@@ -127,6 +137,8 @@ class CoreStore:
             self.conn.execute(FEEDBACK_NULLIFIERS_DDL)
             self.conn.execute(FEEDBACK_DDL)
             self.conn.execute(ANCHOR_RECORDS_DDL)
+            # 安全扫描（api-security-probe §1.2）：probe 最新一次 L1/L2 扫描记录
+            self.conn.execute(SERVICE_SECURITY_DDL)
 
     # ---- services / manifests ----
 
@@ -546,6 +558,59 @@ class CoreStore:
                 "anchored_at": str(r[3]),
             }
         return out
+
+    # ---- service_security（probe 最新一次内容扫描：投毒/泄露）----
+
+    def upsert_service_security(
+        self, service_id: str, clean: bool, findings: list[dict[str, Any]], http_status: int | None
+    ) -> None:
+        """service 维度最新一次扫描 upsert（findings 已脱敏，不含凭证值）。"""
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO service_security (service_id, clean, findings, http_status, scanned_at)
+                VALUES (?, ?, CAST(? AS JSON), ?, now())
+                ON CONFLICT (service_id) DO UPDATE SET
+                  clean = excluded.clean,
+                  findings = excluded.findings,
+                  http_status = excluded.http_status,
+                  scanned_at = now()
+                """,
+                [service_id, clean, json.dumps(findings), http_status],
+            )
+
+    def get_service_security(self, service_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT service_id, clean, findings, http_status, scanned_at "
+            "FROM service_security WHERE service_id = ?",
+            [service_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "service_id": row[0],
+            "clean": bool(row[1]),
+            "findings": json.loads(row[2]) if row[2] is not None else [],
+            "http_status": row[3],
+            "scanned_at": str(row[4]),
+        }
+
+    def service_security_map(self) -> dict[str, dict[str, Any]]:
+        """全库 service_id → 最新扫描记录（决策层批量取数口径，同 anchor_latest_map）。"""
+        rows = self.conn.execute(
+            "SELECT service_id, clean, findings, http_status, scanned_at FROM service_security "
+            "ORDER BY scanned_at, service_id"
+        ).fetchall()
+        return {
+            r[0]: {
+                "service_id": r[0],
+                "clean": bool(r[1]),
+                "findings": json.loads(r[2]) if r[2] is not None else [],
+                "http_status": r[3],
+                "scanned_at": str(r[4]),
+            }
+            for r in rows
+        }
 
     def close(self) -> None:
         with self._lock:
