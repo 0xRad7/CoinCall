@@ -152,7 +152,6 @@ describe("我的 Teams（mine）", () => {
     const btn = screen.getByRole("button", { name: "创建团队" });
     expect(btn.closest(".card")!.textContent).toContain("创建你的第一个团队"); // hero 大卡内
     expect(screen.queryByLabelText("团队名称")).toBeNull(); // 无名字输入步
-    expect(screen.getByText(/已有链上身份？导入/)).toBeTruthy(); // 低调链接
   });
 
   it("列表渲染：团队卡片（名称/服务数/入口）+ 整卡点击进详情", async () => {
@@ -271,10 +270,10 @@ describe("主路径字样残留扫描", () => {
   it("MyTeamsStep/CreateTeamButton/TeamHome 组件源码无「认领/Agent ID」主路径字样（高级折叠引用除外）", () => {
     const content = readFileSync(join(__dirname, "..", "src", "pages", "ProviderWorkbench.tsx"), "utf-8");
     const start = content.indexOf("export function MyTeamsStep");
-    const end = content.length; // ClaimStep 在文件前部；Teams 组件在后段——取 MyTeamsStep 起到文件尾
+    const end = content.length;
     const teamsBlock = content.slice(start, end);
     expect(teamsBlock.length).toBeGreaterThan(100);
-    // 主路径组件区不含主路径字样（高级折叠 summary「导入已有身份（高级）」与 ClaimStep 引用是允许的）
+    // 主路径组件区不含认领/Agent ID 字样
     const sanitized = teamsBlock
       .replace(/已有链上身份？导入[\s\S]*?\n      \)/g, "…");
     expect(sanitized).not.toContain("认领");
@@ -346,25 +345,6 @@ describe("微调：创建按钮位置 + 整卡可点 + 发布页分组", () => {
 });
 
 describe("新用户动线四修正", () => {
-  it("空态无嵌套 details（高级导入拍平单层）；导入链接点击展开 ClaimStep", async () => {
-    render(
-      <WalletProvider>
-        <MyTeamsStep onOpenTeam={vi.fn()} onPublish={vi.fn()} />
-        <ConnectProbe />
-      </WalletProvider>
-    );
-    await connect();
-    await screen.findByText("创建你的第一个团队");
-    // hero 路径不使用 details 嵌套
-    expect(document.querySelectorAll("details").length).toBe(0);
-    // 导入链接展开
-    fireEvent.click(screen.getByText(/已有链上身份？导入/));
-    await waitFor(() => expect(document.body.textContent).toContain("Agent ID"));
-    // 展开后导入区本身不被 details 包裹（ClaimStep 内部的注册引导折叠属组件内部，非本区嵌套）
-    expect(document.querySelector("details > .card")).toBeNull();
-    expect([...document.querySelectorAll("details")].every((d) => !d.textContent?.includes("导入"))).toBe(true);
-  });
-
   it("成功落地 Team 详情：改名按钮在头部；改名提交幂等 POST /providers", async () => {
     // Team 详情 fixture（teams/170 已 mock）
     render(
