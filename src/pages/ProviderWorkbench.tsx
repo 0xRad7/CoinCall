@@ -1240,7 +1240,7 @@ export function WithdrawStep() {
 
 /* ============ Teams 形态：我的 Teams（新首步）+ Team 主页 ============ */
 
-/** 新首步：我的 Teams（连接钱包 → mine 列表 / 空态创建 / 认领降级折叠）。 */
+/** 新首步：我的 Teams（连接钱包 → mine 列表 / 空态创建 / 老身份导入折叠在高级区）。 */
 export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: number) => void; onPublish: (team: MyTeam) => void }) {
   const w = useWallet();
   const mine = useAsync(() => (w.address ? teamsApi.mine(w.address) : Promise.resolve(null)), [w.address]);
@@ -1384,7 +1384,7 @@ export function CreateTeamButton({ onCreated }: { onCreated?: (agentId: number) 
           {agentId != null && phase === "done" && (
             <SuccessBox>团队 #{agentId}「{name}」创建成功！收入将进你的钱包。</SuccessBox>
           )}
-          {cancelled && <WarnBox>你取消了签名（钱包弹窗里拒绝）。团队身份已创建但未绑定——展开下方「导入已有身份（高级）」输入 #{agentId} 完成认领，或稍后重试创建。</WarnBox>}
+          {cancelled && <WarnBox>你取消了签名（钱包弹窗里拒绝）。团队身份已创建但未绑定——展开下方「导入已有身份（高级）」输入 #{agentId} 完成导入，或稍后重试创建。</WarnBox>}
           {error != null && <ErrorBox error={error} />}
         </div>
       ) : (
@@ -1412,7 +1412,7 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
           <>
             <h3 style={{ marginTop: 12 }}>{t.team.display_name}</h3>
             <div className="dim mono" style={{ fontSize: 11, marginBottom: 10 }}>
-              team #{t.team.agent_id} · 认领钱包 {t.team.claim_wallet?.slice(0, 10) ?? "未认领"}… · 创建于 {t.team.created_at.slice(0, 19)}
+              team #{t.team.agent_id} · 服务收款钱包 {t.team.claim_wallet?.slice(0, 10) ?? "未绑定"}… · 创建于 {t.team.created_at.slice(0, 19)}
             </div>
             <div className="stat-grid">
               <div className="stat-card">
