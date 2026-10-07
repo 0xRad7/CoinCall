@@ -34,7 +34,7 @@ from coincall.wallet import LocalWallet
 DEFAULT_GATEWAY_URL = "http://127.0.0.1:8030"
 DEFAULT_CORE_URL = "http://127.0.0.1:8020"
 AUTH_WINDOW_S = 600  # 授权窗口（02 §5a：valid_before = now + 600s）
-HTTP_TIMEOUT_S = 30
+HTTP_TIMEOUT_S = 60  # 与 manifest timeout_ms 硬顶（60s，core 校验）对齐——AI 类上游冷启动可超 30s
 
 RECEIPT_HEADERS = ("X-Receipt-Id", "X-Charged-Raw", "X-Receipt-Sig")
 HTTP_NOT_MODIFIED = 304
