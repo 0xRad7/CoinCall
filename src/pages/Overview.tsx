@@ -1,9 +1,10 @@
-/** 总览页（默认，只读）：四卡 + degraded、Provider 收入榜（proof 外链）、服务目录、keeper 观测。 */
+/** 总览页（公共目录+决策视图，两端共用）：三段式骨架——指标排（证据成对）/ 收入榜 / 比价 / 目录 / keeper 观测。 */
 import { useState } from "react";
 import { coreApi, decisionApi, teamsApi, type DecisionRow, type ProofResponse } from "../api/core";
 import { gatewayApi } from "../api/gateway";
 import { useAsync } from "../lib/useAsync";
 import { AsyncSection, Badge, CopyButton, ErrorBox, Spinner, TxLink } from "../components/ui";
+import { EvidencePair, PageHeader, StatCard } from "../components/shell";
 import { gatewayCallUrl, fromRaw } from "../chain/constants";
 
 export default function Overview() {
@@ -18,34 +19,35 @@ export default function Overview() {
 
   return (
     <div>
-      <h1 className="page-title">总览</h1>
-      <p className="page-sub">平台全局状态：链上 GMV（唯一真相）、服务目录、keeper 结算观测。数据每 30s 内随访问刷新。</p>
+      <PageHeader
+        title="总览"
+        sub="平台全局状态：链上 GMV（唯一真相）、服务目录、keeper 结算观测。数据每 30s 内随访问刷新。"
+        actions={
+          <a className="btn small secondary" href="https://scan.bohr.life" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+            区块浏览器 ↗
+          </a>
+        }
+      />
 
-      {/* 四卡 */}
+      {/* 指标排（四卡，关键数字独立层级 + 证据成对） */}
       <AsyncSection state={overview}>
         {(o) => (
           <>
             <div className="stat-grid">
-              <div className="stat-card">
-                <div className="k">链上 GMV（Charged 总额）</div>
-                <div className="v num">{o.gmv} USDT</div>
-                <div className="s num">raw={o.gmv_raw} · {o.charged_count} 笔</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">调用笔数（成功 / 中止）</div>
-                <div className="v num">{o.calls_success_total ?? "-"} / {o.calls_aborted_total ?? "-"}</div>
-                <div className="s">中止 = Provider 失败未扣款</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">服务（在售/全部）</div>
-                <div className="v num">{o.services_active} / {o.services_total}</div>
-                <div className="s">paused 不参与调用</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">Provider（有收入/注册）</div>
-                <div className="v num">{o.providers_with_revenue} / {o.providers_registered}</div>
-                <div className="s num">已同步到区块 {o.synced_to_block}</div>
-              </div>
+              <StatCard
+                k="链上 GMV（Charged 总额）"
+                value={
+                  <>
+                    {o.gmv}
+                    <span className="unit">USDT</span>
+                  </>
+                }
+                sub={`raw=${o.gmv_raw} · ${o.charged_count} 笔`}
+                evidence={<EvidencePair hash={`charged_count=${o.charged_count} · synced_to_block=${o.synced_to_block}`} href="https://scan.bohr.life" label="去 scan.bohr.life 核对 Charged 事件" />}
+              />
+              <StatCard k="调用笔数（成功 / 中止）" value={`${o.calls_success_total ?? "-"} / ${o.calls_aborted_total ?? "-"}`} sub="中止 = Provider 失败未扣款" />
+              <StatCard k="服务（在售/全部）" value={`${o.services_active} / ${o.services_total}`} sub="paused 不参与调用" />
+              <StatCard k="Provider（有收入/注册）" value={`${o.providers_with_revenue} / ${o.providers_registered}`} sub={`已同步到区块 ${o.synced_to_block}`} />
             </div>
             {o.degraded.length > 0 && (
               <div className="alert warn">
@@ -158,23 +160,22 @@ export default function Overview() {
         <AsyncSection state={keeper} empty="keeper 状态不可用">
           {(k) => (
             <div className="stat-grid" style={{ marginTop: 16 }}>
-              <div className="stat-card">
-                <div className="k">状态</div>
-                <div className="v" style={{ fontSize: 18 }}>
-                  {k.enabled && k.running ? <Badge kind="ok">运行中</Badge> : <Badge kind="err">停止</Badge>}
-                </div>
-                <div className="s num">批次 {k.batch_size} · 间隔 {k.flush_interval_s}s</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">待结算队列</div>
-                <div className="v num">{k.queue.pending}</div>
-                <div className="s num">done {k.queue.done} · failed {k.queue.failed} · expired {k.queue.expired}</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">累计链上入账</div>
-                <div className="v num">{fromRaw(k.cumulative_charged_raw)} USDT</div>
-                <div className="s num">{k.cumulative_charged_count} 笔 · raw={k.cumulative_charged_raw}</div>
-              </div>
+              <StatCard
+                k="状态"
+                value={k.enabled && k.running ? <Badge kind="ok">运行中</Badge> : <Badge kind="err">停止</Badge>}
+                sub={`批次 ${k.batch_size} · 间隔 ${k.flush_interval_s}s`}
+              />
+              <StatCard k="待结算队列" value={k.queue.pending} sub={`done ${k.queue.done} · failed ${k.queue.failed} · expired ${k.queue.expired}`} />
+              <StatCard
+                k="累计链上入账"
+                value={
+                  <>
+                    {fromRaw(k.cumulative_charged_raw)}
+                    <span className="unit">USDT</span>
+                  </>
+                }
+                sub={`${k.cumulative_charged_count} 笔 · raw=${k.cumulative_charged_raw}`}
+              />
               <div className="stat-card">
                 <div className="k">最近一批</div>
                 <div style={{ fontSize: 13, marginTop: 6 }}>
@@ -267,13 +268,13 @@ function pct(x: number | null | undefined): string {
   return x == null ? "-" : `${Math.round(x * 100)}%`;
 }
 
-/** 四分量迷你条形（rev/ful/fb/fresh 各自 score_component） */
+/** 四分量迷你条形（rev/ful/fb/fresh 各自 score_component；配色纳入单色体系，随主题双态） */
 function ScoreBars({ row }: { row: DecisionRow }) {
   const parts: Array<{ key: string; label: string; v: number | null; w: number; color: string }> = [
-    { key: "rev", label: `收入 ${(row.components.revenue.score_component * 100).toFixed(0)}%`, v: row.components.revenue.score_component, w: 0.4, color: "#2f5fe0" },
-    { key: "ful", label: `履约 ${pct(row.components.fulfillment.score_component)}`, v: row.components.fulfillment.score_component, w: 0.25, color: "#178a50" },
-    { key: "fb", label: `反馈 ${pct(row.components.feedback.score_component)}`, v: row.components.feedback.score_component, w: 0.2, color: "#f5a623" },
-    { key: "fresh", label: `新鲜 ${pct(row.components.freshness.score_component)}`, v: row.components.freshness.score_component, w: 0.15, color: "#9b59b6" },
+    { key: "rev", label: `收入 ${(row.components.revenue.score_component * 100).toFixed(0)}%`, v: row.components.revenue.score_component, w: 0.4, color: "var(--chart-1)" },
+    { key: "ful", label: `履约 ${pct(row.components.fulfillment.score_component)}`, v: row.components.fulfillment.score_component, w: 0.25, color: "var(--chart-2)" },
+    { key: "fb", label: `反馈 ${pct(row.components.feedback.score_component)}`, v: row.components.feedback.score_component, w: 0.2, color: "var(--chart-3)" },
+    { key: "fresh", label: `新鲜 ${pct(row.components.freshness.score_component)}`, v: row.components.freshness.score_component, w: 0.15, color: "var(--chart-4)" },
   ];
   return (
     <div style={{ display: "flex", gap: 1, alignItems: "center", height: 8, width: 140, borderRadius: 4, overflow: "hidden", background: "var(--code-bg)" }} title={parts.map((p) => `${p.label}（权重 ${p.w}）`).join(" · ")}>
@@ -485,21 +486,24 @@ function CatalogTeamsAxis({ decisionMap }: { decisionMap: Map<string, DecisionRo
           <AsyncSection state={teamDetail} empty="团队不存在">
             {(t) => (
               <div className="stat-grid">
-                <div className="stat-card"><div className="k">收入</div><div className="v num">{fromRaw(BigInt(t.revenue.total_raw))}</div><div className="s num">{t.revenue.charged_count} 笔 · raw={t.revenue.total_raw}</div></div>
-                <div className="stat-card"><div className="k">服务数</div><div className="v num">{t.services.length}</div><div className="s">{t.team.display_name}</div></div>
-                <div className="stat-card">
-                  <div className="k">履约汇总</div>
-                  <div className="v num" style={{ fontSize: 18 }}>
-                    {(() => {
-                      const svcs = t.fulfillment.services;
-                      const ok = svcs.reduce((x, y) => x + y.calls_success, 0);
-                      const abort = svcs.reduce((x, y) => x + y.calls_aborted, 0);
-                      return `${ok + abort > 0 ? Math.round((ok / (ok + abort)) * 100) : 100}%`;
-                    })()}
-                  </div>
-                  <div className="s num">p95 最慢 {Math.max(0, ...t.fulfillment.services.map((x) => x.p95_ms))}ms</div>
-                </div>
-                <div className="stat-card"><div className="k">反馈</div><div className="v num" style={{ fontSize: 18 }}>{t.feedback.services.reduce((a, x) => a + x.count, 0)} 条</div><div className="s">验证付费评价</div></div>
+                <StatCard
+                  k="收入"
+                  value={fromRaw(BigInt(t.revenue.total_raw))}
+                  sub={`${t.revenue.charged_count} 笔 · raw=${t.revenue.total_raw}`}
+                  evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href="https://scan.bohr.life" label="链上 Charged 口径，去 scan 核对" />}
+                />
+                <StatCard k="服务数" value={t.services.length} sub={t.team.display_name} />
+                <StatCard
+                  k="履约汇总"
+                  value={(() => {
+                    const svcs = t.fulfillment.services;
+                    const ok = svcs.reduce((x, y) => x + y.calls_success, 0);
+                    const abort = svcs.reduce((x, y) => x + y.calls_aborted, 0);
+                    return `${ok + abort > 0 ? Math.round((ok / (ok + abort)) * 100) : 100}%`;
+                  })()}
+                  sub={`p95 最慢 ${Math.max(0, ...t.fulfillment.services.map((x) => x.p95_ms))}ms`}
+                />
+                <StatCard k="反馈" value={`${t.feedback.services.reduce((a, x) => a + x.count, 0)} 条`} sub="验证付费评价" />
               </div>
             )}
           </AsyncSection>
