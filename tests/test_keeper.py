@@ -20,9 +20,11 @@ import respx
 from eth_abi import encode as abi_encode
 from eth_utils import keccak
 
-from app.modules.calls import CallRecord, CallStore
+from app.modules.calls import CallRecord, CallStore, SettleStatus
 from app.modules.keeper import (
+    CHARGED_TOPIC0,
     BotChainSettleChain,
+    ChargeEvent,
     Keeper,
     SettleChainError,
     decode_charge_events,
@@ -1095,4 +1097,396 @@ async def test_client_submit_missing_tx_hash_raises() -> None:
     with pytest.raises(SettleChainError) as exc:
         await client.submit_batch([])
     assert "tx_hash" in str(exc.value)
+    await client.aclose()
+
+
+# ---- 审计 F-01 对账：Charged ↔ settle_queue（审计报告 §2 运营前置 1） --------
+
+RECON_TIP = 10_000
+RECON_BLOCK_TIME_S = 1.0
+
+
+def charged_event(
+    *,
+    provider: str = PROVIDER_WALLET,
+    from_: str = CONSUMER_A,
+    value: int = 10000,
+    nonce: str,
+) -> ChargeEvent:
+    return ChargeEvent(kind="charged", provider=provider, from_=from_, value=value, nonce=nonce)
+
+
+class FakeReconcileChain(FakeChain):
+    """对账通道 fake：线性块时间 + 按块放置的 Charged 事件回放（零网络）。"""
+
+    def __init__(
+        self,
+        charged_by_block: dict[int, list[ChargeEvent]] | None = None,
+        *,
+        tip: int = RECON_TIP,
+        block_time_s: float = RECON_BLOCK_TIME_S,
+        tip_ts: float = NOW,
+    ) -> None:
+        super().__init__()
+        self.tip = tip
+        self.block_time_s = block_time_s
+        self.tip_ts = tip_ts  # 链尖块时间戳
+        self.charged_by_block = dict(charged_by_block or {})
+        self.timestamp_probes: list[int] = []
+        self.fetched_windows: list[tuple[int, int]] = []
+
+    def ts_of(self, block: int) -> float:
+        return self.tip_ts - (self.tip - block) * self.block_time_s
+
+    async def latest_block(self) -> int:
+        return self.tip
+
+    async def block_timestamp(self, block_number: int) -> int:
+        self.timestamp_probes.append(block_number)
+        return int(self.ts_of(max(0, block_number)))
+
+    async def charged_events(self, from_block: int, to_block: int) -> list[ChargeEvent]:
+        self.fetched_windows.append((from_block, to_block))
+        return [
+            event
+            for block in sorted(self.charged_by_block)
+            if from_block <= block <= to_block
+            for event in self.charged_by_block[block]
+        ]
+
+
+def mark_all(store: CallStore, *call_ids: str, status: SettleStatus) -> None:
+    for call_id in call_ids:
+        store.mark_settle(call_id, status)
+
+
+async def test_reconcile_all_matched_ok(tmp_path: Path) -> None:
+    """全匹配：3 done 行 ↔ 3 Charged（四元组一致）→ ok=true。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    for i in range(1, 4):
+        seed_settle(store, call_id=f"call_{i}", nonce=nonce_of(i))
+    mark_all(store, "call_1", "call_2", "call_3", status=SettleStatus.DONE)
+    chain = FakeReconcileChain({9500: [charged_event(nonce=nonce_of(i)) for i in range(1, 4)]})
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    report = await keeper.reconcile(window_hours=2.0)
+
+    assert report["ok"] is True
+    assert report["queue_rows"] == 3 and report["chain_events"] == 3
+    assert report["matched"] == 3
+    assert report["queue_only"] == [] and report["chain_only"] == []
+    assert report["field_mismatch"] == [] and report["wallet_unresolved"] == 0
+    assert report["window"]["to_block"] == RECON_TIP
+    assert report["window"]["from_block_explicit"] is False
+    # cutoff=NOW-7200 → 二分应落在块 10000-7200=2800（块时间 1s）
+    assert report["window"]["from_block"] == RECON_TIP - 7200
+    # 状态摘要随对账刷新（/internal/keeper/status 直读）
+    assert keeper.status_snapshot()["last_reconcile"]["ok"] is True
+    store.close()
+
+
+async def test_reconcile_done_row_without_charged_alarms(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """queue_only：done 行链上无 Charged → ok=false + WARNING 逐笔明细（F-01 正靶）。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_hit", nonce=nonce_of(1))
+    seed_settle(store, call_id="call_miss", nonce=nonce_of(2))
+    mark_all(store, "call_hit", "call_miss", status=SettleStatus.DONE)
+    chain = FakeReconcileChain({9500: [charged_event(nonce=nonce_of(1))]})
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    with caplog.at_level(logging.WARNING, logger="coincall.gateway.keeper"):
+        report = await keeper.reconcile(window_hours=2.0)
+
+    assert report["ok"] is False
+    assert report["matched"] == 1
+    assert report["queue_only"] == [
+        {"call_id": "call_miss", "nonce": nonce_of(2), "status": "done"}
+    ]
+    assert "F-01" in caplog.text and "call_miss" in caplog.text and nonce_of(2) in caplog.text
+    store.close()
+
+
+async def test_reconcile_chain_only_alarms(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """chain_only：链上 Charged 队列无对应（外部直调/空投面）→ ok=false。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_1", nonce=nonce_of(1))
+    mark_all(store, "call_1", status=SettleStatus.DONE)
+    chain = FakeReconcileChain(
+        {9000: [charged_event(nonce=nonce_of(1))], 9500: [charged_event(nonce=nonce_of(99))]}
+    )
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    with caplog.at_level(logging.WARNING, logger="coincall.gateway.keeper"):
+        report = await keeper.reconcile(window_hours=2.0)
+
+    assert report["ok"] is False
+    assert report["chain_only"] == [nonce_of(99)]
+    assert nonce_of(99) in caplog.text
+    store.close()
+
+
+async def test_reconcile_field_mismatch_is_f01_core_signal(tmp_path: Path) -> None:
+    """field_mismatch：nonce 对上但 provider 记错（签名不绑定收款方）→ ok=false。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_1", nonce=nonce_of(1))
+    mark_all(store, "call_1", status=SettleStatus.DONE)
+    # 链上 Charged 的 provider ≠ resolver 解析的 agentWallet：F-01 场景（operator 记错收款方）
+    chain = FakeReconcileChain({9000: [charged_event(provider=CONSUMER_B, nonce=nonce_of(1))]})
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    report = await keeper.reconcile(window_hours=2.0)
+
+    assert report["ok"] is False and report["matched"] == 0
+    assert len(report["field_mismatch"]) == 1
+    mismatch = report["field_mismatch"][0]
+    assert mismatch["call_id"] == "call_1" and mismatch["nonce"] == nonce_of(1)
+    assert mismatch["diff"]["provider"] == {
+        "queue": PROVIDER_WALLET,
+        "chain": CONSUMER_B,
+    }
+    store.close()
+
+
+async def test_reconcile_pending_and_failed_rows_do_not_false_alarm(tmp_path: Path) -> None:
+    """pending（在途）/failed（坏账）/expired（作废）行链上无事件属预期：入明细不翻 ok。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_p", nonce=nonce_of(1))  # pending（缺省）
+    seed_settle(store, call_id="call_f", nonce=nonce_of(2))
+    seed_settle(store, call_id="call_e", nonce=nonce_of(3))
+    mark_all(store, "call_f", status=SettleStatus.FAILED)
+    mark_all(store, "call_e", status=SettleStatus.EXPIRED)
+    chain = FakeReconcileChain()
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    report = await keeper.reconcile(window_hours=2.0)
+
+    assert report["ok"] is True  # 无 done 行缺事件、无 chain_only、无错位
+    assert {item["status"] for item in report["queue_only"]} == {"pending", "failed", "expired"}
+    store.close()
+
+
+async def test_reconcile_pending_nonce_already_charged_reported(tmp_path: Path) -> None:
+    """pending 行的 nonce 已在链上（错过 usedNonces 恢复探测）→ 记数不告警。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_p", nonce=nonce_of(1))  # 保持 pending
+    chain = FakeReconcileChain({9000: [charged_event(nonce=nonce_of(1))]})
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    report = await keeper.reconcile(window_hours=2.0)
+
+    assert report["ok"] is True
+    assert report["pending_but_charged"] == [{"call_id": "call_p", "nonce": nonce_of(1)}]
+    assert report["matched"] == 1
+    store.close()
+
+
+async def test_reconcile_empty_window_ok(tmp_path: Path) -> None:
+    """空窗（零队列行 + 零链上事件）→ ok=true。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    chain = FakeReconcileChain()
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    report = await keeper.reconcile(window_hours=24.0)
+
+    assert report["ok"] is True
+    assert report["queue_rows"] == 0 and report["chain_events"] == 0
+    # cutoff=NOW-24h 比假链创世块（tip_ts=NOW，仅 10000 块）还老 → 二分钳到 0
+    assert report["window"]["from_block"] == 0
+    store.close()
+
+
+async def test_reconcile_from_block_override_pins_window(tmp_path: Path) -> None:
+    """from_block 显式覆写：链窗从该块起、cutoff 钉到该块时间戳（全量对账口径）。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_1", nonce=nonce_of(1))
+    mark_all(store, "call_1", status=SettleStatus.DONE)
+    chain = FakeReconcileChain({500: [charged_event(nonce=nonce_of(1))], 9500: []})
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    report = await keeper.reconcile(window_hours=2.0, from_block=500)
+
+    assert report["window"]["from_block"] == 500
+    assert report["window"]["from_block_explicit"] is True
+    assert report["window"]["cutoff_ts"] == chain.ts_of(500)
+    assert chain.fetched_windows == [(500, RECON_TIP)]
+    assert report["ok"] is True and report["matched"] == 1
+    store.close()
+
+
+async def test_reconcile_without_chain_raises(tmp_path: Path) -> None:
+    """未装配链上通道（keeper_enabled=false 惰性实例）→ SettleChainError（端点 502）。"""
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    keeper = Keeper(store=store)
+    with pytest.raises(SettleChainError, match="未装配"):
+        await keeper.reconcile(window_hours=24.0)
+    store.close()
+
+
+async def test_reconcile_endpoint_and_status_summary(tmp_path: Path, settings: object) -> None:
+    """/internal/keeper/reconcile 端点：响应形状 + status.last_reconcile 摘要挂载。"""
+    from app.core.config import Settings
+    from tests.conftest import gateway_serve
+
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_1", nonce=nonce_of(1))
+    mark_all(store, "call_1", status=SettleStatus.DONE)
+    chain = FakeReconcileChain({9000: [charged_event(nonce=nonce_of(1))]})
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, now=lambda: NOW)
+
+    keeper_settings = Settings(
+        duckdb_path=":memory:",
+        pay_vault_address=VAULT,
+        chain_id=968,
+        keeper_enabled=False,
+    )
+    async with gateway_serve(keeper_settings, keeper=keeper) as (client, _app):  # type: ignore[arg-type]
+        resp = await client.get("/internal/keeper/reconcile", params={"window_hours": 2})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True and body["matched"] == 1
+        assert set(body) >= {
+            "window",
+            "queue_rows",
+            "chain_events",
+            "matched",
+            "queue_only",
+            "chain_only",
+            "ok",
+            "field_mismatch",
+        }
+
+        status = (await client.get("/internal/keeper/status")).json()
+        assert status["last_reconcile"]["ok"] is True
+        assert status["last_reconcile"]["window"]["to_block"] == RECON_TIP
+    store.close()
+
+
+async def test_reconcile_endpoint_maps_chain_error_to_502(tmp_path: Path, settings: object) -> None:
+    """链上取数失败 → SettleChainError → HTTP 502（监控脚本可区分"不平"与"取不到"）。"""
+    from app.core.config import Settings
+    from tests.conftest import gateway_serve
+
+    class BrokenChain(FakeReconcileChain):
+        async def latest_block(self) -> int:
+            raise SettleChainError("bot-chain-api 不可达")
+
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    keeper = Keeper(store=store, chain=BrokenChain(), wallet_for=wallet_for, now=lambda: NOW)
+    keeper_settings = Settings(
+        duckdb_path=":memory:",
+        pay_vault_address=VAULT,
+        chain_id=968,
+        keeper_enabled=False,
+    )
+    async with gateway_serve(keeper_settings, keeper=keeper) as (client, _app):  # type: ignore[arg-type]
+        resp = await client.get("/internal/keeper/reconcile")
+        assert resp.status_code == 502
+        assert "不可达" in resp.json()["detail"]
+    store.close()
+
+
+async def test_reconcile_api_mode_via_bot_chain_api(tmp_path: Path) -> None:
+    """api 模式全路径：/chain/info 定链尖 → /chain/blocks 二分 → /contracts/logs
+    分页（snake→camel 键形转换复用 _receipt_log_shape）→ 对账（含 chain_only）。"""
+    import time as time_mod
+
+    tip = 12_000
+    tip_ts = time_mod.time()  # 真实时钟：与 SQL now() 同域，近窗行/块窗一致覆盖
+    block_time = 1.0
+    logs_requests: list[dict[str, str]] = []
+    charged_logs = [
+        _api_raw_log(
+            log_charged(provider=PROVIDER_WALLET, from_=CONSUMER_A, value=10000, nonce=nonce_of(1)),
+            tx_hash="0x" + "aa" * 32,
+            block_number=9000,
+        ),
+        _api_raw_log(  # 链上有队列无：外部直调（operator 绕过网关）
+            log_charged(provider=PROVIDER_WALLET, from_=CONSUMER_B, value=7, nonce=nonce_of(99)),
+            tx_hash="0x" + "bb" * 32,
+            block_number=9500,
+        ),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/chain/info":
+            return httpx.Response(200, json={"block_number": tip, "block_interval_s": 1.0})
+        if path.startswith("/api/v1/chain/blocks/"):
+            n = int(path.rsplit("/", 1)[1])
+            return httpx.Response(
+                200, json={"number": n, "timestamp": int(tip_ts - (tip - n) * block_time)}
+            )
+        assert path == "/api/v1/contracts/logs"
+        params = dict(request.url.params)
+        logs_requests.append(params)
+        assert params["address"] == VAULT and params["topic0"] == CHARGED_TOPIC0
+        fb, tb = int(params["from_block"]), int(params["to_block"])
+        return httpx.Response(
+            200,
+            json={
+                "address": VAULT,
+                "topic0": CHARGED_TOPIC0,
+                "from_block": fb,
+                "to_block": tb,
+                "count": 2,
+                "truncated": False,
+                "logs": [log for log in charged_logs if fb <= log["block_number"] <= tb],
+            },
+        )
+
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    seed_settle(store, call_id="call_1", nonce=nonce_of(1))
+    mark_all(store, "call_1", status=SettleStatus.DONE)
+    chain = BotChainSettleChain(
+        base_url=BOTCHAIN,
+        rpc_url="http://rpc.test/",
+        pay_vault=VAULT,
+        operator_address=OPERATOR,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        mode="api",
+    )
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for)
+
+    report = await keeper.reconcile(window_hours=2.0)
+
+    # 7200s 窗 @1s 块 → 起点 ≈ 4800（±测试耗时秒级），跨 >5000 块 → 5000 块/页分 2 页
+    assert len(logs_requests) == 2
+    assert report["mode"] == "api"
+    assert report["window"]["to_block"] == tip
+    assert tip - 7210 <= report["window"]["from_block"] <= tip - 7190
+    assert report["matched"] == 1 and report["chain_only"] == [nonce_of(99)]
+    assert report["ok"] is False  # 外部直调 Charged → 告警
+    await chain.aclose()
+    store.close()
+
+
+async def test_reconcile_direct_mode_charged_events_zero_api() -> None:
+    """direct 模式 charged_events：走 _fetch_logs（web3 单点注入），零 bot-chain-api 触达。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"direct 模式不应触达 bot-chain-api: {request.url}")
+
+    class ProbingClient(BotChainSettleChain):
+        async def _fetch_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
+            assert from_block == 9 and to_block == 9
+            return [
+                log_charged(
+                    provider=PROVIDER_WALLET, from_=CONSUMER_A, value=10000, nonce=nonce_of(3)
+                )
+            ]
+
+    client = ProbingClient(
+        base_url=BOTCHAIN,
+        rpc_url="http://rpc.test/",
+        pay_vault=VAULT,
+        operator_address=OPERATOR,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    events = await client.charged_events(9, 9)
+    assert len(events) == 1 and events[0].kind == "charged"
+    assert events[0].value == 10000 and events[0].nonce == nonce_of(3)
     await client.aclose()

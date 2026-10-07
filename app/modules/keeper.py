@@ -29,16 +29,16 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Protocol, cast
 
 import httpx
-from eth_utils import to_checksum_address
+from eth_utils import keccak, to_checksum_address
 from web3 import AsyncHTTPProvider, AsyncWeb3
 from web3.middleware import ExtraDataToPOAMiddleware
-from web3.types import HexStr, LogReceipt
+from web3.types import FilterParams, HexStr, LogReceipt
 
 from app.core.abis import charge_batch_abi, event_abi, view_abi
 from app.modules.calls import CallStatus, CallStore, SettleStatus
@@ -58,6 +58,18 @@ HTTP_OK = 200
 HTTP_NOT_FOUND = 404
 #: api 模式块窗拉日志的单次上限（对齐 bot-chain-api contracts.py MAX_LOGS_LIMIT）
 LOGS_FETCH_LIMIT = 5000
+
+# ---- 审计 F-01 缓解：Charged 事件 ↔ settle_queue 对账（payvault-security-audit §2 前置 1）----
+
+#: Charged 事件签名 topic0（eth_getLogs 服务端过滤，只拉 Charged 不拉 ChargeFailed）
+CHARGED_TOPIC0 = "0x" + keccak(text="Charged(address,address,uint256,bytes32)").hex()
+#: 对账块窗分页大小（对齐 bot-chain-api contracts.py GETLOGS_WINDOW_LIMIT=5000 块/窗）
+RECONCILE_PAGE_BLOCKS = 5000
+#: 二分找 cutoff 块时假设的块时间下界（秒）：真实链 interval ≥ 该值即窗口覆盖完整，
+#: 搜索范围 = tip - window_s/MIN_BLOCK_TIME_S（防全链二分触达远古块头）
+MIN_BLOCK_TIME_S = 0.1
+#: 二分块时间戳探测次数上限（防异常链高 runaway；log2(2^64) 远够）
+BLOCK_PROBE_LIMIT = 64
 
 REASON_TRANSFER_FAILED = "transfer_failed"
 REASON_NOT_IN_WINDOW = "not_in_window"
@@ -137,7 +149,7 @@ def decode_charge_events(logs: list[dict[str, Any]], pay_vault: str) -> list[Cha
 
 
 class SettleChain(Protocol):
-    """keeper 的链上通道（提交/回执/探测；单测全 fake）。"""
+    """keeper 的链上通道（提交/回执/探测/对账取数；单测全 fake）。"""
 
     async def submit_batch(self, calls: list[dict[str, Any]]) -> str: ...
 
@@ -146,6 +158,12 @@ class SettleChain(Protocol):
     async def receipt_logs(self, tx_hash: str) -> list[dict[str, Any]]: ...
 
     async def is_nonce_used(self, nonce: str) -> bool: ...
+
+    async def latest_block(self) -> int: ...
+
+    async def block_timestamp(self, block_number: int) -> int: ...
+
+    async def charged_events(self, from_block: int, to_block: int) -> list[ChargeEvent]: ...
 
 
 def _plain_log(log: Any) -> dict[str, Any]:
@@ -270,11 +288,8 @@ class BotChainSettleChain:
 
     async def _fetch_receipt(self, tx_hash: str) -> dict[str, Any]:
         """direct 模式单点回执读取（单测 override 此处即可零网络；C-02 模式）。"""
-        if self._w3 is None:
-            w3 = AsyncWeb3(AsyncHTTPProvider(self._rpc_url))
-            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)  # POA extraData 超 32B
-            self._w3 = w3
-        receipt = await self._w3.eth.get_transaction_receipt(HexStr(tx_hash))
+        w3 = self._ensure_w3()
+        receipt = await w3.eth.get_transaction_receipt(HexStr(tx_hash))
         return dict(receipt)
 
     async def _fetch_tx_status(self, tx_hash: str) -> dict[str, Any] | None:
@@ -327,6 +342,90 @@ class BotChainSettleChain:
             if str(log.get("transaction_hash", "")).lower() == want
         ]
 
+    # ---- 审计 F-01 对账取数 B：Charged 事件块窗读取（只读，不发交易） ----
+
+    def _ensure_w3(self) -> AsyncWeb3:
+        if self._w3 is None:
+            w3 = AsyncWeb3(AsyncHTTPProvider(self._rpc_url))
+            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)  # POA extraData 超 32B
+            self._w3 = w3
+        return self._w3
+
+    async def latest_block(self) -> int:
+        """链尖块号：direct=本仓 web3；api=bot-chain-api /chain/info.block_number。"""
+        if self.mode == "api":
+            try:
+                resp = await self._http.get(f"{self.base_url}/api/v1/chain/info")
+            except httpx.HTTPError as exc:
+                raise SettleChainError(f"chain/info 拉取失败: {exc}") from exc
+            if resp.status_code != HTTP_OK:
+                raise SettleChainError(f"chain/info 被拒({resp.status_code}): {resp.text[:200]}")
+            return int(resp.json()["block_number"])
+        return int(await self._ensure_w3().eth.block_number)
+
+    async def block_timestamp(self, block_number: int) -> int:
+        """块时间戳（unix 秒）：direct=web3 get_block；api=/chain/blocks/{n}.timestamp。"""
+        if self.mode == "api":
+            try:
+                resp = await self._http.get(f"{self.base_url}/api/v1/chain/blocks/{block_number}")
+            except httpx.HTTPError as exc:
+                raise SettleChainError(f"chain/blocks 拉取失败: {exc}") from exc
+            if resp.status_code != HTTP_OK:
+                raise SettleChainError(f"chain/blocks 被拒({resp.status_code}): {resp.text[:200]}")
+            return int(resp.json()["timestamp"])
+        block = await self._ensure_w3().eth.get_block(block_number)
+        return int(block["timestamp"])
+
+    async def charged_events(self, from_block: int, to_block: int) -> list[ChargeEvent]:
+        """块窗 [from_block, to_block] 内 PayVault 的 Charged 事件（已解码；只读）。
+
+        窗口按 RECONCILE_PAGE_BLOCKS 分页：api 模式 bot-chain-api 限 5000 块/窗
+        （contracts.py GETLOGS_WINDOW_LIMIT），direct 模式同口径分页防节点端范围限流。
+        """
+        logs: list[dict[str, Any]] = []
+        cursor = max(0, from_block)
+        while cursor <= to_block:
+            page_to = min(cursor + RECONCILE_PAGE_BLOCKS - 1, to_block)
+            logs.extend(await self._charged_logs_page(cursor, page_to))
+            cursor = page_to + 1
+        events = decode_charge_events(logs, self.pay_vault)
+        return [e for e in events if e.kind == "charged"]
+
+    async def _charged_logs_page(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
+        """单页原始日志：api=/contracts/logs（snake→camel 复用 _receipt_log_shape）；
+        direct=本仓 web3 eth_getLogs（_fetch_logs 单点，单测 override 零网络）。"""
+        if self.mode == "api":
+            try:
+                resp = await self._http.get(
+                    f"{self.base_url}/api/v1/contracts/logs",
+                    params={
+                        "address": self.pay_vault,
+                        "from_block": from_block,
+                        "to_block": to_block,
+                        "topic0": CHARGED_TOPIC0,
+                        "limit": LOGS_FETCH_LIMIT,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                raise SettleChainError(f"contracts/logs 拉取失败: {exc}") from exc
+            if resp.status_code != HTTP_OK:
+                raise SettleChainError(
+                    f"contracts/logs 被拒({resp.status_code}): {resp.text[:200]}"
+                )
+            return [_receipt_log_shape(log) for log in resp.json().get("logs", [])]
+        return await self._fetch_logs(from_block, to_block)
+
+    async def _fetch_logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
+        """direct 模式单点 eth_getLogs（单测 override 此处即可零网络；C-02 模式）。"""
+        criteria = {
+            "fromBlock": from_block,
+            "toBlock": to_block,
+            "address": to_checksum_address(self.pay_vault),
+            "topics": [HexStr(CHARGED_TOPIC0)],
+        }
+        raw = await self._ensure_w3().eth.get_logs(cast(FilterParams, criteria))
+        return [_plain_log(entry) for entry in raw]
+
 
 @dataclass
 class KeeperMetrics:
@@ -337,6 +436,8 @@ class KeeperMetrics:
     cumulative_charged_count: int = 0
     last_batch: dict[str, Any] | None = None
     last_error: str | None = None
+    #: 最近一次 F-01 对账摘要（GET /internal/keeper/reconcile 按需触发时刷新）
+    last_reconcile: dict[str, Any] | None = None
 
 
 def settle_counts(store: CallStore) -> dict[str, int]:
@@ -355,6 +456,100 @@ def _auth_of(row: dict[str, Any]) -> dict[str, Any]:
     if isinstance(auth, str):
         auth = json.loads(auth)
     return dict(auth)
+
+
+def reconcile_charged(
+    rows: list[dict[str, Any]],
+    wallets: Mapping[str, str | None],
+    events: Sequence[ChargeEvent],
+) -> dict[str, Any]:
+    """审计 F-01 核心对账（纯函数）：settle 行 ↔ Charged 事件逐笔比对。
+
+    口径 = 部署冒烟 charged_matches_queue 同款四元组 (provider, from, value, nonce)——
+    nonce 是消费者授权唯一键（先按 nonce 归属），其余三元组不一致即 field_mismatch
+    （F-01 正靶：签名不绑定收款方，provider 记错只有这里能抓到）。
+
+    告警语义（ok=false 判据，避免在途/坏账常态误报）：
+    - queue_only 中 status=done 的行：done ⇒ 链上必有 Charged（mark_done 只在 Charged
+      事件或 usedNonces 已烧后落库），没有即队列/落库被污染；
+    - chain_only 任何一笔：外部直调/operator 绕过网关的 Charged（含空投面）；
+    - field_mismatch 任何一笔：nonce 对上但 provider/from/value 与队列不一致。
+    pending/failed/expired 行链上无事件属预期（在途/坏账/作废），列入 queue_only
+    明细但不翻 ok；pending 行的 nonce 已在链上（错过恢复探测）单列 pending_but_charged
+    记数不告警。
+    """
+    by_nonce: dict[str, dict[str, Any]] = {}
+    dup_nonces: list[str] = []
+    for row in rows:
+        auth = _auth_of(row)
+        nonce = str(auth["nonce"]).lower()
+        if nonce in by_nonce:
+            dup_nonces.append(nonce)
+            continue
+        by_nonce[nonce] = {
+            "call_id": str(row["call_id"]),
+            "status": str(row["status"]),
+            "from": str(auth["from"]),
+            "value": int(auth["value"]),
+        }
+    charged = [e for e in events if e.kind == "charged" and e.nonce is not None]
+
+    matched = 0
+    chain_only: list[str] = []
+    field_mismatch: list[dict[str, Any]] = []
+    pending_but_charged: list[dict[str, str]] = []
+    hit: set[str] = set()
+    for event in charged:
+        key = str(event.nonce).lower()
+        entry = by_nonce.get(key)
+        if entry is None:
+            chain_only.append(str(event.nonce))
+            continue
+        hit.add(key)
+        wallet = wallets.get(entry["call_id"])
+        diff: dict[str, Any] = {}
+        if entry["from"].lower() != event.from_.lower():
+            diff["from"] = {"queue": entry["from"], "chain": event.from_}
+        if wallet is not None and wallet.lower() != event.provider.lower():
+            diff["provider"] = {"queue": wallet, "chain": event.provider}
+        if event.value is not None and entry["value"] != int(event.value):
+            diff["value"] = {"queue": entry["value"], "chain": int(event.value)}
+        if diff:
+            field_mismatch.append(
+                {
+                    "call_id": entry["call_id"],
+                    "nonce": event.nonce,
+                    "status": entry["status"],
+                    "diff": diff,
+                }
+            )
+            continue
+        matched += 1
+        if entry["status"] == SettleStatus.PENDING.value:
+            pending_but_charged.append({"call_id": entry["call_id"], "nonce": str(event.nonce)})
+
+    queue_only = [
+        {"call_id": entry["call_id"], "nonce": nonce, "status": entry["status"]}
+        for nonce, entry in sorted(by_nonce.items())
+        if nonce not in hit
+    ]
+    ok = (
+        not chain_only
+        and not field_mismatch
+        and not any(item["status"] == SettleStatus.DONE.value for item in queue_only)
+    )
+    return {
+        "queue_rows": len(rows),
+        "chain_events": len(charged),
+        "matched": matched,
+        "queue_only": queue_only,
+        "chain_only": chain_only,
+        "field_mismatch": field_mismatch,
+        "pending_but_charged": pending_but_charged,
+        "queue_dup_nonces": dup_nonces,
+        "wallet_unresolved": sum(1 for wallet in wallets.values() if wallet is None),
+        "ok": ok,
+    }
 
 
 class Keeper:
@@ -639,6 +834,110 @@ class Keeper:
             "坏账落表（settle=failed + calls=bad_debt）: call=%s consumer=%s", call_id, consumer
         )
 
+    # ---- 审计 F-01 对账（按需触发，与结算主循环零耦合；纯只读） ----------------
+
+    async def reconcile(
+        self,
+        *,
+        window_hours: float = 24.0,
+        from_block: int | None = None,
+    ) -> dict[str, Any]:
+        """Charged 链上事件 ↔ settle_queue 近窗行逐笔对账（审计 F-01 缓解）。
+
+        纯只读：不改 settle_queue 状态、不发交易、不触碰结算循环。两侧窗口共用同一
+        cutoff：缺省 now-window_hours（链侧起点经块时间戳二分定位 from_block）；
+        from_block 显式覆写时 cutoff 钉到该块时间戳（部署块起点全量对账用）。
+        不平（done 无 Charged / 链上有队列无 / 四元组错位）即 WARNING 逐笔告警。
+        """
+        chain = self.chain
+        if chain is None:
+            raise SettleChainError(
+                "keeper 未装配链上通道（COINCALL_KEEPER_ENABLED=false），对账不可用"
+            )
+        window_s = window_hours * 3600.0
+        cutoff_ts = self._now() - window_s
+        tip = await chain.latest_block()
+        if from_block is not None:
+            explicit = True
+            start_block = max(0, from_block)
+            cutoff_ts = float(await chain.block_timestamp(start_block))
+        else:
+            explicit = False
+            start_block = await self._block_at_or_after(chain, cutoff_ts, tip, window_s)
+        events = await chain.charged_events(start_block, tip)
+        # 队列侧窗口与 cutoff 对齐：from_block 覆写时换算回等效小时数（SQL 时钟域内过滤）
+        rows = self.store.settle_rows_since(hours=max(0.0, (self._now() - cutoff_ts) / 3600.0))
+        wallets: dict[str, str | None] = {}
+        for row in rows:
+            if self._wallet_for is None:
+                break
+            wallet = await self._wallet_for(row)
+            wallets[str(row["call_id"])] = str(wallet) if wallet is not None else None
+        report = reconcile_charged(rows, wallets, events)
+        report["mode"] = str(getattr(chain, "mode", "direct"))
+        report["window"] = {
+            "window_hours": window_hours,
+            "cutoff_ts": cutoff_ts,
+            "from_block": start_block,
+            "to_block": tip,
+            "from_block_explicit": explicit,
+        }
+        self.metrics.last_reconcile = {
+            "at": self._now(),
+            "ok": report["ok"],
+            "matched": report["matched"],
+            "queue_rows": report["queue_rows"],
+            "chain_events": report["chain_events"],
+            "queue_only": len(report["queue_only"]),
+            "chain_only": len(report["chain_only"]),
+            "field_mismatch": len(report["field_mismatch"]),
+            "window": dict(report["window"]),
+        }
+        if report["ok"]:
+            logger.info(
+                "F-01 对账通过: matched=%d/%d queue_rows=%d blocks=[%d,%d]",
+                report["matched"],
+                report["chain_events"],
+                report["queue_rows"],
+                start_block,
+                tip,
+            )
+        else:
+            logger.warning(
+                "F-01 对账不平（Charged ↔ settle_queue）: %s",
+                json.dumps(
+                    {
+                        "queue_only": report["queue_only"],
+                        "chain_only": report["chain_only"],
+                        "field_mismatch": report["field_mismatch"],
+                        "window": report["window"],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        return report
+
+    async def _block_at_or_after(
+        self, chain: SettleChain, cutoff_ts: float, tip: int, window_s: float
+    ) -> int:
+        """二分找第一个 timestamp ≥ cutoff 的块号（块时间戳单调）。
+
+        搜索范围钳在 [tip - window_s/MIN_BLOCK_TIME_S, tip]：真实链 interval ≥
+        MIN_BLOCK_TIME_S 时覆盖完整窗口，又不触达远古块头。
+        """
+        span = int(window_s / MIN_BLOCK_TIME_S) + 1
+        lo = max(0, tip - span)
+        hi = tip
+        for _ in range(BLOCK_PROBE_LIMIT):
+            if lo >= hi:
+                break
+            mid = (lo + hi) // 2
+            if float(await chain.block_timestamp(mid)) < cutoff_ts:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
     # ---- 可观测 ----
 
     def status_snapshot(self) -> dict[str, Any]:
@@ -649,6 +948,7 @@ class Keeper:
             "flush_interval_s": self._flush_interval,
             "queue": settle_counts(self.store),
             "last_batch": self.metrics.last_batch,
+            "last_reconcile": self.metrics.last_reconcile,
             "cumulative_charged_count": self.metrics.cumulative_charged_count,
             "cumulative_charged_raw": str(self.metrics.cumulative_charged_raw),
             "blacklisted_consumers": sorted(self._blacklist),

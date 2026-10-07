@@ -14,7 +14,6 @@ import json
 import logging
 import time
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -208,8 +207,7 @@ async def _admit_payment(
     # 服务端咽喉卡口：按钱包日累计（绕过 SDK 直打也绕不过；0=关闭）
     settings = request.app.state.settings
     if settings.wallet_daily_cap_raw > 0:
-        day = datetime.now(UTC).strftime("%Y-%m-%d")
-        spent_today = request.app.state.store.daily_spent_by_wallet(key_info.consumer_wallet, day)
+        spent_today = request.app.state.store.daily_spent_by_wallet(key_info.consumer_wallet)
         if spent_today + int(price_raw) > settings.wallet_daily_cap_raw:
             raise await _challenge(
                 request,

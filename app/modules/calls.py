@@ -186,17 +186,20 @@ class CallStore:
             "created_at": str(row[12]),
         }
 
-    def daily_spent_by_wallet(self, wallet: str, day: str) -> int:
-        """当日（UTC，YYYY-MM-DD）该钱包 success/settled 调用的扣款额之和。
+    def daily_spent_by_wallet(self, wallet: str) -> int:
+        """当日该钱包 success/settled 调用的扣款额之和。
 
         服务端咽喉卡口用：绕过客户端策略的攻击者也无法绕过（一切扣款经网关落此表）。
+        日键与 created_at 同为 DuckDB now() 时钟域（CAST(created_at AS DATE)=当前本地日）——
+        修 2026-10-08 缺陷：原 UTC 日期字符串匹配本地时间 created_at，CST 00:00-08:00
+        窗口日累计漏计（卡口变松）；两域统一后跨时区恒正确。
         """
         rows = self.conn.execute(
             "SELECT COALESCE(SUM(try_cast(amount_raw AS BIGINT)), 0) FROM calls "
             "WHERE lower(consumer_wallet) = lower(?) "
-            "AND CAST(created_at AS VARCHAR) LIKE ? "
+            "AND CAST(created_at AS DATE) = CAST(now() AS DATE) "
             "AND status IN ('success', 'settled')",
-            [wallet, day + "%"],
+            [wallet],
         ).fetchone()
         return int(rows[0] if rows else 0)
 
@@ -240,6 +243,30 @@ class CallStore:
                 "UPDATE settle_queue SET status = ? WHERE call_id = ?",
                 [status.value, call_id],
             )
+
+    def settle_rows_since(self, hours: float) -> list[dict[str, Any]]:
+        """近窗 settle 行（**全状态**：done/pending/failed/expired）——审计 F-01 对账取数 A。
+
+        窗口在 SQL 时钟域内计算（now() - to_microseconds(?)），与 created_at DEFAULT now()
+        同域，无跨时区换算口径问题；keeper.reconcile 与链上 Charged 事件逐笔比对。
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT call_id, provider_token_id, auth_json, status, created_at "
+                "FROM settle_queue WHERE created_at >= now() - to_microseconds(?) "
+                "ORDER BY created_at",
+                [int(hours * 3_600_000_000)],
+            ).fetchall()
+        return [
+            {
+                "call_id": r[0],
+                "provider_token_id": r[1],
+                "auth_json": r[2],
+                "status": r[3],
+                "created_at": str(r[4]),
+            }
+            for r in rows
+        ]
 
     def close(self) -> None:
         with self._lock:

@@ -61,7 +61,8 @@ uv run python scripts/demo_p1.py
 | GET | `/healthz` | 存活探针 |
 | GET | `/internal/stats/calls` | 每服务聚合：窗口计数/p50/p95 延迟/去重付款人/最近活动（`?window_hours=` 默认 168、上限 720，10 §1 冻结契约） |
 | GET | `/internal/receipts/pubkey` | 收据 Ed25519 公钥 hex（第三方离线验签入口，10 §2） |
-| GET | `/internal/keeper/status` | keeper 可观测：队列深度 / 最近一批 / 累计 Charged / 黑名单 / anchor 段 |
+| GET | `/internal/keeper/status` | keeper 可观测：队列深度 / 最近一批 / 累计 Charged / 黑名单 / `last_reconcile` / anchor 段 |
+| GET | `/internal/keeper/reconcile` | 审计 F-01 缓解对账：近窗 PayVault Charged 事件 ↔ settle_queue 逐笔 (provider, from, value, nonce) 比对（`?window_hours=` 默认 24 / `?from_block=` 覆写链侧起点）；不平即 `ok=false` + WARNING 告警，纯只读 |
 
 请求头：`X-Api-Key`（core 签发）、`X-PAYMENT`（base64 JSON：from/to/value/validAfter/
 validBefore/nonce/v/r/s）、`X-Idempotency-Key`（可选）。成功响应附
@@ -94,6 +95,18 @@ coincall-bot-chain-api `POST /contracts/send` 提交 `chargeWithSigBatch`
 本链恒定 20 gwei，≈0.001 BOT 级）；资金划转在 MockUSDT 层完成，operator 与资金
 安全无关（合约 I1）。kill 后重启：pending 笔自动续批；提交后宕机的笔经
 `usedNonces` 只读探测补记，不重放不丢单。
+
+**结算对账监控（审计 F-01 缓解，payvault-security-audit §2 运营前置 1）**：
+`GET /internal/keeper/reconcile`（按需/监控脚本拉取，不自动周期跑，与结算循环零
+耦合）把近窗 PayVault `Charged` 链上事件与 settle_queue 行按部署冒烟
+`charged_matches_queue` 同口径四元组 (provider, from, value, nonce) 逐笔比对——
+消费者 EIP-712 签名不绑定收款方（F-01），provider 记错只能靠这道事件级对账抓：
+`done` 行链上无 Charged、链上 Charged 队列无对应（外部直调）、或 nonce 对上但
+provider/from/value 错位，均 `ok=false` + WARNING 逐笔告警（pending/failed/expired
+行链上无事件属预期，入明细不告警）。链上取数尊重 `COINCALL_KEEPER_CHAIN_MODE`
+（direct=本仓 web3 eth_getLogs；api=bot-chain-api `/contracts/logs`，链尖/块时间戳
+经 `/chain/info`、`/chain/blocks/{n}`）；纯只读，最近一次摘要挂
+`/internal/keeper/status` 的 `last_reconcile`。
 
 ## 决策摘要锚定任务（10 §1/§2）
 
@@ -129,7 +142,7 @@ keeper 启用时随进程常驻的独立协程（`COINCALL_ANCHOR_INTERVAL_S`，
 | `app/modules/call_route.py` | 7 步时序编排（含 bad_debt 黑名单拦截） |
 | `app/modules/auth.py` / `manifest_client.py` | core 管理面客户端（apikey 校验 / manifest 缓存） |
 | `app/modules/keeper.py` | keeper 结算器（攒批/上链/回执分支/黑名单/恢复探测） |
-| `app/modules/keeper_route.py` | `GET /internal/keeper/status`（含 anchor 段） |
+| `app/modules/keeper_route.py` | `GET /internal/keeper/status`（含 anchor 段）+ `GET /internal/keeper/reconcile`（审计 F-01 对账） |
 | `app/modules/anchor.py` | 决策摘要锚定任务（anchor-pending→setMetadata→anchor-result） |
 | `app/core/abis/erc8004.py` | IdentityRegistry setMetadata ABI 副本切片（锚定用） |
 | `app/modules/stats_route.py` | `GET /internal/stats/calls`（窗口化扩展统计） |
