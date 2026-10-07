@@ -32,6 +32,7 @@ CHARGED_TOPIC0 = "0x7cbb811de7ebfc8f2d6195f3af05b0b12fc3e9c8b48a2dbf3ff1c4ef8129
 #: USDT 6 位精度（与 manifest TOKEN_DECIMALS 同源口径）
 TOKEN_DECIMALS = 6
 
+#: Charged proof 交易链接基址（缺省=测试网；运行时以 settings.explorer_tx_base 为准，主网 env 覆盖）
 EXPLORER_TX_BASE = "https://scan.bohr.life/tx/"
 
 STREAM_CHARGED = "charged_events"
@@ -472,15 +473,17 @@ def provider_proof(wallet: str, request: Request) -> ProofResponse:
     store: CoreStore = request.app.state.store
     events = store.charged_events_for_provider(normalized)
     total = sum(ev["value_raw"] for ev in events)
+    explorer_base: str = request.app.state.app_settings.explorer_tx_base
     return ProofResponse(
         provider_wallet=normalized,
         revenue_raw=total,
         revenue=to_amount(total),
         count=len(events),
+        explorer_url_base=explorer_base,
         events=[
             ProofEvent(
                 tx_hash=ev["tx_hash"],
-                explorer_url=EXPLORER_TX_BASE + ev["tx_hash"],
+                explorer_url=explorer_base + ev["tx_hash"],
                 log_index=ev["log_index"],
                 block_number=ev["block_number"],
                 value_raw=ev["value_raw"],

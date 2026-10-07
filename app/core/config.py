@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     identity_cache_ttl: float = 60.0
     # ---- P1-3：排行榜双源----
     gateway_base_url: str = "http://127.0.0.1:8030"
+    #: Charged proof 交易链接基址（默认测试网；主网 .env 覆盖为 scan.botchain.ai）
+    explorer_tx_base: str = "https://scan.bohr.life/tx/"
     #: Charged 增量同步的单次窗口（rpc.bohr.life getLogs 上限，同 bot-chain-api 口径）
     charged_sync_window: int = 5000
     #: 水位回补时的 reorg 安全余量（块）
