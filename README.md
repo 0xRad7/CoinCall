@@ -67,15 +67,43 @@ print(r.body, r.receipt_id, r.charged_raw)  # 结果 + 收据 + 扣款额
 差 10000（最小单位）。请向付费钱包转入 USDT（测试网为 MockUSDT，可 wallet.mint()）后重试。
 ```
 
-### 5) Agent 框架（MCP）挂载即接入
+### 5) Agent 框架（MCP）挂载即接入——五工具面
 
 ```bash
-uv run python tools/mcp_server.py        # stdio MCP server，两个工具：
-# catalog            —— 列可用付费服务
-# paid_service_call  —— 调用付费服务（service_id + params）
+uv run python tools/mcp_server.py        # stdio MCP server，五个工具：
+# wallet_status      —— 钱包健康自查（地址/链/USDT 余额/对 PayVault 授权/L0 限额现值；
+#                       余额或授权为 0 时返回 hint_* 人话：水龙头 mint / approve_vault）
+# catalog            —— 列可用付费服务（ID/定价/input schema）
+# service_quote      —— 单服务报价：定价/收款方 PayVault/自己的余额与授权/L0 预算余量
+# paid_service_call  —— 付费调用（唯一花钱工具；EIP-712 支付授权 + X-PAYMENT；
+#                       描述里写死纪律：先 catalog+quote，失败不要自动重试）
+# spend_report       —— 本地账本聚合：已花/剩余/最近 N 笔（intent→receipt→onchain）
 ```
 
-Claude Code / 任何标准 MCP client 指到该命令即可；预算由 `COINCALL_BUDGET_RAW` 在本地强制执行。
+Claude Code / 任何标准 MCP client 指到该命令即可。工具面 = Agent 决策闭环
+（自查 → 看目录 → 看价 → 付费 → 汇报）；预算/白名单由 `COINCALL_*` env 注入
+L0 引擎在本地强制（见下节）。macOS 代理环境加 `NO_PROXY=*` 防系统代理劫持
+localhost（C-07）。
+
+### 6) Skill（coincall-consumer）——给 Agent 的使用纪律
+
+仓内自带 `skills/coincall-consumer/`（SKILL.md + CLI 薄壳 + 安全清单），教 Agent
+**如何安全地**用上面的五工具/SDK：六步流程（自查→目录→报价→超限问人→调用→汇报）、
+三条铁律（付费失败不自动重试 / 预算触底即停 / 每笔报收据）、密钥纪律。
+
+```bash
+# ZCode：把 skills/ 目录同步到 ~/.agents/skills/（或项目级 .agents/skills/）
+cp -r skills/coincall-consumer ~/.agents/skills/
+
+# CLI 直用（内部走 SDK，天然带 L0；stdout=结果 JSON，stderr=人话错误）：
+python skills/coincall-consumer/scripts/call.py status            # 自查
+python skills/coincall-consumer/scripts/call.py quote svc_rad_ai  # 报价
+python skills/coincall-consumer/scripts/call.py call svc_rad_ai '{"query":"BTC"}'  # 付费（真实扣款）
+python skills/coincall-consumer/scripts/call.py report            # 账单
+```
+
+安全边界五问五答（最多花多少/会不会转陌生地址/金额会不会被改/花哪了能看吗/能立刻停吗）
+见 `skills/coincall-consumer/references/security.md`。
 
 ## 公开 API
 
