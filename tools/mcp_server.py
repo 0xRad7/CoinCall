@@ -28,12 +28,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TextIO
 
-from coincall.policy import PolicyConfig
-
+# 仓内直跑支持（uv run python tools/mcp_server.py）：本项目无 build-system，
+# uv sync 只装依赖不装包——必须先补 sys.path 再 import coincall（tests 侧靠 PYTHONPATH）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coincall.client import DEFAULT_CORE_URL, DEFAULT_GATEWAY_URL, CallResult, Client
 from coincall.errors import CoinCallError
+from coincall.policy import PolicyConfig
 from coincall.signing import PAY_VAULT_ADDRESS
 from coincall.wallet import LocalWallet
 
