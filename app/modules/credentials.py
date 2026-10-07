@@ -2,7 +2,8 @@
 
 公开 manifest 与凭证分离：三方接口的认证头（如 X-API-KEY）只存在本模块的
 加密表里，**永不**出现在 catalog/manifest 响应；网关经 internal resolve 取用后
-在转发时注入。消费者入站头（X-Api-Key/X-PAYMENT）不上透传（02 §2 既有语义）。
+在转发时注入；probe 探测带 service_id 时经 resolve_injectable_headers 以同口径
+自动注入。消费者入站头（X-Api-Key/X-PAYMENT）不上透传（02 §2 既有语义）。
 
 信任模型（诚实边界）：Provider 的上游密钥必然交给代理方（Kong/Apigee 同款
 API 网关模型），与消费者资金钥匙是两个信任域，P7 不受影响；不想交的 Provider
@@ -144,3 +145,33 @@ def _canonical_json(headers: dict[str, str]) -> str:
 
 def _loads(raw: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in json.loads(raw).items()}
+
+
+def resolve_injectable_headers(store: CoreStore, fernet: Fernet, service_id: str) -> dict[str, str]:
+    """探测自动注入用：解析某服务应带的认证头（与网关转发同口径）。
+
+    口径对齐 gateway UpstreamCredentialsClient.get_for：服务级凭证优先；
+    为空且服务登记了 provider.agent_id → 回退团队默认头（team:{agent_id} 同源存储）。
+    解密失败按「无凭证」返回（网关取不到凭证也按无凭证转发，不阻断调用方）；
+    返回值含凭证明文——只进请求头，绝不落日志/响应。
+    """
+    row = store.get_service_credentials_cipher(service_id)
+    headers = _decrypt_or_empty(fernet, row)
+    if headers:
+        return headers
+    service = store.get_service(service_id)
+    if service is None:
+        return {}
+    agent_id = service["manifest"].get("provider", {}).get("agent_id")
+    if not isinstance(agent_id, int):
+        return {}
+    return _decrypt_or_empty(fernet, store.get_service_credentials_cipher(_team_key(agent_id)))
+
+
+def _decrypt_or_empty(fernet: Fernet, row: tuple[bytes, list[str]] | None) -> dict[str, str]:
+    if row is None:
+        return {}
+    try:
+        return _loads(fernet.decrypt(row[0]).decode())
+    except (InvalidToken, ValueError):  # pragma: no cover - 密钥轮换/脏数据场景
+        return {}

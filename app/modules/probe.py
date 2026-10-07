@@ -8,6 +8,14 @@ hackathon 本机规模）：仅 http/https；拒绝 obvious 私网/回环字面�
 内容安全扫描（L1 投毒启发式 + L2 凭证泄露，禁 LLM）；带 service_id 时按服务
 upsert 落 service_security（决策层 content_scan 信号源）。不带 service_id 的
 既有调用行为不变（扫描结果仅随响应返回，不落库）。
+
+2026-10-01 增补二（探测打通两堵点）：
+- 自动凭证：带 service_id 且该服务（或其团队回退）配置过上游凭证时，探测
+  自动解密注入认证头（resolve_injectable_headers，与网关转发同口径）；
+  手工 headers 仍可传且同名优先；响应 credentials_applied 只回显头名不回显值。
+- 出网代理：探测客户端 trust_env=True（读 HTTPS_PROXY/HTTP_PROXY/NO_PROXY），
+  外部上游（ngrok 等）可经本机代理出网；本机其余 httpx 客户端保持
+  trust_env=False 不受影响（main.py 同源纪律）。
 """
 
 import ipaddress
@@ -16,9 +24,11 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
+from cryptography.fernet import Fernet
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.modules.credentials import resolve_injectable_headers
 from app.modules.security_scan import scan_body
 from app.storage.db import CoreStore
 
@@ -39,7 +49,10 @@ class ProbeRequest(BaseModel):
     service_id: str | None = Field(
         default=None,
         max_length=128,
-        description="扫描结果归属服务（提供时按服务落 service_security；缺省仅回显扫描结果）",
+        description=(
+            "扫描结果归属服务；提供且该服务（或其团队回退）有已配置凭证时，"
+            "探测自动注入对应认证头（与网关转发同口径），缺省裸探"
+        ),
     )
 
     @field_validator("method")
@@ -79,6 +92,16 @@ def _guard(url: str) -> None:
 def probe(body: ProbeRequest, request: Request) -> dict:
     """代发一次上游请求，回状态/耗时/响应体（供前端推断 output_schema）。"""
     _guard(body.url)
+    # 自动凭证（2026-10-01 §二）：服务级优先、团队回退，与网关转发同口径；
+    # 手工 headers 同名优先（合并覆盖）；值只进请求头，响应仅回显头名
+    auto_headers: dict[str, str] = {}
+    if body.service_id is not None:
+        store: CoreStore = request.app.state.store
+        fernet: Fernet = request.app.state.credential_fernet
+        auto_headers = resolve_injectable_headers(store, fernet, body.service_id)
+    merged_headers = {**auto_headers, **body.headers}
+    manual_names = {name.lower() for name in body.headers}
+    credentials_applied = sorted(name for name in auto_headers if name.lower() not in manual_names)
     client: httpx.Client = getattr(request.app.state, "probe_http", None) or _client()
     started = time.monotonic()
     try:
@@ -86,7 +109,7 @@ def probe(body: ProbeRequest, request: Request) -> dict:
             resp = client.get(
                 body.url,
                 params=body.query,
-                headers=body.headers,
+                headers=merged_headers,
                 timeout=PROBE_TIMEOUT_S,
                 follow_redirects=False,
             )
@@ -94,7 +117,7 @@ def probe(body: ProbeRequest, request: Request) -> dict:
             resp = client.post(
                 body.url,
                 json=body.body or {},
-                headers=body.headers,
+                headers=merged_headers,
                 timeout=PROBE_TIMEOUT_S,
                 follow_redirects=False,
             )
@@ -109,13 +132,13 @@ def probe(body: ProbeRequest, request: Request) -> dict:
     findings = scan_body(resp_body)
     scanned_at = datetime.now(UTC).isoformat()
     if body.service_id is not None:
-        store: CoreStore = request.app.state.store
         store.upsert_service_security(body.service_id, not findings, findings, resp.status_code)
     return {
         "status_code": resp.status_code,
         "content_type": resp.headers.get("content-type", ""),
         "elapsed_ms": elapsed_ms,
         "body": resp_body,
+        "credentials_applied": credentials_applied,
         "security": {
             "service_id": body.service_id,
             "clean": not findings,
@@ -127,4 +150,7 @@ def probe(body: ProbeRequest, request: Request) -> dict:
 
 
 def _client() -> httpx.Client:
-    return httpx.Client(trust_env=False)
+    # trust_env=True：探测要出网打外部上游（ngrok 等），经 HTTPS_PROXY/HTTP_PROXY
+    # 走本机代理；NO_PROXY 可豁免特定主机。本机其余 httpx 客户端（8010/8030 调用）
+    # 在 main.py 显式 trust_env=False，不受这些环境变量影响
+    return httpx.Client(trust_env=True)

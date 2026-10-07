@@ -7,6 +7,8 @@
 - probe 集成：探测 → 扫描 → service_security 落表 → /services/security/{id} 公开查询
   → /advice security.content_scan 三态反映（有发现/未见特征/从未探测）
 - 兼容：不带 service_id 的既有 probe 调用行为不变（扫描仅随响应返回，不落库）
+- 自动凭证注入（2026-10-01 §二）：带 service_id 探测自动解密注入服务级凭证、
+  团队级回退、无凭证裸探、手工头同名优先；credentials_applied 只回显头名
 """
 
 import copy
@@ -225,6 +227,8 @@ class TestNegativeSamples:
 
 def _upstream(state: dict[str, Any]) -> Callable[[httpx.Request], httpx.Response]:
     def handler(request: httpx.Request) -> httpx.Response:
+        # 记录上游实收头（自动凭证注入断言用；httpx 头名小写化）
+        state.setdefault("seen_headers", []).append(dict(request.headers))
         return httpx.Response(200, json=state["body"])
 
     return handler
@@ -439,6 +443,151 @@ class TestProbeScanIntegration:
                 "/services/probe", json={"url": "https://up.example/api", "service_id": "  "}
             )
             assert r.status_code == 422
+
+
+class TestProbeAutoCredentials:
+    """探测自动凭证（2026-10-01 §二）：服务级命中 / 团队回退 / 无凭证 / 手工头优先。
+
+    断言口径：上游实收头（MockTransport 捕获）含解密后的明文值；
+    probe 响应 credentials_applied 只含头名，明文值全响应不回显。
+    """
+
+    #: 合成凭证样例（非真实凭证）
+    SVC_KEY = "sk-auto-zzz1234567890zzz"
+    TEAM_TOKEN = "Bearer team-abc123def456ghi789"
+    MANUAL_KEY = "sk-manual-qqq987654321qqq"
+    PROVIDER_WALLET = "0x1234567890AbCdEf1234567890aBcDeF12345678"  # FakeIdentityClient 已知 137
+
+    def _register_provider(self, client: TestClient) -> None:
+        r = client.post(
+            "/providers",
+            json={"agent_id": 137, "display_name": "T", "claim_wallet": self.PROVIDER_WALLET},
+        )
+        assert r.status_code == 201, r.text
+
+    def _post_manifest(self, client: TestClient, sid: str) -> None:
+        assert (
+            client.post("/manifests", json=_manifest(sid, W_A, category="translation")).status_code
+            == 201
+        )
+
+    def test_auto_inject_service_credentials(self, tmp_path: Path) -> None:
+        """服务级凭证命中：探测自动带上解密后的认证头；响应只回显头名。"""
+        state: dict[str, Any] = {"body": {"result": "ok"}}
+        with _client(tmp_path, state=state) as client:
+            self._post_manifest(client, "svc_cred")
+            assert (
+                client.put(
+                    "/services/svc_cred/credentials",
+                    json={"headers": {"X-API-KEY": self.SVC_KEY, "X-Tenant": "booth-a"}},
+                ).status_code
+                == 200
+            )
+            r = client.post(
+                "/services/probe",
+                json={"url": "https://up.example/api", "service_id": "svc_cred"},
+            )
+            assert r.status_code == 200, r.text
+            probe = r.json()
+            assert probe["credentials_applied"] == ["X-API-KEY", "X-Tenant"]
+            seen = state["seen_headers"][-1]
+            assert seen["x-api-key"] == self.SVC_KEY
+            assert seen["x-tenant"] == "booth-a"
+            # 凭证明文永不回显（响应全文不含值）
+            assert self.SVC_KEY not in r.text
+
+    def test_auto_inject_team_fallback(self, tmp_path: Path) -> None:
+        """无服务级凭证 → 回退团队默认头（manifest.provider.agent_id 同源，网关同口径）。"""
+        state: dict[str, Any] = {"body": {"result": "ok"}}
+        with _client(tmp_path, state=state) as client:
+            self._register_provider(client)
+            self._post_manifest(client, "svc_tf")
+            assert (
+                client.put(
+                    "/teams/137/credentials", json={"headers": {"Authorization": self.TEAM_TOKEN}}
+                ).status_code
+                == 200
+            )
+            r = client.post(
+                "/services/probe",
+                json={"url": "https://up.example/api", "service_id": "svc_tf"},
+            )
+            assert r.status_code == 200, r.text
+            probe = r.json()
+            assert probe["credentials_applied"] == ["Authorization"]
+            assert state["seen_headers"][-1]["authorization"] == self.TEAM_TOKEN
+            assert self.TEAM_TOKEN not in r.text
+
+    def test_service_level_wins_over_team(self, tmp_path: Path) -> None:
+        """两级都配置：服务级整体优先（团队头不叠加），与网关 get_for 一致。"""
+        state: dict[str, Any] = {"body": {"result": "ok"}}
+        with _client(tmp_path, state=state) as client:
+            self._register_provider(client)
+            self._post_manifest(client, "svc_both")
+            assert (
+                client.put(
+                    "/teams/137/credentials", json={"headers": {"Authorization": self.TEAM_TOKEN}}
+                ).status_code
+                == 200
+            )
+            assert (
+                client.put(
+                    "/services/svc_both/credentials", json={"headers": {"X-API-KEY": self.SVC_KEY}}
+                ).status_code
+                == 200
+            )
+            r = client.post(
+                "/services/probe",
+                json={"url": "https://up.example/api", "service_id": "svc_both"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["credentials_applied"] == ["X-API-KEY"]
+            seen = state["seen_headers"][-1]
+            assert seen["x-api-key"] == self.SVC_KEY
+            assert "authorization" not in seen
+
+    def test_no_credentials_skips_injection(self, tmp_path: Path) -> None:
+        """无任何凭证：裸探（不注入认证头），credentials_applied 为空。"""
+        state: dict[str, Any] = {"body": {"result": "ok"}}
+        with _client(tmp_path, state=state) as client:
+            self._post_manifest(client, "svc_nc")
+            r = client.post(
+                "/services/probe",
+                json={"url": "https://up.example/api", "service_id": "svc_nc"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["credentials_applied"] == []
+            seen = state["seen_headers"][-1]
+            assert "x-api-key" not in seen and "authorization" not in seen
+
+    def test_manual_header_overrides_auto(self, tmp_path: Path) -> None:
+        """手工 headers 仍可传且同名优先；被覆盖的凭证头不计入 credentials_applied。"""
+        state: dict[str, Any] = {"body": {"result": "ok"}}
+        with _client(tmp_path, state=state) as client:
+            self._post_manifest(client, "svc_mo")
+            assert (
+                client.put(
+                    "/services/svc_mo/credentials",
+                    json={"headers": {"X-API-KEY": self.SVC_KEY, "X-Extra": "e1"}},
+                ).status_code
+                == 200
+            )
+            r = client.post(
+                "/services/probe",
+                json={
+                    "url": "https://up.example/api",
+                    "service_id": "svc_mo",
+                    "headers": {"X-API-KEY": self.MANUAL_KEY},
+                },
+            )
+            assert r.status_code == 200, r.text
+            probe = r.json()
+            assert probe["credentials_applied"] == ["X-Extra"]
+            seen = state["seen_headers"][-1]
+            assert seen["x-api-key"] == self.MANUAL_KEY
+            assert seen["x-extra"] == "e1"
+            # 被覆盖的存储凭证明文同样不回显
+            assert self.SVC_KEY not in r.text
 
 
 class TestRulesEndpoint:
