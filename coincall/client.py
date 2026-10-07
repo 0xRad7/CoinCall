@@ -35,7 +35,12 @@ DEFAULT_CORE_URL = "http://127.0.0.1:8020"
 AUTH_WINDOW_S = 600  # 授权窗口（02 §5a：valid_before = now + 600s）
 HTTP_TIMEOUT_S = 60  # 与 manifest timeout_ms 硬顶（60s，core 校验）对齐——AI 类上游冷启动可超 30s
 
-RECEIPT_HEADERS = ("X-Receipt-Id", "X-Charged-Raw", "X-Receipt-Sig")
+RECEIPT_HEADERS = (
+    "X-Receipt-Id",
+    "X-Charged-Raw",
+    "X-Receipt-Sig",
+    "X-Idempotency-Replay",
+)  # 重放标识透传：Agent 应知道这是上次购买的结果
 HTTP_NOT_MODIFIED = 304
 HTTP_BAD_REQUEST = 400
 HTTP_PAYMENT_REQUIRED = 402
