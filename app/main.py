@@ -113,7 +113,7 @@ logging.basicConfig(
 )
 
 
-def create_app(
+def create_app(  # noqa: PLR0915 —— lifespan 装配所有依赖，语句数天然多
     settings: Settings | None = None,
     *,
     chain_adapter: ChainAdapter | None = None,
@@ -130,6 +130,11 @@ def create_app(
         app.state.store = CallStore(app_settings.duckdb_path)  # C-14：单进程单写者
         # trust_env=False：core(8020)/keeper 通道都是直连本机地址，C-07——系统代理劫持 502
         app.state.http = httpx.AsyncClient(timeout=10.0, trust_env=False)
+        # provider 转发客户端：trust_env=True 走 HTTPS_PROXY（本机 DNS 污染环境下外部上游必需）
+        # 超时按转发语义设长（AI 类上游冷启动可超 30s）；本机 NO_PROXY 保 127.0.0.1 直连
+        app.state.forward_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(65.0, connect=10.0), trust_env=True
+        )
         app.state.auth = auth_client or CoreAuthClient(
             base_url=app_settings.core_base_url, http=app.state.http
         )
@@ -166,7 +171,7 @@ def create_app(
                 pay_vault=app_settings.pay_vault_address,
             ),
             "http_json": HttpJsonProvider(
-                app.state.http, allow_loopback=app_settings.allow_loopback_providers
+                app.state.forward_http, allow_loopback=app_settings.allow_loopback_providers
             ),
         }
         app.state.providers = dict(providers) if providers else default_providers
@@ -199,6 +204,7 @@ def create_app(
         if built_chain is not None:
             await built_chain.aclose()
         await app.state.http.aclose()
+        await app.state.forward_http.aclose()
         app.state.store.close()
 
     app = FastAPI(
