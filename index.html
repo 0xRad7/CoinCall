@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
     <title>CoinCall 控制台</title>
+    <script>
+      /* 首帧前恢复主题（避免亮/暗闪跳）：与 ThemeContext 的 localStorage 键一致 */
+      try {
+        if (localStorage.getItem("coincall.theme") === "dark") document.documentElement.dataset.theme = "dark";
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
