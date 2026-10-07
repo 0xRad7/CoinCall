@@ -56,9 +56,11 @@ class Keystore:
                     "ciphertext": self._fernet.encrypt(acct.key.hex().encode()).decode(),
                     "created_at": created_at,
                 }
-                (self._dir / f"{acct.address}.json").write_text(
+                key_file = self._dir / f"{acct.address}.json"
+                key_file.write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
+                key_file.chmod(0o600)  # 密文文件同权纪律（2026-10-07 收紧：原 644）
         return ManagedAccount(address=acct.address, persisted=self._persist, created_at=created_at)
 
     def get(self, address: str) -> LocalAccount | None:
