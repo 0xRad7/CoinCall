@@ -15,6 +15,8 @@ export interface ServiceManifest {
   output_schema: Record<string, unknown>;
   status: string;
   created_at?: string;
+  category?: string;
+  tags?: string[];
 }
 
 export interface CatalogService {

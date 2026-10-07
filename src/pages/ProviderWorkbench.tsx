@@ -471,46 +471,6 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
         />
       </div>
 
-      {/* Schema 与探测 */}
-      <div className="card form-group-card">
-        <h3>Schema 与探测</h3>
-        {endpointType === "http_json" && endpointMethod === "GET" && schemaHasNestedObjects(inputSchema) && (
-          <div className="alert warn">
-            <b>GET 模式不支持嵌套对象参数</b>：input_schema 里有 type 为 object 的属性——发布会被 422 拒绝。请改用 POST，或把参数拍平为标量/标量数组。
-          </div>
-        )}
-        {endpointType === "http_json" && (
-          <details className="raw-detail" style={{ marginBottom: 12 }}>
-            <summary style={{ fontSize: 13 }}>示例请求区（探测 / 生成 input_schema 用）——点开编辑</summary>
-            <div style={{ marginTop: 8 }}>
-              <ExampleRequestEditor method={endpointMethod} params={exampleParams} onParamsChange={setExampleParams} json={exampleJson} onJsonChange={setExampleJson} />
-            </div>
-          </details>
-        )}
-        <JsonEditor
-          label="input_schema（消费端参数校验，决定调用表单）"
-          value={inputSchema}
-          onChange={(v) => {
-            setInputSchema(v);
-            setInputAutoNote(false);
-          }}
-          fieldError={fieldErr("input_schema")}
-          rows={8}
-          badge={inputAutoNote ? "自动识别，请核对" : undefined}
-        />
-        <JsonEditor
-          label="output_schema"
-          value={outputSchema}
-          onChange={(v) => {
-            setOutputSchema(v);
-            setOutputAutoNote(false);
-          }}
-          fieldError={fieldErr("output_schema")}
-          rows={5}
-          badge={outputAutoNote ? "自动识别，请核对" : undefined}
-        />
-      </div>
-
       {error && <ErrorBox error={error} />}
       {ok && (
         <SuccessBox>
@@ -589,6 +549,7 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
   const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [credOpen, setCredOpen] = useState<Record<string, boolean>>({});
+  const [editOpen, setEditOpen] = useState<Record<string, boolean>>({});
 
   // 所有权 = 收款所有权 ∪ 身份所有权：wallet==连接地址，或 agent_id ∈ 我认领的集合
   const my = w.address?.toLowerCase() ?? "";
@@ -629,7 +590,7 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog.data, mine]);
 
-  const repost = async (svc: ServiceManifest, patch: Partial<ServiceManifest>) => {
+  const repost = async (svc: ServiceManifest, patch: Partial<ServiceManifest>): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
@@ -643,8 +604,10 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
       await coreApi.publishManifest(next);
       setConfirm(null);
       catalog.reload();
+      return true;
     } catch (e) {
       setError(e);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -677,7 +640,7 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
           刷新
         </button>
       </div>
-      <p className="card-desc">状态切换与改价都是「重新提交 manifest」：改价立即对新调用生效；paused 服务调用会 404。</p>
+      <p className="card-desc">改描述/改价/暂停都是「重新提交 manifest」：描述与 schema 立即对 Agent 目录生效（这是 Agent 选工具时看到的全部信息）；改价对新调用生效；paused 服务调用会 404。</p>
       {error != null && <ErrorBox error={error} />}
       <AsyncSection state={catalog} empty="目录里还没有你的服务——去第 ② 步发布，或确认认领的身份与服务收款钱包">
         {() => (
@@ -738,6 +701,15 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
                         })()}
                       </div>
                       <div className="mono dim">{s.service_id} · v{m.version}</div>
+                      {m.description ? (
+                        <div className="dim" style={{ fontSize: 12, marginTop: 2 }} title={m.description}>
+                          {m.description.length > 90 ? m.description.slice(0, 90) + "…" : m.description}
+                        </div>
+                      ) : (
+                        <div className="dim" style={{ fontSize: 12, marginTop: 2, color: "var(--warn)" }}>
+                          无描述——Agent 无法判断这个服务能做什么，点「编辑信息」补齐
+                        </div>
+                      )}
                       {m.endpoint.type === "http_json" && (
                         <div className="mono dim" style={{ fontSize: 11 }} title="你的真实上游（仅管理面可见，公开目录恒脱敏）">
                           ↳ {fullManifests[s.service_id]?.endpoint.url ?? "…"}
@@ -768,12 +740,23 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
                         <button className="btn small" disabled={busy || !priceChanged} onClick={() => setConfirm({ kind: "price", svc: m, nextAmount: newAmount! })}>
                           应用改价
                         </button>
+                        <button
+                          className="btn small secondary"
+                          onClick={() => {
+                            const next = !editOpen[s.service_id];
+                            setEditOpen((o) => ({ ...o, [s.service_id]: next }));
+                            if (next) setCredOpen((o) => ({ ...o, [s.service_id]: false }));
+                          }}
+                        >
+                          编辑信息
+                        </button>
                         {m.endpoint.type === "http_json" && (
                           <button
                             className="btn small secondary"
                             onClick={() => {
                               const next = !credOpen[s.service_id];
                               setCredOpen((o) => ({ ...o, [s.service_id]: next }));
+                              if (next) setEditOpen((o) => ({ ...o, [s.service_id]: false }));
                             }}
                           >
                             上游认证头
@@ -782,6 +765,21 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
                       </div>
                     </td>
                   </tr>
+                  {editOpen[s.service_id] && (
+                    <tr>
+                      <td colSpan={5} style={{ background: "var(--surface-2)" }}>
+                        <div style={{ padding: "8px 10px" }}>
+                          <ServiceInfoEditor
+                            svc={m}
+                            full={fullManifests[s.service_id] ?? null}
+                            busy={busy}
+                            onSave={(patch) => repost(m, patch)}
+                            onDone={() => setEditOpen((o) => ({ ...o, [s.service_id]: false }))}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {m.endpoint.type === "http_json" && credOpen[s.service_id] && (
                     <tr>
                       <td colSpan={5} style={{ background: "var(--surface-2)" }}>
@@ -841,6 +839,90 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
 }
 
 /** 上游认证头管理面板（仅 http_json；internal 无上游概念不显示）。值永不回显，只有头名。 */
+/** 编辑信息面板：名称/描述/双 schema/类目/标签——重提交 manifest（版本自动 +1）。
+ *  这些字段是 Agent 选工具时看到的全部信息：描述要写清「能回答什么问题、数据来自哪、入参含义」。 */
+const CATEGORY_OPTIONS = ["translation", "data-feed", "on-chain-query", "analysis", "agent-tool", "other"];
+
+function ServiceInfoEditor({ svc, full, busy, onSave, onDone }: {
+  svc: ServiceManifest;
+  full: ServiceManifest | null;
+  busy: boolean;
+  onSave: (patch: Partial<ServiceManifest>) => Promise<boolean>;
+  onDone: () => void;
+}) {
+  const base = full ?? svc;
+  const [name, setName] = useState(svc.name);
+  const [desc, setDesc] = useState(svc.description ?? "");
+  const [inputSchema, setInputSchema] = useState(() => JSON.stringify(base.input_schema ?? {}, null, 2));
+  const [outputSchema, setOutputSchema] = useState(() => JSON.stringify(base.output_schema ?? {}, null, 2));
+  const [category, setCategory] = useState(base.category ?? "other");
+  const [tags, setTags] = useState((base.tags ?? []).join(", "));
+  const [localErr, setLocalErr] = useState<string | null>(null);
+
+  const save = async () => {
+    let inputParsed: Record<string, unknown> = {};
+    let outputParsed: Record<string, unknown> = {};
+    try {
+      inputParsed = JSON.parse(inputSchema || "{}");
+      outputParsed = JSON.parse(outputSchema || "{}");
+    } catch (e) {
+      setLocalErr(`schema JSON 解析失败：${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    setLocalErr(null);
+    const ok = await onSave({
+      name: name.trim(),
+      description: desc.trim(),
+      input_schema: inputParsed,
+      output_schema: outputParsed,
+      category,
+      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+    });
+    if (ok) onDone();
+  };
+
+  return (
+    <div className="flex" style={{ gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+      <div style={{ flex: "1 1 260px", minWidth: 260 }}>
+        <div className="field">
+          <label>服务名称（Agent 匹配需求的第一眼）</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} aria-label="服务名称" />
+        </div>
+        <div className="field">
+          <label>描述——写给 Agent 看：能回答什么问题、数据来自哪、入参含义（{svc.service_id}）</label>
+          <textarea rows={5} value={desc} onChange={(e) => setDesc(e.target.value)} aria-label="服务描述" placeholder="例：币安 USDT 永续合约 AI 强势币 Top N 榜……适合『哪些币在涨』类问题。入参 limit=Top N。" />
+        </div>
+        <div className="field">
+          <label>类目（决策层分区词表）</label>
+          <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="类目">
+            {CATEGORY_OPTIONS.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label>标签（逗号分隔）</label>
+          <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="binance, futures, top-n" aria-label="标签" />
+        </div>
+        {localErr && <div className="alert warn">{localErr}</div>}
+        <div className="btn-row" style={{ marginTop: 8 }}>
+          <button className="btn small" disabled={busy || !name.trim()} onClick={() => void save()}>
+            {busy ? <Spinner label="保存中…" /> : "保存并重新发布（版本自动 +1）"}
+          </button>
+          <button className="btn small secondary" disabled={busy} onClick={onDone}>
+            取消
+          </button>
+        </div>
+      </div>
+      <div style={{ flex: "1 1 300px", minWidth: 300 }}>
+        <JsonEditor label="input_schema（Agent 构造调用参数的依据）" value={inputSchema} onChange={setInputSchema} rows={9} />
+        <JsonEditor label="output_schema（Agent 解读返回数据的依据）" value={outputSchema} onChange={setOutputSchema} rows={7} />
+        <div className="help">GET 上游的 input_schema 仅支持标量/标量数组（嵌套对象会被 422 拒绝）。</div>
+      </div>
+    </div>
+  );
+}
+
 function ServiceCredentialsPanel({ serviceId, teamAgentId }: { serviceId: string; teamAgentId: number | null }) {
   const [names, setNames] = useState<string[] | null>(null);
   // 团队默认认证头（网关回退）：服务级为空时展示

@@ -317,38 +317,100 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .demo-box .big-warn { color: var(--danger); font-weight: 700; font-size: var(--fs-14); margin: 0 0 8px; }
 
 /* ============================================================
-   落地页 /welcome（单页两态：未连接=深色叙事登录面 / 已连接=选身份工具面）
-   深色叙事面独立于控制台主题（外营销内工具的明暗反差），token 自带。
+   落地页 /welcome（单页两态：未连接=暗色情报站登录面 / 已连接=选身份工具面）
+   登录面参考 investigation.graphchain.top：近黑底 #0a0e14 + 卡面 #0f1520 层次，
+   主文字 #e6e9ef / 次级 #8b93a3，电光蓝点缀 #3b82f6 / #5b8bff；
+   hero 打字光标▌ + fade-in-up 依次入场 + 底部径向光晕（纯 CSS，无 JS 动效依赖）。
    ============================================================ */
 .welcome-shell { min-height: 100vh; display: flex; flex-direction: column; }
-.welcome-shell.login { background: #0b111d; color: #e8edf5; }
+.welcome-shell.login { background: #0a0e14; color: #e6e9ef; }
 .welcome-shell.pick { background: var(--bg); color: var(--text); }
-.welcome-top { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-4); }
-.login .welcome-top { border-bottom: 1px solid #1e293c; }
+
+/* 顶部：细透明深色条（左品牌右操作）；登录面锚点滚动时常驻 */
+.welcome-top { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-4); min-height: 52px; }
+.login .welcome-top { position: sticky; top: 0; z-index: 30; background: rgba(10, 14, 20, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid rgba(139, 147, 163, 0.14); }
 .pick .welcome-top { background: var(--surface); border-bottom: 1px solid var(--border); }
 .welcome-top .brand { display: flex; align-items: center; gap: var(--space-2); font-weight: 700; font-size: var(--fs-16); color: inherit; }
 .welcome-top .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: #5b8bff; display: inline-block; }
 .login .welcome-top .theme-toggle { background: transparent; border-color: #2b3850; color: #94a3bd; }
 .login .welcome-top .theme-toggle:hover { background: #131b2b; }
 
-/* ---- 登录态：深色叙事面（登录入口在右上角顶栏，页面中部纯叙事） ---- */
+/* ---- 登录态主体（hero + 能力 + 指标 + 护栏），登录入口保持在右上角顶栏 ---- */
 .welcome-top-actions { display: flex; align-items: center; gap: var(--space-3); }
 .welcome-browse-link { font-size: var(--fs-13); color: #9db9ff; }
 .welcome-browse-link:hover { text-decoration: underline; }
 .login .welcome-top .btn { padding: 7px 14px; }
-.welcome-login { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-5) var(--space-4); gap: var(--space-4); }
-.welcome-eyebrow { font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.16em; color: #7d8ba6; text-transform: uppercase; }
-.welcome-login h1 { font-size: 34px; font-weight: 600; line-height: 1.45; letter-spacing: -0.01em; margin: 0; text-align: center; color: #f2f5fb; }
-.welcome-lede { color: #94a3bd; font-size: var(--fs-16); margin: -8px 0 0; text-align: center; max-width: 56ch; }
-.welcome-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); width: 100%; max-width: 860px; }
-@media (max-width: 720px) { .welcome-points { grid-template-columns: 1fr; } .welcome-login h1 { font-size: 26px; } }
-.welcome-point { border: 1px solid #223049; border-radius: var(--radius); padding: var(--card-pad); background: #0f1725; }
-.welcome-point .pt { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 4px; color: #f2f5fb; }
-.welcome-point .pd { font-size: var(--fs-13); color: #94a3bd; margin: 0; line-height: 1.6; }
-.welcome-stats { border-top: 1px solid #1e293c; padding-top: var(--space-3); width: 100%; max-width: 860px; display: flex; align-items: center; justify-content: center; gap: var(--space-3); flex-wrap: wrap; color: #94a3bd; font-size: var(--fs-13); }
-.welcome-stats .ws-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-16); color: #f2f5fb; }
-.welcome-stats .evidence a.evidence-link { border-color: #2b3850; color: #9db9ff; background: transparent; }
-.welcome-stats .evidence a.evidence-link:hover { background: #131b2b; }
+.welcome-login { flex: 1; width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 var(--space-4) var(--space-6); }
+
+/* 入场动效：hero 元素 fade-in-up 依次延迟（纯 CSS；reduced-motion 关闭） */
+@keyframes wl-fade-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.wl-fade { animation: wl-fade-up 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+.wl-fade.d1 { animation-delay: 0.05s; }
+.wl-fade.d2 { animation-delay: 0.16s; }
+.wl-fade.d3 { animation-delay: 0.28s; }
+.wl-fade.d4 { animation-delay: 0.42s; }
+.wl-fade.d5 { animation-delay: 0.56s; }
+.wl-fade.d6 { animation-delay: 0.7s; }
+
+/* Hero：eyebrow 等宽徽标 + 大标题（打字光标▌ blink）+ 副主张 + lede + 锚点 CTA；底部微弱径向光晕 */
+.wl-hero { position: relative; isolation: isolate; text-align: center; padding: clamp(64px, 11vh, 120px) 0 48px; }
+.wl-hero::after { content: ""; position: absolute; left: 50%; bottom: -30%; transform: translateX(-50%); width: 130%; max-width: 900px; height: 75%; background: radial-gradient(ellipse at center, rgba(59, 130, 246, 0.16) 0%, rgba(59, 130, 246, 0.05) 45%, transparent 70%); pointer-events: none; z-index: -1; }
+.wl-eyebrow { display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.18em; color: #5b8bff; border: 1px solid rgba(91, 139, 255, 0.32); background: rgba(59, 130, 246, 0.08); border-radius: 999px; padding: 5px 12px; }
+.wl-hero h1 { margin: 22px 0 0; font-size: clamp(46px, 8vw, 76px); font-weight: 700; line-height: 1.08; letter-spacing: -0.02em; color: #f2f5fb; }
+.wl-caret { display: inline-block; margin-left: 8px; color: #5b8bff; font-weight: 500; transform: translateY(-4px); animation: wl-blink 1.05s step-end infinite; }
+@keyframes wl-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.wl-sub { display: block; margin-top: 18px; font-size: clamp(17px, 2.6vw, 24px); font-weight: 500; line-height: 1.5; letter-spacing: 0; color: #c3cbda; }
+.welcome-lede { margin: 18px auto 0; max-width: 58ch; font-size: var(--fs-16); line-height: 1.7; color: #8b93a3; text-align: center; }
+.wl-cta-row { margin-top: 32px; display: flex; justify-content: center; }
+.wl-cta { display: inline-flex; align-items: center; gap: 8px; padding: 11px 24px; border-radius: var(--radius); background: #3b82f6; color: #fff; font-size: var(--fs-14); font-weight: 600; text-decoration: none; transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; }
+.wl-cta:hover { background: #5b8bff; text-decoration: none; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(59, 130, 246, 0.35); }
+
+/* Core Capabilities：4→2→1 卡网格（编号 + 粗标题 + 副标 + 描述），hover 上浮 + 边框发光 */
+.wl-caps { margin-top: 8px; padding-top: 40px; scroll-margin-top: 72px; }
+.wl-sec-title { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: #e6e9ef; }
+.wl-sec-title::before { content: ""; width: 22px; height: 2px; border-radius: 1px; background: linear-gradient(90deg, #3b82f6, rgba(59, 130, 246, 0)); flex-shrink: 0; }
+.wl-cap-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.wl-cap { background: #0f1520; border: 1px solid #1c2635; border-radius: 10px; padding: var(--card-pad); transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+.wl-cap:hover { transform: translateY(-4px); border-color: rgba(91, 139, 255, 0.55); box-shadow: 0 0 0 1px rgba(91, 139, 255, 0.22), 0 14px 34px rgba(2, 6, 14, 0.55); }
+.wl-cap .wc-no { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.14em; color: #3b82f6; }
+.wl-cap h3 { margin: 10px 0 3px; font-size: var(--fs-16); font-weight: 700; color: #e6e9ef; line-height: 1.4; }
+.wl-cap .wc-tag { font-size: var(--fs-12); color: #5b8bff; margin-bottom: 10px; }
+.wl-cap p { margin: 0; font-size: var(--fs-13); line-height: 1.65; color: #8b93a3; }
+
+/* 平台指标：3 列大数字（等宽 tabular-nums + 电光蓝高亮）+ 链上自证外链（EvidencePair） */
+.wl-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin-top: 48px; padding-top: 32px; border-top: 1px solid #1c2635; }
+.wl-metric .wm-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: clamp(30px, 4.5vw, 40px); font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; color: #5b8bff; }
+.wl-metric .wm-num .wm-unit { font-size: var(--fs-14); font-weight: 500; color: #8b93a3; margin-left: 4px; letter-spacing: 0; }
+.wl-metric .wm-label { margin-top: 8px; font-size: var(--fs-13); font-weight: 600; color: #e6e9ef; }
+.wl-metric .wm-sub { margin-top: 2px; font-size: var(--fs-12); color: #8b93a3; }
+.wl-metrics .evidence a.evidence-link { border-color: #2b3850; color: #9db9ff; background: transparent; }
+.wl-metrics .evidence a.evidence-link:hover { background: #131b2b; }
+
+/* 护栏：低调三行小字 */
+.wl-guard { margin-top: 48px; padding-top: 24px; border-top: 1px solid #1c2635; }
+.wl-guard-title { font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #8b93a3; }
+.wl-guard ul { margin: 12px 0 0; padding: 0; list-style: none; }
+.wl-guard li { font-size: var(--fs-13); color: #8b93a3; line-height: 1.9; }
+.wl-guard li::before { content: "·"; color: #3b82f6; font-weight: 700; margin-right: 8px; }
+.wl-guard li b { color: #c3cbda; font-weight: 600; }
+.wl-guard .mono { font-size: var(--fs-12); color: #9db9ff; }
+
+/* 登录面响应式：<=1000px 能力卡 2 列；<=720px 单列 + 标题降级 */
+@media (max-width: 1000px) { .wl-cap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) {
+  .wl-cap-grid, .wl-metrics { grid-template-columns: 1fr; }
+  .wl-eyebrow { font-size: 10px; letter-spacing: 0.12em; }
+  .wl-hero h1 { font-size: 40px; }
+  .wl-sub { font-size: 17px; }
+  .welcome-login { padding-bottom: var(--space-5); }
+}
+
+/* 动效可关闭（无障碍） */
+@media (prefers-reduced-motion: reduce) {
+  .wl-fade { animation: none; }
+  .wl-caret { animation: none; }
+  .wl-cta, .wl-cap { transition: none; }
+}
 
 /* ---- 选身份态：工具面 + 两张大模式卡（英文主标签 + 中文副语，身份色首次出现） ---- */
 .welcome-pick { flex: 1; width: 100%; max-width: 880px; margin: 0 auto; padding: var(--space-5) var(--space-4); }
