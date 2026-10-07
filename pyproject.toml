@@ -47,6 +47,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "ANN", "PLR2004", "S105", "S106", "PLC0415"]  # 断言字面量/无注解/函数内 import（gateway 同例）
 "tools/**" = ["T201", "ANN401"]  # MCP stdio：stdout 即协议通道；JSON-RPC 边界 Any 是正确类型（gateway C-09 同例）
+"skills/**" = ["T201"]  # skill CLI：stdout 即结果 JSON 通道（同 tools T201 豁免）
 
 [tool.mypy]
 python_version = "3.11"
