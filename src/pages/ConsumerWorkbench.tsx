@@ -20,6 +20,8 @@ import { addSpentRaw, appendHistory, clearHistory, loadBudgetRaw, loadHistory, l
 import { feedbackApi } from "../api/core";
 import { useAsync } from "../lib/useAsync";
 import { useWallet } from "../state/WalletContext";
+import { useMode } from "../state/ModeContext";
+import { PageHeader, StatCard } from "../components/shell";
 
 const APIKEY_STORE = "coincall.apikey";
 
@@ -27,10 +29,20 @@ export default function ConsumerWorkbench() {
   const { address } = useWallet();
   const connected = address != null;
 
+  // 直接进入本工作台 = 选定 Consumer 身份（与 /welcome 选卡同一粘滞存储）
+  const { mode, setMode } = useMode();
+  useEffect(() => {
+    if (mode !== "consumer") setMode("consumer");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div>
-      <h1 className="page-title">消费端工作台</h1>
-      <p className="page-sub">从零完成一次付费调用：连接钱包 → 备好资金 → 签发 API key → 选服务 → 钱包签名授权 → 402 网关调用。签名与交易全部在你的浏览器钱包弹窗里完成，控制台不接触私钥。</p>
+      <PageHeader
+        mode="consumer"
+        title="消费端工作台"
+        sub="从零完成一次付费调用：连接钱包 → 备好资金 → 签发 API key → 选服务 → 钱包签名授权 → 402 网关调用。签名与交易全部在你的浏览器钱包弹窗里完成，控制台不接触私钥。"
+      />
 
       <ConnectSection />
       {connected && (
@@ -184,23 +196,22 @@ export function FundsSection() {
         <ErrorBox error={funds.error} />
       ) : d ? (
         <div className="stat-grid">
-          <div className="stat-card">
-            <div className="k">token 余额</div>
-            <div className="v num">{fromRaw(d.balance)}</div>
-            <div className="s num">raw={d.balance.toString()}</div>
-          </div>
-          <div className="stat-card">
-            <div className="k">对 PayVault 授权额</div>
-            <div className="v num">{fromRaw(d.allowance)}</div>
-            <div className="s num">raw={d.allowance.toString()} · {VAULT.slice(0, 10)}…</div>
-          </div>
-          <div className="stat-card">
-            <div className="k">可用额（可消费）</div>
-            <div className="v num" style={{ color: available && available > 0n ? "var(--success)" : "var(--danger)" }}>
-              {fromRaw(available ?? 0n)}
-            </div>
-            <div className="s num">raw={(available ?? 0n).toString()}</div>
-          </div>
+          <StatCard
+            k="token 余额"
+            value={fromRaw(d.balance)}
+            sub={`raw=${d.balance.toString()}`}
+          />
+          <StatCard
+            k="对 PayVault 授权额"
+            value={fromRaw(d.allowance)}
+            sub={`raw=${d.allowance.toString()} · ${VAULT.slice(0, 10)}…`}
+          />
+          <StatCard
+            k="可用额（可消费）"
+            value={fromRaw(available ?? 0n)}
+            sub={`raw={(available ?? 0n).toString()}`}
+            tone={available && available > 0n ? "success" : "danger"}
+          />
         </div>
       ) : null}
 
