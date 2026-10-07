@@ -1,5 +1,7 @@
 """应用配置：环境变量唯一入口（env 前缀 COINCALL_）。"""
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +39,12 @@ class Settings(BaseSettings):
     keeper_flush_interval: float = 30.0  # 攒批时间阈值（秒）
     keeper_operator_address: str = "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a"
     bot_chain_api_base_url: str = "http://127.0.0.1:8010"
+    #: keeper 链上通道模式（mainnet-readiness §3.2/§5-1）：
+    #: direct（缺省）=回执日志走本仓 web3 直连 RPC（现行为零变化）；
+    #: api =日志也经 bot-chain-api（/tx 定位块 + /contracts/logs 块窗），本仓零 web3
+    #: 连接——DNS 污染环境（botchain.ai 整域）主网结算可达，出链流量由 bot-chain-api
+    #: 的 PROXY 分流兜底
+    keeper_chain_mode: Literal["direct", "api"] = "direct"
     #: agent_id → agentWallet 静态覆盖（缺省走 core manifest 解析）
     keeper_provider_wallet_overrides: dict[str, str] = {}
     # ---- 决策摘要锚定任务（10 §1/§2；只在 keeper_enabled 时随 keeper 启动）----

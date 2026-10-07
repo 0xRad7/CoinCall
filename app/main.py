@@ -66,6 +66,7 @@ def _build_keeper(
         rpc_url=settings.chain_rpc_url,
         pay_vault=settings.pay_vault_address,
         operator_address=settings.keeper_operator_address,
+        mode=settings.keeper_chain_mode,
     )
     keeper = Keeper(
         store=store,

@@ -6,6 +6,14 @@
   from=operator（bot-chain-api keystore 代管，本仓不持有任何私钥）；
 - 回执事件 Charged/ChargeFailed 用本仓 web3+ABI 副本本地解码（不依赖 explorer）。
 
+链上通道两种模式（env ``COINCALL_KEEPER_CHAIN_MODE``，装配见 main._build_keeper）：
+- ``direct``（缺省，现行为零变化）：submit/回执状态/usedNonces 走 bot-chain-api HTTP，
+  回执日志（receipt_logs）由本仓自建 AsyncWeb3 直连 RPC 读取——DNS 污染环境下
+  主网 rpc.botchain.ai 不可达（mainnet-readiness §3.2/§5-1 唯一必改代码项）；
+- ``api``：日志也经 bot-chain-api（/tx/{hash} 定位块 → /contracts/logs 块窗原始日志
+  → 本地按 transaction_hash 过滤），本仓零 web3 连接——出链流量全部由 bot-chain-api
+  的 PROXY 分流兜底，keystore 签名路径（TxService.resolve_signer）也天然复用。
+
 reason 分支（合约短码 → 队列状态）：
 - Charged                          → settle_queue=done + calls=settled
 - transfer_failed（nonce 未烧）    → 原签名重试一次 → 仍失败：calls=bad_debt + 拉黑消费者
@@ -48,6 +56,8 @@ RECEIPT_POLL_INTERVAL_S = 1.0
 HTTP_TIMEOUT_S = 60.0
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
+#: api 模式块窗拉日志的单次上限（对齐 bot-chain-api contracts.py MAX_LOGS_LIMIT）
+LOGS_FETCH_LIMIT = 5000
 
 REASON_TRANSFER_FAILED = "transfer_failed"
 REASON_NOT_IN_WINDOW = "not_in_window"
@@ -151,8 +161,31 @@ def _plain_log(log: Any) -> dict[str, Any]:
     return out
 
 
+def _receipt_log_shape(log: dict[str, Any]) -> dict[str, Any]:
+    """bot-chain-api /contracts/logs 原始日志（snake_case）→ web3 回执日志形态（camelCase）。
+
+    process_log 只认 camelCase 键（web3 v7 口径，与 _plain_log 产物同构）。
+    """
+    return {
+        "address": str(log.get("address", "")),
+        "topics": [str(t) for t in (log.get("topics") or [])],
+        "data": str(log.get("data", "0x")),
+        "blockNumber": int(log.get("block_number", 0)),
+        "blockHash": str(log.get("block_hash", "")),
+        "transactionHash": str(log.get("transaction_hash", "")),
+        "transactionIndex": int(log.get("transaction_index", 0)),
+        "logIndex": int(log.get("log_index", 0)),
+        "removed": bool(log.get("removed", False)),
+    }
+
+
 class BotChainSettleChain:
-    """真实通道：写经 bot-chain-api（operator 由其 keystore 签名），读回执走本仓 web3。"""
+    """真实通道：写经 bot-chain-api（operator 由其 keystore 签名），读回执按模式分流。
+
+    mode="direct"（缺省）：回执日志走本仓 web3 直连 RPC（现行为零变化）；
+    mode="api"：日志也经 bot-chain-api（/tx/{hash} 定位块 → /contracts/logs 块窗
+    原始日志 → 本地按 transaction_hash 过滤），DNS 污染环境主网可达（§5-1）。
+    """
 
     def __init__(
         self,
@@ -162,10 +195,14 @@ class BotChainSettleChain:
         pay_vault: str,
         operator_address: str,
         http: httpx.AsyncClient | None = None,
+        mode: str = "direct",
     ) -> None:
+        if mode not in ("direct", "api"):
+            raise ValueError(f"keeper_chain_mode 非法: {mode!r}（期望 direct | api）")
         self.base_url = base_url.rstrip("/")
         self.pay_vault = pay_vault
         self.operator_address = operator_address
+        self.mode = mode
         self._rpc_url = rpc_url
         # trust_env=False：bot-chain-api 是直连服务地址，C-07——macOS 系统代理会把
         # 127.0.0.1 请求劫持成 502 空体（live 实跑踩坑）
@@ -200,20 +237,12 @@ class BotChainSettleChain:
         return str(tx_hash)
 
     async def receipt_status(self, tx_hash: str) -> int | None:
-        try:
-            resp = await self._http.get(f"{self.base_url}/api/v1/tx/{tx_hash}")
-        except httpx.HTTPError as exc:
-            raise SettleChainError(f"回执查询失败: {exc}") from exc
-        if resp.status_code == HTTP_NOT_FOUND:
-            return None
-        if resp.status_code != HTTP_OK:
-            raise SettleChainError(f"回执查询被拒({resp.status_code}): {resp.text[:200]}")
-        body = resp.json()
-        if not body.get("found"):
-            return None
-        return int(body["status"])
+        body = await self._fetch_tx_status(tx_hash)
+        return None if body is None else int(body["status"])
 
     async def receipt_logs(self, tx_hash: str) -> list[dict[str, Any]]:
+        if self.mode == "api":
+            return await self._receipt_logs_via_api(tx_hash)
         receipt = await self._fetch_receipt(tx_hash)
         return [_plain_log(log) for log in receipt.get("logs", [])]
 
@@ -240,13 +269,63 @@ class BotChainSettleChain:
                 await self._w3.provider.disconnect()
 
     async def _fetch_receipt(self, tx_hash: str) -> dict[str, Any]:
-        """单点回执读取（单测 override 此处即可零网络；C-02 模式）。"""
+        """direct 模式单点回执读取（单测 override 此处即可零网络；C-02 模式）。"""
         if self._w3 is None:
             w3 = AsyncWeb3(AsyncHTTPProvider(self._rpc_url))
             w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)  # POA extraData 超 32B
             self._w3 = w3
         receipt = await self._w3.eth.get_transaction_receipt(HexStr(tx_hash))
         return dict(receipt)
+
+    async def _fetch_tx_status(self, tx_hash: str) -> dict[str, Any] | None:
+        """GET /api/v1/tx/{hash} → 回执摘要；未找到返回 None（等待方轮询用）。"""
+        try:
+            resp = await self._http.get(f"{self.base_url}/api/v1/tx/{tx_hash}")
+        except httpx.HTTPError as exc:
+            raise SettleChainError(f"回执查询失败: {exc}") from exc
+        if resp.status_code == HTTP_NOT_FOUND:
+            return None
+        if resp.status_code != HTTP_OK:
+            raise SettleChainError(f"回执查询被拒({resp.status_code}): {resp.text[:200]}")
+        body = resp.json()
+        if not body.get("found"):
+            return None
+        return body
+
+    async def _receipt_logs_via_api(self, tx_hash: str) -> list[dict[str, Any]]:
+        """api 模式日志读取（零 web3 连接）：
+
+        /tx/{hash} 定位区块 → /contracts/logs?address&from_block&to_block 拉该块
+        PayVault 原始日志 → 本地按 transaction_hash 过滤出本笔交易的日志。
+        /contracts/logs 返回 snake_case 原始形态（bot-chain-api _raw_log），需转回
+        web3 回执日志的 camelCase 口径，decode_charge_events 的 process_log 才认
+        （snake 直喂会 MismatchedABI 静默跳过——单测锁定的实坑）。
+        """
+        body = await self._fetch_tx_status(tx_hash)
+        if body is None or body.get("block_number") is None:
+            raise SettleChainError(f"回执尚未上链（无块号，无法块窗拉日志）: {tx_hash}")
+        block = int(body["block_number"])
+        try:
+            resp = await self._http.get(
+                f"{self.base_url}/api/v1/contracts/logs",
+                params={
+                    "address": self.pay_vault,
+                    "from_block": block,
+                    "to_block": block,
+                    "limit": LOGS_FETCH_LIMIT,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise SettleChainError(f"contracts/logs 拉取失败: {exc}") from exc
+        if resp.status_code != HTTP_OK:
+            raise SettleChainError(f"contracts/logs 被拒({resp.status_code}): {resp.text[:200]}")
+        want = tx_hash.lower()
+        logs = resp.json().get("logs", [])
+        return [
+            _receipt_log_shape(log)
+            for log in logs
+            if str(log.get("transaction_hash", "")).lower() == want
+        ]
 
 
 @dataclass

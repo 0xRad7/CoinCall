@@ -718,6 +718,262 @@ async def test_client_receipt_logs_via_injected_receipt() -> None:
     await client.aclose()
 
 
+# ---- BotChainSettleChain api 模式（httpx.MockTransport 假 bot-chain-api） ----
+
+
+def _api_raw_log(log: dict[str, Any], *, tx_hash: str, block_number: int = 9) -> dict[str, Any]:
+    """/contracts/logs 原始日志形态（bot-chain-api contracts._raw_log：snake_case + 0x 归一）。"""
+    return {
+        "address": log["address"],
+        "topics": log["topics"],
+        "data": log["data"],
+        "block_number": block_number,
+        "block_hash": "0x" + "00" * 32,
+        "transaction_hash": tx_hash,
+        "transaction_index": 0,
+        "log_index": 0,
+        "removed": False,
+    }
+
+
+def _api_chain(handler: Any) -> BotChainSettleChain:
+    """api 模式客户端：httpx.MockTransport 直供（零网络、零 web3）。"""
+    return BotChainSettleChain(
+        base_url=BOTCHAIN,
+        rpc_url="http://rpc.test/",
+        pay_vault=VAULT,
+        operator_address=OPERATOR,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        mode="api",
+    )
+
+
+async def test_client_api_mode_receipt_logs_filters_by_tx() -> None:
+    """/tx 定位块 → /contracts/logs 块窗 → 按 transaction_hash 过滤（同块他笔剔除）。"""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == "/api/v1/tx/0xabc":
+            return httpx.Response(
+                200, json={"found": True, "tx_hash": "0xabc", "status": 1, "block_number": 9}
+            )
+        assert request.url.path == "/api/v1/contracts/logs"
+        assert dict(request.url.params) == {
+            "address": VAULT,
+            "from_block": "9",
+            "to_block": "9",
+            "limit": "5000",
+        }
+        mine = _api_raw_log(
+            log_charged(provider=PROVIDER_WALLET, from_=CONSUMER_A, value=10000, nonce=nonce_of(3)),
+            tx_hash="0xabc",
+        )
+        other_tx = _api_raw_log(
+            log_charged(provider=PROVIDER_WALLET, from_=CONSUMER_B, value=7, nonce=nonce_of(4)),
+            tx_hash="0x" + "ff" * 32,
+        )
+        return httpx.Response(
+            200,
+            json={
+                "address": VAULT,
+                "topic0": None,
+                "from_block": 9,
+                "to_block": 9,
+                "count": 2,
+                "truncated": False,
+                "logs": [mine, other_tx],
+            },
+        )
+
+    client = _api_chain(handler)
+    logs = await client.receipt_logs("0xabc")
+    assert seen == ["/api/v1/tx/0xabc", "/api/v1/contracts/logs"]
+    events = decode_charge_events(logs, VAULT)
+    assert len(events) == 1 and events[0].kind == "charged"
+    assert events[0].value == 10000 and events[0].nonce == nonce_of(3)
+    await client.aclose()
+
+
+async def test_client_api_mode_receipt_logs_tx_missing() -> None:
+    """/tx 未找到（found=False）→ SettleChainError（行保持 pending 待重试）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/tx/0xabc"
+        return httpx.Response(200, json={"found": False, "tx_hash": "0xabc"})
+
+    client = _api_chain(handler)
+    with pytest.raises(SettleChainError, match="尚未上链"):
+        await client.receipt_logs("0xabc")
+    await client.aclose()
+
+
+async def test_client_api_mode_logs_rejected() -> None:
+    """/contracts/logs 非 200 → SettleChainError 带状态码与响应体片段。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/tx/0xabc":
+            return httpx.Response(
+                200, json={"found": True, "tx_hash": "0xabc", "status": 1, "block_number": 9}
+            )
+        return httpx.Response(500, text="boom")
+
+    client = _api_chain(handler)
+    with pytest.raises(SettleChainError, match=r"contracts/logs 被拒\(500\)"):
+        await client.receipt_logs("0xabc")
+    await client.aclose()
+
+
+def test_client_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="direct"):
+        BotChainSettleChain(
+            base_url=BOTCHAIN,
+            rpc_url="http://rpc.test/",
+            pay_vault=VAULT,
+            operator_address=OPERATOR,
+            mode="proxy",
+        )
+
+
+def test_keeper_chain_mode_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """env 唯一入口：缺省 direct；COINCALL_KEEPER_CHAIN_MODE=api 生效；非法值拒绝启动。"""
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    assert Settings().keeper_chain_mode == "direct"
+    monkeypatch.setenv("COINCALL_KEEPER_CHAIN_MODE", "api")
+    assert Settings().keeper_chain_mode == "api"
+    monkeypatch.setenv("COINCALL_KEEPER_CHAIN_MODE", "proxy")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+async def test_client_direct_mode_regression_no_api_calls() -> None:
+    """direct（缺省）回归：receipt_logs 仍走 _fetch_receipt（web3），零 bot-chain-api 触达。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"direct 模式不应触达 bot-chain-api: {request.url}")
+
+    class ProbingClient(BotChainSettleChain):
+        async def _fetch_receipt(self, tx_hash: str) -> dict[str, Any]:
+            return {
+                "status": 1,
+                "logs": [
+                    log_charged(
+                        provider=PROVIDER_WALLET, from_=CONSUMER_A, value=10000, nonce=nonce_of(3)
+                    )
+                ],
+            }
+
+    client = ProbingClient(
+        base_url=BOTCHAIN,
+        rpc_url="http://rpc.test/",
+        pay_vault=VAULT,
+        operator_address=OPERATOR,
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    logs = await client.receipt_logs("0xabc")
+    events = decode_charge_events(logs, VAULT)
+    assert events[0].kind == "charged" and events[0].value == 10000
+    await client.aclose()
+
+
+# ---- api 模式经 Keeper 全链路（MockTransport 假 bot-chain-api 四端点） ------
+
+
+async def test_keeper_api_mode_happy_path(tmp_path: Path) -> None:
+    """api 模式 happy path：send → /tx 回执 → 块窗日志 → 3 笔 settle=done + calls=settled。"""
+    from app.modules.calls import CallStatus
+
+    tx_hash = "0x" + "ab" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/contracts/call":  # 重启首轮 usedNonces 探测
+            return httpx.Response(200, json={"to": VAULT, "method": "usedNonces", "result": False})
+        if path == "/api/v1/contracts/send":
+            sent = json.loads(request.content)
+            assert sent["from_address"] == OPERATOR and sent["dry_run"] is False
+            return httpx.Response(
+                200,
+                json={
+                    "dry_run": False,
+                    "tx_hash": tx_hash,
+                    "status": 1,
+                    "block_number": 9,
+                    "gas_used": 120000,
+                    "effective_gas_price_wei": "20000000000",
+                    "from_address": OPERATOR,
+                    "to_address": VAULT,
+                    "contract_address": None,
+                },
+            )
+        if path == f"/api/v1/tx/{tx_hash}":
+            return httpx.Response(
+                200, json={"found": True, "tx_hash": tx_hash, "status": 1, "block_number": 9}
+            )
+        assert path == "/api/v1/contracts/logs"
+        logs = [
+            _api_raw_log(
+                log_charged(
+                    provider=PROVIDER_WALLET, from_=CONSUMER_A, value=10000, nonce=nonce_of(i)
+                ),
+                tx_hash=tx_hash,
+            )
+            for i in range(1, 4)
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "address": VAULT,
+                "topic0": None,
+                "from_block": 9,
+                "to_block": 9,
+                "count": 3,
+                "truncated": False,
+                "logs": logs,
+            },
+        )
+
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    for i in range(1, 4):
+        seed_settle(store, call_id=f"call_{i}", nonce=nonce_of(i))
+    chain = _api_chain(handler)
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, batch_size=3, now=lambda: NOW)
+    report = await keeper.run_cycle()
+    assert report["flushed"] is True and report["charged"] == 3
+    assert settle_statuses(store)["done"] == ["call_1", "call_2", "call_3"]
+    assert keeper.metrics.cumulative_charged_count == 3
+    assert store.get_call("call_1")["status"] == CallStatus.SETTLED
+    await chain.aclose()
+    store.close()
+
+
+async def test_keeper_api_mode_send_failure_keeps_pending(tmp_path: Path) -> None:
+    """api 模式 send 被拒（409 revert）→ SettleChainError；3 笔保持 pending 待下轮。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/contracts/call":
+            return httpx.Response(200, json={"to": VAULT, "method": "usedNonces", "result": False})
+        assert request.url.path == "/api/v1/contracts/send"
+        return httpx.Response(
+            409, json={"error": "tx_reverted", "detail": "NotOperator()", "code": "reverted"}
+        )
+
+    store = CallStore(str(tmp_path / "gateway.duckdb"))
+    for i in range(1, 4):
+        seed_settle(store, call_id=f"call_{i}", nonce=nonce_of(i))
+    chain = _api_chain(handler)
+    keeper = Keeper(store=store, chain=chain, wallet_for=wallet_for, batch_size=3, now=lambda: NOW)
+    with pytest.raises(SettleChainError, match="chargeWithSigBatch 被拒"):
+        await keeper.run_cycle()
+    assert settle_statuses(store)["pending"] == ["call_1", "call_2", "call_3"]
+    assert keeper.metrics.last_error is not None
+    await chain.aclose()
+    store.close()
+
+
 # ---- 补充：resolver / 常驻循环韧性 / 边缘分支 ------------------------------
 
 
