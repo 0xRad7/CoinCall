@@ -138,6 +138,28 @@ class Ledger:
             }
         )
 
+    def recent(self, n: int = 10) -> list[dict[str, Any]]:
+        """倒序读最后 n 行（最新在前）；无文件/坏行（崩溃残留半行）安全跳过。
+
+        审计读口（spend_report）：只读不追加，坏行不炸——对账出口必须稳。
+        """
+        if self._path is None or not self._path.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        for raw in reversed(self._path.read_text(encoding="utf-8").splitlines()):
+            if len(rows) >= n:
+                break
+            text = raw.strip()
+            if not text:
+                continue
+            try:
+                row: Any = json.loads(text)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        return rows
+
 
 class PolicyEngine:
     """签名前评估（check）→ 三段记账。check 不通过绝不进签名路径。"""
@@ -226,6 +248,36 @@ class PolicyEngine:
         self.state.hourly_calls += 1
         self.state.last_call_ts = now
         self._save_state()
+
+    # ---- 聚合读口（MCP spend_report/wallet_status/service_quote 用） ----
+    def summary(self) -> dict[str, Any]:
+        """预算余量/已花/引擎状态一屏读（只读不落盘）。
+
+        日额口径与下一次 check() 一致：跨 UTC 日后显示层先行归零
+        （state 的重置仍只发生在下一笔 check，本方法不改动状态文件）。
+        """
+        today = _utc_day(time.time())
+        if self.state.day_key == today:
+            daily_spent = self.state.daily_spent_raw
+            day_key = self.state.day_key
+        else:
+            daily_spent, day_key = 0, today  # 新日：下一笔 check 将重置
+
+        def _left(budget: int | None, spent: int) -> int | None:
+            return budget - spent if budget is not None else None
+
+        return {
+            "total_budget_raw": self.cfg.total_budget_raw,
+            "total_spent_raw": self.state.total_spent_raw,
+            "total_left_raw": _left(self.cfg.total_budget_raw, self.state.total_spent_raw),
+            "daily_budget_raw": self.cfg.daily_budget_raw,
+            "daily_spent_raw": daily_spent,
+            "daily_left_raw": _left(self.cfg.daily_budget_raw, daily_spent),
+            "day_key": day_key,
+            "max_per_call_raw": self.cfg.max_per_call_raw,
+            "allowed_service_ids": self.cfg.allowed_service_ids,
+            "disabled_reason": self.state.disabled_reason,
+        }
 
     # ---- 三段账本 ----
     def record_intent(self, service_id: str, amount_raw: int, auth_nonce: str) -> str:

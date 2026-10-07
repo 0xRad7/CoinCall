@@ -136,7 +136,14 @@ def test_summary_budget_view(tmp_path):
     e.disable("手动停机")
     assert e.summary()["disabled_reason"] == "手动停机"
     # 未设限的档位显示 None（引擎在位但不设顶）
-    e3 = PolicyEngine(cfg(state_path=tmp_path / "s3.json", ledger_path=tmp_path / "l3.jsonl"))
+    e3 = PolicyEngine(
+        cfg(
+            total_budget_raw=None,
+            daily_budget_raw=None,
+            state_path=tmp_path / "s3.json",
+            ledger_path=tmp_path / "l3.jsonl",
+        )
+    )
     s3 = e3.summary()
     assert s3["total_budget_raw"] is None and s3["total_left_raw"] is None
     assert s3["daily_left_raw"] is None
@@ -161,7 +168,14 @@ def test_summary_rolls_stale_day_for_display(tmp_path):
             }
         )
     )
-    e = PolicyEngine(cfg(daily_budget_raw=500, state_path=p, ledger_path=tmp_path / "l.jsonl"))
+    e = PolicyEngine(
+        cfg(
+            total_budget_raw=None,
+            daily_budget_raw=500,
+            state_path=p,
+            ledger_path=tmp_path / "l.jsonl",
+        )
+    )
     s = e.summary()
     assert s["day_key"] == _time.strftime("%Y-%m-%d", _time.gmtime())
     assert s["daily_spent_raw"] == 0 and s["daily_left_raw"] == 500  # 新日未花
@@ -176,8 +190,10 @@ def test_ledger_recent_last_n_newest_first(tmp_path):
         e.record_receipt(rid, f"rcp_{i}", charged_raw=10 * (i + 1))
     rows = e.ledger.recent(3)
     assert len(rows) == 3
+    # 文件序 intent0,receipt0,intent1,receipt1,intent2,receipt2 → 倒序截 3：
     assert rows[0]["stage"] == "receipt" and rows[0]["gateway_receipt"] == "rcp_2"  # 最新在前
-    assert rows[-1]["stage"] == "intent" and rows[-1]["service_id"] == "svc_1"
+    assert rows[1]["stage"] == "intent" and rows[1]["service_id"] == "svc_2"
+    assert rows[-1]["stage"] == "receipt" and rows[-1]["gateway_receipt"] == "rcp_1"
     assert [r["charged_raw"] for r in rows if r["stage"] == "receipt"] == [30, 20]
     assert e.ledger.recent(2)[0] == rows[0]  # 截断仍从最新起
     assert len(e.ledger.recent(99)) == 6  # 不超过实际行数
