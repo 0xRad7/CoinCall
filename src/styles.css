@@ -531,3 +531,14 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 /* 发布页分组卡 + 粘性操作条 */
 .form-group-card { margin-bottom: var(--space-5); }
 .sticky-action-bar { position: sticky; bottom: 0; z-index: 20; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); box-shadow: 0 -2px 12px rgba(20, 30, 50, 0.08); margin-top: var(--space-4); }
+
+
+/* 总览-服务目录：团队|服务 左右结构 */
+.catalog-split { display: grid; grid-template-columns: 220px 1fr; gap: 16px; margin-bottom: 16px; }
+.catalog-team-list { display: flex; flex-direction: column; gap: 6px; }
+.catalog-team-item { text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; font-family: inherit; transition: border-color 0.12s, background-color 0.12s; display: flex; flex-direction: column; gap: 2px; }
+.catalog-team-item:hover { border-color: var(--primary); }
+.catalog-team-item.active { border-color: var(--primary); background: var(--primary-soft); }
+.catalog-team-item .ct-name { font-size: var(--fs-14); font-weight: 600; color: var(--text); }
+.catalog-team-item .ct-meta { font-size: var(--fs-12); color: var(--text-2); }
+@media (max-width: 720px) { .catalog-split { grid-template-columns: 1fr; } }

@@ -1,7 +1,7 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, Navigate } from "react-router-dom";
 import { useWallet } from "./state/WalletContext";
 import { useMode } from "./state/ModeContext";
-import { CHAIN_ID } from "./chain/constants";
+import { ADMIN_ADDRESS, CHAIN_ID } from "./chain/constants";
 import { ConnectWalletButton } from "./components/ConnectWalletButton";
 import { ModePill, ThemeToggle } from "./components/shell";
 
@@ -66,15 +66,16 @@ function WalletChipBar() {
   );
 }
 
-/** 侧栏导航：任务分组 + 每项一句灰字副标注（Provider/Consumer 项带身份色激活态）。 */
-const NAV_GROUPS: Array<{
+/** 侧栏导航工厂：adminEnabled 决定总览副标注（管理员视图/目录与比价）。 */
+function navGroups(adminEnabled: boolean): Array<{
   label: string;
   items: Array<{ to: string; end?: boolean; name: string; sub: string; identity?: "provider" | "consumer" }>;
-}> = [
+}> {
+  return [
   {
     label: "公共",
     items: [
-      { to: "/", end: true, name: "总览", sub: "目录与比价" },
+      { to: "/", end: true, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" },
     ],
   },
   {
@@ -90,10 +91,24 @@ const NAV_GROUPS: Array<{
       { to: "/help", name: "帮助", sub: "流程与错误码" },
     ],
   },
-];
+  ];
+}
 
 export function AppShell() {
   const { mode } = useMode();
+  const w = useWallet();
+  // 管理员门禁：配置 VITE_ADMIN_ADDRESS 后，总览=管理员专属（连接地址精确匹配）；
+  // 未配置（本地开发）不启用门禁——总览对所有人可见，便于调试。
+  const adminEnabled = ADMIN_ADDRESS !== "";
+  const isAdmin = !adminEnabled || (w.address ?? "").toLowerCase() === ADMIN_ADDRESS;
+
+  // 非管理员访问 / → 送往 welcome
+  const hash = typeof window !== "undefined" ? window.location.hash : "";
+  const path = hash.startsWith("#") ? hash.slice(1).split("?")[0] : "";
+  if (adminEnabled && !isAdmin && (path === "/" || path === "")) {
+    return <Navigate to="/welcome" replace />;
+  }
+
   return (
     <div className="app-shell">
       <nav className="side-nav">
@@ -101,7 +116,7 @@ export function AppShell() {
           <span className="dot" />
           CoinCall 币应
         </div>
-        {NAV_GROUPS.map((g) => (
+        {navGroups(adminEnabled).map((g) => (
           <div key={g.label} className="nav-group">
             <div className="nav-group-label">{g.label}</div>
             {g.items

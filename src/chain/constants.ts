@@ -108,3 +108,6 @@ export function fromRaw(amountRaw: bigint | string, decimals = USDT_DECIMALS): s
   const f = (abs % base).toString().padStart(decimals, "0").replace(/0+$/, "");
   return `${neg ? "-" : ""}${i.toString()}${f ? "." + f : ""}`;
 }
+
+/** 管理员地址（VITE_ADMIN_ADDRESS 注入；空=不启用门禁，总览对所有人可见——本地开发模式） */
+export const ADMIN_ADDRESS = (import.meta.env.VITE_ADMIN_ADDRESS ?? "").toLowerCase();

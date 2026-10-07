@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_EXPLORER_URL?: string;
   readonly VITE_PAY_VAULT?: string;
   readonly VITE_USDT?: string;
+  readonly VITE_ADMIN_ADDRESS?: string;
 }
 
 interface ImportMeta {

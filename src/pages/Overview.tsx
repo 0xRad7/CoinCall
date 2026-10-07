@@ -1,6 +1,6 @@
 /** 总览页（公共目录+决策视图，两端共用）：三段式骨架——指标排（证据成对）/ 收入榜 / 比价 / 目录 / keeper 观测。 */
 import { useState } from "react";
-import { coreApi, decisionApi, teamsApi, type DecisionRow, type ProofResponse } from "../api/core";
+import { coreApi, decisionApi, type DecisionRow, type ProofResponse } from "../api/core";
 import { gatewayApi } from "../api/gateway";
 import { useAsync } from "../lib/useAsync";
 import { AsyncSection, Badge, CopyButton, ErrorBox, Spinner, TxLink } from "../components/ui";
@@ -87,10 +87,10 @@ export default function Overview() {
       {/* 同类比价（决策视图） */}
       <DecisionView />
 
-      {/* 服务目录（Teams 分卡视图，双轴：Teams=谁提供 / category=什么能力） */}
+      {/* 服务目录（左右结构：左=团队列表，右=选中团队的服务；管理员视图，团队主页数据去 Provider 工作台看） */}
       <div className="card">
         <h3>服务目录</h3>
-        <CatalogTeamsAxis decisionMap={decisionMap} />
+        <CatalogTeamsSplit decisionMap={decisionMap} />
         <AsyncSection state={catalog} empty="目录为空——去 Provider 工作台发布第一个服务">
           {(c) => (
             <div className="svc-grid">
@@ -396,112 +396,92 @@ export function DecisionView() {
 }
 
 
-/** 目录双轴切换：Teams（默认分组）| 类目（平铺）。 */
-function CatalogTeamsAxis({ decisionMap }: { decisionMap: Map<string, DecisionRow> }) {
-  const [axis, setAxis] = useState<"teams" | "category">("teams");
+/** 目录左右结构：左=团队列表（收入聚合），右=选中团队的服务详情卡。 */
+function CatalogTeamsSplit({ decisionMap }: { decisionMap: Map<string, DecisionRow> }) {
   const catalog = useAsync(() => coreApi.catalog(), []);
-  const [openTeam, setOpenTeam] = useState<number | null>(null);
-  const teamDetail = useAsync(() => (openTeam != null ? teamsApi.detail(openTeam) : Promise.resolve(null)), [openTeam]);
+  const [selTeam, setSelTeam] = useState<string | null>(null);
 
   return (
-    <>
-      <div className="flex" style={{ gap: 6, marginBottom: 12 }}>
-        <div className="seg">
-          <button className={axis === "teams" ? "active" : ""} onClick={() => setAxis("teams")}>按团队</button>
-          <button className={axis === "category" ? "active" : ""} onClick={() => setAxis("category")}>按类目</button>
-        </div>
-        <span className="dim" style={{ fontSize: 12 }}>{axis === "teams" ? "Teams = 谁提供（团队聚合收入徽章）" : "类目 = 什么能力（点击目录卡上方的类目 chips 切换）"}</span>
-      </div>
-
-      <AsyncSection state={catalog} empty="目录为空">
-        {(c) => {
-          if (axis === "category") {
-            return (
-              <div className="svc-grid">
-                {c.services.map((s) => (
-                  <div className="svc-card" key={s.service_id}>
-                    <div className="flex" style={{ justifyContent: "space-between" }}>
-                      <span className="svc-name">{s.manifest.name}</span>
-                      <Badge kind={s.status === "active" ? "ok" : "warn"}>{s.status}</Badge>
-                    </div>
-                    <div className="mono dim" style={{ fontSize: 11 }}>{s.service_id} · {s.manifest.provider.display_name}</div>
-                    <div className="svc-price" style={{ margin: "6px 0" }}>{s.manifest.pricing.amount} USDT<span className="dim"> · raw={s.manifest.pricing.amount_raw}</span></div>
-                  </div>
-                ))}
-              </div>
-            );
-          }
-          // Teams 分组
-          const groups = new Map<string, { display_name: string; agent_id: number | null; services: typeof c.services }>();
-          for (const s of c.services) {
-            const key = s.manifest.provider.display_name || s.manifest.provider.wallet;
-            const g = groups.get(key) ?? { display_name: s.manifest.provider.display_name, agent_id: s.manifest.provider.agent_id, services: [] as typeof c.services };
-            g.services.push(s);
-            groups.set(key, g);
-          }
-          return (
-            <div className="svc-grid">
-              {[...groups.entries()].map(([key, g]) => {
-                                const rev = [...decisionMap.values()].filter((r) => g.services.some((sv) => sv.service_id === r.service_id));
-                const teamRev = rev.reduce((a, r) => a + BigInt(r.components.revenue.total_raw), BigInt(0));
+    <AsyncSection state={catalog} empty="目录为空">
+      {(c) => {
+        const groups = new Map<string, { display_name: string; agent_id: number | null; services: typeof c.services }>();
+        for (const s of c.services) {
+          const key = s.manifest.provider.display_name || s.manifest.provider.wallet;
+          const g = groups.get(key) ?? { display_name: s.manifest.provider.display_name, agent_id: s.manifest.provider.agent_id, services: [] as typeof c.services };
+          g.services.push(s);
+          groups.set(key, g);
+        }
+        const keys = [...groups.keys()];
+        const active = selTeam ?? keys[0] ?? "";
+        const g = groups.get(active);
+        const rev = [...decisionMap.values()].filter((r) => g?.services.some((sv) => sv.service_id === r.service_id));
+        const teamRev = rev.reduce((a, r) => a + BigInt(r.components.revenue.total_raw), BigInt(0));
+        return (
+          <div className="catalog-split">
+            <aside className="catalog-team-list">
+              {keys.map((k) => {
+                const grp = groups.get(k)!;
+                const r = [...decisionMap.values()].filter((d) => grp.services.some((sv) => sv.service_id === d.service_id));
+                const rv = r.reduce((a, d) => a + BigInt(d.components.revenue.total_raw), BigInt(0));
                 return (
-                  <div className="svc-card" key={key} style={{ gridColumn: "span 2" }} role="button" aria-label={`展开团队 ${g.display_name}`} onClick={() => setOpenTeam(g.agent_id)}>
-                    <div className="flex" style={{ justifyContent: "space-between" }}>
-                      <span className="svc-name">{g.display_name || "（未命名团队）"}</span>
-                      <span className="badge ok" title="团队聚合收入（链上 Charged）">{fromRaw(teamRev)} USDT</span>
-                    </div>
-                    <div className="mono dim" style={{ fontSize: 11, margin: "4px 0 8px" }}>
-                      {g.services.length} 服务{g.agent_id != null ? ` · team #${g.agent_id}` : ""}
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      {g.services.map((s) => (
-                        <div key={s.service_id} className="flex" style={{ justifyContent: "space-between", fontSize: 13 }}>
-                          <span>{s.manifest.name}</span>
-                          <span className="num dim">{s.manifest.pricing.amount} USDT</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>点击展开团队主页数据 ↓</div>
-                  </div>
+                  <button key={k} type="button" className={`catalog-team-item${k === active ? " active" : ""}`} onClick={() => setSelTeam(k)}>
+                    <span className="ct-name">{grp.display_name || "（未命名团队）"}</span>
+                    <span className="ct-meta">{grp.services.length} 服务 · {fromRaw(rv)} USDT</span>
+                  </button>
                 );
               })}
+            </aside>
+            <div className="catalog-team-detail">
+              {g && (
+                <>
+                  <div className="flex" style={{ justifyContent: "space-between", marginBottom: 10 }}>
+                    <div>
+                      <span className="svc-name">{g.display_name || "（未命名团队）"}</span>
+                      <span className="dim" style={{ fontSize: 12, marginLeft: 8 }}>
+                        {g.agent_id != null ? `team #${g.agent_id}` : "无链上身份"} · 团队主页数据请到 Provider 工作台查看
+                      </span>
+                    </div>
+                    <span className="badge ok" title="团队聚合收入（链上 Charged）">{fromRaw(teamRev)} USDT</span>
+                  </div>
+                  <div className="svc-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
+                    {g.services.map((s) => {
+                      const dr = decisionMap.get(s.service_id);
+                      return (
+                        <div className="svc-card" key={s.service_id}>
+                          <div className="flex" style={{ justifyContent: "space-between" }}>
+                            <span className="svc-name">{s.manifest.name}</span>
+                            <Badge kind={s.status === "active" ? "ok" : "warn"}>{s.status}</Badge>
+                          </div>
+                          <div className="mono dim">{s.service_id}</div>
+                          <div style={{ margin: "8px 0" }}>
+                            <span className="svc-price">{s.manifest.pricing.amount} {s.manifest.pricing.token}</span>
+                            <span className="dim"> / 次</span>
+                          </div>
+                          {dr && (
+                            <div className="flex" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }} title="决策层履约信号">
+                              <span className="badge ok">✓ {pct(dr.components.fulfillment.success_rate)}</span>
+                              {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
+                              <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
+                            </div>
+                          )}
+                          <div className="call-endpoint-box">
+                            <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
+                            <div className="flex" style={{ gap: 6 }}>
+                              <span className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>POST {gatewayCallUrl(s.service_id)}</span>
+                              <CopyButton text={`POST ${gatewayCallUrl(s.service_id)}`} label="复制" />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
-          );
-        }}
-      </AsyncSection>
-
-      {openTeam != null && (
-        <div style={{ marginTop: 12 }}>
-          <div className="flex" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-            <b>团队主页数据</b>
-            <button className="btn small secondary" onClick={() => setOpenTeam(null)}>收起</button>
           </div>
-          <AsyncSection state={teamDetail} empty="团队不存在">
-            {(t) => (
-              <div className="stat-grid">
-                <StatCard
-                  k="收入"
-                  value={fromRaw(BigInt(t.revenue.total_raw))}
-                  sub={`${t.revenue.charged_count} 笔 · raw=${t.revenue.total_raw}`}
-                  evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href={EXPLORER_URL} label="链上 Charged 口径，去 scan 核对" />}
-                />
-                <StatCard k="服务数" value={t.services.length} sub={t.team.display_name} />
-                <StatCard
-                  k="履约汇总"
-                  value={(() => {
-                    const svcs = t.fulfillment.services;
-                    const ok = svcs.reduce((x, y) => x + y.calls_success, 0);
-                    const abort = svcs.reduce((x, y) => x + y.calls_aborted, 0);
-                    return `${ok + abort > 0 ? Math.round((ok / (ok + abort)) * 100) : 100}%`;
-                  })()}
-                  sub={`p95 最慢 ${Math.max(0, ...t.fulfillment.services.map((x) => x.p95_ms))}ms`}
-                />
-              </div>
-            )}
-          </AsyncSection>
-        </div>
-      )}
-    </>
+        );
+      }}
+    </AsyncSection>
   );
 }
 
