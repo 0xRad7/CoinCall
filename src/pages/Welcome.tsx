@@ -8,7 +8,7 @@
  *   中文副语，身份色首次出现），选择后进对应工作台并 localStorage 粘滞；
  * - 已连接且已选过身份（非手动返回）→ 直接进对应工作台。
  */
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { ThemeToggle } from "../components/shell";
@@ -26,6 +26,27 @@ export default function Welcome() {
   if (mode && !switching) return <Navigate to={mode === "provider" ? "/provider" : "/consumer"} replace />;
   return <PickFace />;
 }
+
+/** 星空穿越粒子：16 颗从内容中心向四周飞散——纯 CSS 动画，此处只注入每颗的驱动变量
+ * （--tx/--ty 方向、--d 周期 3~5.6s、--dl 负相位每颗递增 0.45s、--s 尺寸 3~4px、c 三色轮换）。 */
+const STAR_PARTICLES: Array<{ tx: string; ty: string; d: string; dl: string; s: string; c: string }> = [
+  { tx: "26vw", ty: "3vh", d: "3.2s", dl: "-0s", s: "3px", c: "teal" },
+  { tx: "26vw", ty: "15vh", d: "3.9s", dl: "-0.45s", s: "3.5px", c: "blue" },
+  { tx: "21vw", ty: "27vh", d: "4.6s", dl: "-0.9s", s: "4px", c: "white" },
+  { tx: "10vw", ty: "37vh", d: "5.3s", dl: "-1.35s", s: "3.5px", c: "teal" },
+  { tx: "-3vw", ty: "26vh", d: "3s", dl: "-1.8s", s: "3px", c: "blue" },
+  { tx: "-15vw", ty: "26vh", d: "3.6s", dl: "-2.25s", s: "3.5px", c: "white" },
+  { tx: "-27vw", ty: "21vh", d: "4.3s", dl: "-2.7s", s: "4px", c: "teal" },
+  { tx: "-37vw", ty: "10vh", d: "5s", dl: "-3.15s", s: "3.5px", c: "blue" },
+  { tx: "-26vw", ty: "-3vh", d: "3.3s", dl: "-3.6s", s: "3px", c: "white" },
+  { tx: "-26vw", ty: "-15vh", d: "4s", dl: "-4.05s", s: "3.5px", c: "teal" },
+  { tx: "-21vw", ty: "-27vh", d: "4.8s", dl: "-4.5s", s: "4px", c: "blue" },
+  { tx: "-10vw", ty: "-37vh", d: "5.6s", dl: "-4.95s", s: "3.5px", c: "white" },
+  { tx: "3vw", ty: "-26vh", d: "3.1s", dl: "-5.4s", s: "3px", c: "teal" },
+  { tx: "15vw", ty: "-26vh", d: "3.8s", dl: "-5.85s", s: "3.5px", c: "blue" },
+  { tx: "27vw", ty: "-21vh", d: "4.5s", dl: "-6.3s", s: "4px", c: "white" },
+  { tx: "37vw", ty: "-10vh", d: "5.2s", dl: "-6.75s", s: "3.5px", c: "teal" },
+];
 
 /* ============ 登录态（暗色情报站落地页，登录入口在右上角顶栏） ============ */
 const CAPABILITIES: Array<{ no: string; title: string; tag: string; desc: string; size?: "lg" | "wide" }> = [
@@ -93,6 +114,12 @@ function LoginFace() {
 
   return (
     <div className="welcome-shell login">
+      {/* 星空穿越背景：静态星点+深蓝微光（::before/::after）+ 16 颗变量驱动飞散粒子；纯装饰，无障碍隐藏 */}
+      <div className="wl-stars" aria-hidden="true">
+        {STAR_PARTICLES.map((sp, i) => (
+          <span key={i} className={`ws-p ${sp.c}`} style={{ "--tx": sp.tx, "--ty": sp.ty, "--d": sp.d, "--dl": sp.dl, "--s": sp.s } as CSSProperties} />
+        ))}
+      </div>
       <header className="welcome-top">
         <span className="brand">
           <span className="dot" />

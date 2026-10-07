@@ -324,7 +324,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
    + fade-in-up 依次入场 + 底部径向光晕；reduced-motion 全部优雅降级。
    ============================================================ */
 .welcome-shell { min-height: 100vh; display: flex; flex-direction: column; }
-.welcome-shell.login { background: #0a0e14; color: #e6e9ef; }
+.welcome-shell.login { position: relative; background: #0a0e14; color: #e6e9ef; }
 .welcome-shell.pick { background: var(--bg); color: var(--text); }
 
 /* 顶部：细透明深色条（左品牌右操作）；登录面锚点滚动时常驻 */
@@ -337,10 +337,44 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .login .welcome-top .theme-toggle { background: transparent; border-color: #2b3850; color: #94a3bd; }
 .login .welcome-top .theme-toggle:hover { background: #131b2b; }
 
+/* ---- 星空穿越背景：静态星点 + 深蓝微光 + 16 颗变量驱动飞散粒子（纯 CSS） ---- */
+.wl-stars { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.wl-stars::before {
+  content: ""; position: absolute; inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 18% 22%, rgba(230, 232, 238, 0.55), transparent 100%),
+    radial-gradient(1px 1px at 62% 12%, rgba(230, 232, 238, 0.35), transparent 100%),
+    radial-gradient(1px 1px at 82% 58%, rgba(148, 163, 189, 0.45), transparent 100%),
+    radial-gradient(1px 1px at 34% 74%, rgba(230, 232, 238, 0.3), transparent 100%),
+    radial-gradient(1px 1px at 8% 52%, rgba(148, 163, 189, 0.35), transparent 100%),
+    radial-gradient(1px 1px at 88% 86%, rgba(230, 232, 238, 0.25), transparent 100%);
+  background-size: 240px 220px, 320px 280px, 280px 260px, 360px 300px, 260px 240px, 400px 340px;
+}
+.wl-stars::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(58% 46% at 50% 44%, rgba(37, 99, 235, 0.1), transparent 72%);
+}
+.ws-p {
+  position: absolute; left: 50%; top: 52%;
+  width: var(--s); height: var(--s); border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: ws-fly var(--d) cubic-bezier(0.3, 0.55, 0.6, 1) var(--dl) infinite;
+  will-change: transform, opacity;
+}
+.ws-p.teal { background: #5eead4; box-shadow: 0 0 6px 1px rgba(45, 212, 191, 0.75); }
+.ws-p.blue { background: #60a5fa; box-shadow: 0 0 6px 1px rgba(59, 130, 246, 0.75); }
+.ws-p.white { background: #e6e8ee; box-shadow: 0 0 5px 1px rgba(230, 232, 238, 0.65); }
+@keyframes ws-fly {
+  0% { transform: translate(-50%, -50%) translate(0, 0) scale(0.4); opacity: 0; }
+  14% { opacity: 1; }
+  78% { opacity: 0.6; }
+  100% { transform: translate(-50%, -50%) translate(var(--tx), var(--ty)) scale(1.2); opacity: 0; }
+}
+
 /* ---- 登录态主体（hero + 能力 + 指标 + 护栏），登录入口保持在右上角顶栏 ---- */
 .welcome-top-actions { display: flex; align-items: center; gap: var(--space-3); }
 .login .welcome-top .btn { padding: 9px 20px; font-size: 15px; }
-.welcome-login { flex: 1; width: 100%; max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--space-4) clamp(14px, 2.5vh, 32px); }
+.welcome-login { position: relative; z-index: 1; flex: 1; width: 100%; max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--space-4) clamp(14px, 2.5vh, 32px); }
 
 /* 入场动效：hero 元素 fade-in-up 依次延迟（纯 CSS；reduced-motion 关闭） */
 @keyframes wl-fade-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
@@ -460,6 +494,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
   .wl-title { background-position: 12% 0; }
   .bento-card { transition: none; }
   .bento-card { transform: none; }
+  .ws-p { display: none; }  /* 星空粒子静止隐藏；静态星点层保留 */
 }
 
 /* ---- 选身份态：工具面 + 两张大模式卡（英文主标签 + 中文副语，身份色首次出现） ---- */
