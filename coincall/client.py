@@ -110,6 +110,16 @@ class Client:
         self._catalog_etag: str | None = None
         self._spent_raw = 0
 
+    # -- 内部：连接错误人话化 --
+
+    @staticmethod
+    def _unreachable(label: str, url: str, exc: Exception) -> CoinCallError:
+        """连接失败带上下文：哪个服务、什么地址、怎么自查（替代裸 Errno 61）。"""
+        return CoinCallError(
+            f"{label} 不可达（{url}）：{exc} —— 先跑 ./up.sh status 检查服务"
+            "（core=8020 管理面 / gateway=8030 网关），停了就 ./up.sh start"
+        )
+
     # -- 目录 --
 
     def catalog(self, *, force: bool = False) -> dict[str, Any]:
@@ -121,7 +131,10 @@ class Client:
         if force:
             self._catalog_etag = None
         headers = {"If-None-Match": self._catalog_etag} if self._catalog_etag else {}
-        resp = self._http.get(f"{self.core_url}/catalog", headers=headers)
+        try:
+            resp = self._http.get(f"{self.core_url}/catalog", headers=headers)
+        except httpx.ConnectError as exc:
+            raise self._unreachable("core（管理面，拿不到目录与价格）", self.core_url, exc) from exc
         if resp.status_code == HTTP_NOT_MODIFIED and self._catalog is not None:
             return self._catalog
         if resp.status_code >= HTTP_BAD_REQUEST:
@@ -212,9 +225,12 @@ class Client:
             if idempotency_key is not None
             else _default_idempotency_key(service_id, params),
         }
-        resp = self._http.post(
-            f"{self.gateway_url}/call/{service_id}", json=params, headers=headers
-        )
+        try:
+            resp = self._http.post(
+                f"{self.gateway_url}/call/{service_id}", json=params, headers=headers
+            )
+        except httpx.ConnectError as exc:
+            raise self._unreachable("gateway（网关，付费调用入口）", self.gateway_url, exc) from exc
 
         if resp.status_code == HTTP_PAYMENT_REQUIRED:
             raise PaymentRequiredError(self._json_or_empty(resp))

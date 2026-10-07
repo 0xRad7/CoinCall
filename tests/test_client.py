@@ -357,3 +357,45 @@ def test_default_idempotency_key_unique_per_call() -> None:
     k1 = _default_idempotency_key("svc_rad_ai", {"limit": 10})
     k2 = _default_idempotency_key("svc_rad_ai", {"limit": 10})
     assert k1 != k2 and k1.startswith("ik-") and k2.startswith("ik-")
+
+
+@pytest.mark.unit
+def test_core_unreachable_error_names_the_service() -> None:
+    """连接失败必须指明哪个服务不可达（core=8020 拿目录/价格）——不再裸 Errno 61。
+
+    2026-10-07 事故：core 停机时消费端只看到 "[Errno 61] Connection refused"，
+    无法分辨是 core、网关还是上游的问题。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("[Errno 61] Connection refused")
+
+    c = Client(
+        api_key="sk_x",
+        http=httpx.Client(transport=httpx.MockTransport(handler), trust_env=False),
+    )
+    with pytest.raises(CoinCallError) as exc_info:
+        c.catalog()
+    msg = str(exc_info.value)
+    assert "core" in msg and "不可达" in msg and "8020" in msg and "up.sh" in msg
+
+
+@pytest.mark.unit
+def test_gateway_unreachable_error_names_the_service() -> None:
+    """同上：网关（8030，付费调用入口）不可达时指明目标。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/catalog":
+            return httpx.Response(200, json=CATALOG)
+        raise httpx.ConnectError("[Errno 61] Connection refused")
+
+    wallet = LocalWallet.from_key(ANVIL1_KEY)
+    c = Client(
+        api_key="sk_x",
+        wallet=wallet,
+        http=httpx.Client(transport=httpx.MockTransport(handler), trust_env=False),
+    )
+    with pytest.raises(CoinCallError) as exc_info:
+        c.call("svc_e2e_demo", {"text": "hi"})
+    msg = str(exc_info.value)
+    assert "gateway" in msg and "不可达" in msg and "8030" in msg
