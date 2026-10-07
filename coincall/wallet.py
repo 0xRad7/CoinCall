@@ -216,7 +216,7 @@ class LocalWallet:
         }
 
     def mint(self, amount: str | int | Decimal) -> dict[str, object]:
-        """MockUSDT 公开 mint（仅测试网 968 冒烟；主网代币无此函数）。"""
+        """测试网 USDT mint（仅限 MINTER_ROLE 账户；普通钱包会 revert，充值走转入）。"""
         amount_raw = _to_raw(amount, self.token_decimals)
         receipt = self._send_signed(
             self.token_address, erc20_mint_data(self.address, amount_raw), MINT_GAS

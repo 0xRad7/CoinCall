@@ -233,7 +233,7 @@ def _wallet_hints(
             hints.append(note)
         return hints
     if wallet["usdt_balance_raw"] < price_raw:
-        hints.append(f"余额不足：本笔 {price_raw} raw；测试网可用 wallet.mint() 充值 MockUSDT")
+        hints.append(f"余额不足：本笔 {price_raw} raw；请向付费钱包转入测试网 USDT（无公开 mint）")
     if wallet["vault_allowance_raw"] < price_raw:
         hints.append(f"授权不足：执行 wallet.approve_vault('{amount}') 向 PayVault 授权")
     return hints
@@ -326,8 +326,8 @@ def wallet_status_payload(client: Client) -> dict[str, Any]:
     payload.update(wallet)
     if wallet["usdt_balance_raw"] == 0:
         payload["hint_fund_wallet"] = (
-            "钱包 USDT 余额为 0：测试网用 wallet.mint('10')（MockUSDT 公开水龙头）充值；"
-            "主网向该地址转入 USDT"
+            "钱包 USDT 余额为 0：向该地址转入测试网 USDT（mint 受 MINTER_ROLE 门禁，"
+            "无公开水龙头，需从持有资金的钱钱包入）"
         )
     if wallet["vault_allowance_raw"] == 0:
         payload["hint_approve_vault"] = (

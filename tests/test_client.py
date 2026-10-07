@@ -178,7 +178,7 @@ def test_call_402_insufficient_balance_guidance() -> None:
     assert err.amount_raw == "10000"
     assert err.deficit_raw == "8000"
     assert err.approve_to == PAY_VAULT_ADDRESS
-    assert "8000" in err.guidance and "MockUSDT" in err.guidance
+    assert "8000" in err.guidance and "无公开 mint" in err.guidance
     assert c.spent_raw == 0  # 402 不进预算
 
 

@@ -2,7 +2,7 @@
 
 - live：core(8020) 目录只读冒烟。
 - needs_funds：anvil #1 钱包 → mint+approve（本地直签 raw tx，BOT 付 gas）→
-  core 签 key → 对 svc_e2e_demo 真实付费调用 200 → 等 keeper 结算（≤90s）→ 断言 Charged。
+  core 签 key → 对 svc_rad_ai 真实付费调用 200 → 等 keeper 结算（≤90s）→ 断言 Charged。
 
 8020/8030 连接拒绝（其他任务在重启服务）按纪律等 5s 重试。
 """
@@ -47,7 +47,7 @@ def test_catalog_live() -> None:
     assert resp.status_code == 200, resp.text
     catalog = resp.json()
     assert catalog["count"] >= 1
-    assert any(svc["service_id"] == "svc_e2e_demo" for svc in catalog["services"])
+    assert any(svc["service_id"] == "svc_rad_ai" for svc in catalog["services"])
 
 
 @pytest.mark.needs_funds
@@ -61,16 +61,15 @@ def test_paid_call_e2e_settled_by_keeper() -> None:
     wallet = LocalWallet.from_key(ANVIL1_KEY)
     assert wallet.chain_id == 968
 
-    # ① 资金准备：余额/授权不足则本地直签补齐（MockUSDT 公开 mint，BOT 付 gas）
+    # ① 资金准备：授权不足本地直签补齐；余额不足 skip（epoch2 真 USDT 无公开 mint，需人工转入）
     bal = wallet.balance()
     if bal.usdt_balance_raw < 2_000_000:
-        minted = wallet.mint("10")
-        assert minted["status"] == 1, minted
+        pytest.skip("付费钱包测试网 USDT 不足——先向该地址转入 USDT（0x75ed…）再跑 live 冒烟")
     if bal.vault_allowance_raw < 2_000_000:
         approved = wallet.approve_vault("10")
         assert approved["status"] == 1, approved
     ready = wallet.balance()
-    assert ready.available_raw >= 10_000  # 至少够一笔 svc_e2e_demo（0.01 USDT）
+    assert ready.available_raw >= 10_000  # 至少够一笔 svc_rad_ai（0.01 USDT）
 
     # ② core 签发 api key（绑定消费者钱包；明文只回一次）
     resp = _request_with_retry(
@@ -89,7 +88,7 @@ def test_paid_call_e2e_settled_by_keeper() -> None:
         http=_HTTP,
     )
     marker = f"p1-1-live-{uuid.uuid4().hex[:8]}"
-    result = client.call("svc_e2e_demo", {"text": marker})
+    result = client.call("svc_rad_ai", {"text": marker})
     assert result.status_code == 200
     assert result.receipt_id and result.receipt_id.startswith("rcp_")
     assert result.charged_raw == "10000"

@@ -20,8 +20,9 @@ GAS_PRICE_GWEI = 20
 TX_TIMEOUT_S = 30
 RECEIPT_TIMEOUT_S = 90
 
-# 计价 token：测试网 MockUSDT（6 位精度，对齐 BOT Chain USDT 口径）
-TOKEN_ADDRESS = "0x4F8f2eaAA3988E9f59B72C93262DDC1084E540fb"  # noqa: S105 —— 合约地址非凭据
+# 计价 token：测试网真 USDT（epoch2；= PayVault 0xa6E8… 的 token()，链上核验一致，6 位精度）。
+# 旧 MockUSDT 0x4F8f… 仅历史（epoch1 退役）；真 USDT 的 mint 受 MINTER_ROLE 门禁，消费者不能自铸。
+TOKEN_ADDRESS = "0x75edC9335175Fc0552D51D48439F229c10420fe3"  # noqa: S105 —— 公开合约地址，非凭据
 TOKEN_DECIMALS = 6
 
 APPROVE_GAS = 100_000  # approve(address,uint256) 实测 ≈46k，留余量（POA 链 gas 价格恒定）
@@ -44,12 +45,12 @@ def _pad_address(addr: str) -> bytes:
 
 
 def erc20_approve_data(spender: str, amount_raw: int) -> bytes:
-    """approve(spender, amount_raw) calldata（MockUSDT 无 ABI 依赖的手工编码）。"""
+    """approve(spender, amount_raw) calldata（USDT 无 ABI 依赖的手工编码）。"""
     return _SELECTORS["approve(address,uint256)"] + _pad_address(spender) + _pad_uint(amount_raw)
 
 
 def erc20_mint_data(to: str, amount_raw: int) -> bytes:
-    """MockUSDT 公开 mint(to, amount_raw) calldata（仅测试网冒烟用）。"""
+    """mint(to, amount_raw) calldata（仅限持有 MINTER_ROLE 的账户；普通消费者钱包会 revert）。"""
     return _SELECTORS["mint(address,uint256)"] + _pad_address(to) + _pad_uint(amount_raw)
 
 

@@ -80,7 +80,7 @@ class PaymentRequiredError(CoinCallError):
             return (
                 f"钱包 {token} 余额不足：本笔定价 {amount} {token}"
                 f"（amount_raw={self.amount_raw}），链上余额 raw={self.wallet_balance_raw}{gap}。"
-                f"请向付费钱包转入 {token}（测试网为 MockUSDT，可 wallet.mint()）后重试。"
+                f"请向付费钱包转入测试网 {token}（无公开 mint，从持有资金的钱包转入）后重试。"
             )
         if self.code == "insufficient_allowance":
             return (

@@ -213,3 +213,12 @@ def _pad_uint(n: int) -> bytes:
 
 def _pad_addr(addr: str) -> bytes:
     return int(addr, 16).to_bytes(32, "big")
+
+
+def test_token_address_epoch2_anchor() -> None:
+    """纪元漂移回归锚：SDK 计价 token 必须与 PayVault(0xa6E8…) 实扣 token 一致。
+
+    2026-10-01 链上核验 PayVault.token() = 0x75ed…9335（epoch2 真 USDT）；
+    此前 SDK 停留在 epoch1 MockUSDT 0x4F8f…，导致 wallet_status/quote 显示与真实扣款脱节。
+    """
+    assert TOKEN_ADDRESS.lower() == "0x75edc9335175fc0552d51d48439f229c10420fe3"

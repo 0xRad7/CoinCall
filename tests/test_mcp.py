@@ -173,7 +173,7 @@ def test_tool_paid_service_call_402_becomes_iserror_with_guidance() -> None:
     )
     assert result["isError"] is True
     text = result["content"][0]["text"]
-    assert "insufficient_balance" in text and "MockUSDT" in text  # 人话指引而非裸 JSON
+    assert "insufficient_balance" in text and "无公开 mint" in text  # 人话指引而非裸 JSON
 
 
 @pytest.mark.unit
