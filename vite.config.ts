@@ -18,7 +18,9 @@ export default defineConfig({
   plugins: [react()],
   // host: true = 监听 0.0.0.0，局域网机器可访问（后端三服务仍仅本机，经此代理转发）
   // hmr:false=关闭热更新（发起人 2026-10-07）：编辑不再实时推送，改完统一重启前端
-  server: { port: 5173, host: true, hmr: false, proxy },
+  server: { port: 5173, host: true, hmr: false, proxy,
+    // ngrok 免费版会带 ngrok-skip-browser-warning 头且 Host 为隧道域名——vite>=5.1 需显式放行
+    allowedHosts: [".ngrok-free.dev", ".ngrok.io"] },
   preview: { port: 5173, host: true, proxy },
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
