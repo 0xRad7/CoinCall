@@ -1,0 +1,16 @@
+#!/bin/zsh
+# 静态三连门（CONSTRAINTS §C）：钩子不过 = 提交被拒
+set -e
+cd "$(dirname "$0")/.."
+uv run ruff check . || exit 1
+uv run ruff format --check . || exit 1
+# 仅对存在 .py 的目标目录跑类型检查（建仓期目录可能尚未落文件）
+targets=()
+for d in coincall tools; do
+  if find "$d" -name '*.py' -print -quit 2>/dev/null | grep -q .; then
+    targets+=("$d")
+  fi
+done
+if [ ${#targets[@]} -gt 0 ]; then
+  uv run mypy "${targets[@]}" || exit 1
+fi

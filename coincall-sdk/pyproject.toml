@@ -1,0 +1,93 @@
+[project]
+name = "coincall-sdk"
+version = "0.1.0"
+description = "CoinCall 消费者 SDK：本地付费钱包 + EIP-712 签名支付 + MCP 工具（ETH Wuhan 2026）"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "web3>=7.0,<8",
+    "eth-account>=0.13",
+    "eth-keys>=0.5",
+    "eth-utils>=5.0",
+]
+
+[project.scripts]
+coincall-mcp = "coincall.mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.7,<1"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-markers"
+markers = [
+    "unit: 离线单元测试（HTTP/链 RPC 全 mock，零网络）",
+    "live: 打真实 core/gateway（8020/8030）的只读冒烟",
+    "needs_funds: 测试网 968 真实付费端到端（mint+approve+扣款+keeper 结算）",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF", "T20", "S", "ANN", "PL"]
+ignore = [
+    "PLR0913",     # Client/wallet 构造参数多属正常（对齐 gateway 同款豁免）
+    "RUF001",      # 中文文档：全角标点误报（移植 gateway C-02 沉淀）
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ANN", "PLR2004", "S105", "S106", "PLC0415"]  # 断言字面量/无注解/函数内 import（gateway 同例）
+"tools/**" = ["T201", "ANN401"]  # MCP stdio：stdout 即协议通道；JSON-RPC 边界 Any 是正确类型（gateway C-09 同例）
+"skills/**" = ["T201"]  # skill CLI：stdout 即结果 JSON 通道（同 tools T201 豁免）
+
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "web3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "eth_account.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "eth_keys.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "eth_utils.*"
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["coincall"]
+[[tool.mypy.overrides]]
+module = "eth_typing.*"
+ignore_missing_imports = true
+
+[tool.uv.build-backend]
+module-name = "coincall"
+module-root = ""
