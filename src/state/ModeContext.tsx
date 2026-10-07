@@ -39,7 +39,10 @@ export interface ModeState {
 }
 
 const fallback: ModeState = {
-  mode: readMode(),
+  // getter 动态读：无 Provider 的消费方（测试/独立渲染）不会吃到模块加载时刻的陈旧值
+  get mode() {
+    return readMode();
+  },
   setMode: (m: Mode) => applyMode(m),
   clearMode: () => applyMode(null),
 };

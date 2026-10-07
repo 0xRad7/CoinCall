@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 // @vitest-environment jsdom
 /**
  * 新动线与视觉系统护栏测试：
@@ -13,8 +14,9 @@ import { RootIndex } from "../src/App";
 import Overview from "../src/pages/Overview";
 import Welcome from "../src/pages/Welcome";
 import { ModeProvider } from "../src/state/ModeContext";
+import ConsumerWorkbench from "../src/pages/ConsumerWorkbench";
 import { ThemeProvider } from "../src/state/ThemeContext";
-import { WalletProvider } from "../src/state/WalletContext";
+import { WalletProvider, useWallet } from "../src/state/WalletContext";
 import type { Eip1193Provider } from "../src/chain/injected";
 
 const ADDR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
@@ -237,3 +239,43 @@ describe("/ 总览公共动线", () => {
     expect(link?.getAttribute("aria-label")).toContain("核对");
   });
 });
+
+
+it("守卫：已连接未选身份直进工作台 → 送回 /welcome 不渲染", async () => {
+  localStorage.removeItem("coincall.mode");
+  window.location.hash = "#/consumer";
+  const mockProvider = {
+    request: async (args: { method: string }) => {
+      if (args.method === "eth_requestAccounts" || args.method === "eth_accounts")
+        return ["0x70997970c51812dc3a010c7d01b50e0d17dc79c8"];
+      if (args.method === "eth_chainId") return "0x3c8";
+      return null;
+    },
+  };
+  let connect: undefined | (() => void);
+  render(
+    <WalletProvider>
+      <CaptureConnect onReady={(c) => (connect = c)} />
+      <ModeProvider>
+        <ConsumerWorkbench />
+      </ModeProvider>
+    </WalletProvider>,
+  );
+  await waitFor(() => expect(connect).toBeTruthy());
+  // 6963 公告必须在 WalletProvider 挂载后发出（挂载前的公告会被错过）
+  window.dispatchEvent(
+    new CustomEvent("eip6963:announceProvider", {
+      detail: { info: { uuid: "com.okx.wallet", name: "OKX Wallet", icon: "", rdns: "com.okx.wallet" }, provider: mockProvider },
+    }),
+  );
+  connect!();
+  await waitFor(() => expect(window.location.hash).toBe("#/welcome"));
+  cleanup();
+});
+
+
+function CaptureConnect({ onReady }: { onReady: (c: () => void) => void }) {
+  const w = useWallet();
+  useEffect(() => onReady(() => void w.connect()), [w]);
+  return null;
+}

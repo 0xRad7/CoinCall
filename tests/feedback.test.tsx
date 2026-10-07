@@ -144,6 +144,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+beforeEach(() => {
+  localStorage.setItem("coincall.mode", "consumer"); // 守卫：已连接未选身份会被送回 /welcome
+});
+
 describe("调用后反馈", () => {
   it("付费调用历史存新收据头（Sig-Ed25519/Ts）→ 点评价弹层 → 提交五元组+签名 → 已评价徽章", async () => {
     await payCall();

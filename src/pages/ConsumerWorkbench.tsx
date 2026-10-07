@@ -29,12 +29,13 @@ export default function ConsumerWorkbench() {
   const { address } = useWallet();
   const connected = address != null;
 
-  // 直接进入本工作台 = 选定 Consumer 身份（与 /welcome 选卡同一粘滞存储）
-  const { mode, setMode } = useMode();
+  // 身份只能由 /welcome 选择卡设定：已连接但未选身份 → 送回选择页（禁止直达替用户选择）
+  const { mode } = useMode();
+  const needsChoice = connected && !mode;
   useEffect(() => {
-    if (mode !== "consumer") setMode("consumer");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (needsChoice) window.location.hash = "#/welcome";
+  }, [needsChoice]);
+  if (needsChoice) return null;
 
   return (
     <div>

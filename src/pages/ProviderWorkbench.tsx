@@ -40,12 +40,14 @@ export default function ProviderWorkbench() {
     if (ok !== undefined) setDone((d) => ({ ...d, [step]: ok }));
   };
 
-  // 直接进入本工作台 = 选定 Provider 身份（与 /welcome 选卡同一粘滞存储）
-  const { mode, setMode } = useMode();
+  // 身份只能由 /welcome 选择卡设定：已连接但未选身份 → 送回选择页（禁止直达替用户选择）
+  const { mode } = useMode();
+  const pw = useWallet();
+  const needsChoice = pw.address != null && !mode;
   useEffect(() => {
-    if (mode !== "provider") setMode("provider");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (needsChoice) window.location.hash = "#/welcome";
+  }, [needsChoice]);
+  if (needsChoice) return null;
 
   // 步骤间共享状态：当前团队（Teams 形态锚点）
   const [claimed, setClaimed] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(null);
