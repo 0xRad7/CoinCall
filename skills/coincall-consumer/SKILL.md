@@ -18,7 +18,7 @@ export COINCALL_WALLET_KEY="0x…"       # 专用付费钱包私钥（或 0600 �
 export COINCALL_TOTAL_BUDGET_RAW=1000000    # 总额硬顶
 export COINCALL_DAILY_BUDGET_RAW=200000     # 日额（UTC 日界）
 export COINCALL_PER_CALL_BUDGET_RAW=50000   # 单笔上限
-export COINCALL_ALLOWED_SERVICES=svc_rad_ai # 服务白名单（逗号分隔；默认拒绝）
+export COINCALL_ALLOWED_SERVICES=binance_future_ai_increase_top_n # 服务白名单（逗号分隔；默认拒绝）
 ```
 
 ## 操作流程（每轮消费都按此顺序）
@@ -72,8 +72,8 @@ export COINCALL_ALLOWED_SERVICES=svc_rad_ai # 服务白名单（逗号分隔；�
 ```bash
 python skills/coincall-consumer/scripts/call.py status          # 自查
 python skills/coincall-consumer/scripts/call.py catalog         # 目录
-python skills/coincall-consumer/scripts/call.py quote svc_rad_ai # 报价
-python skills/coincall-consumer/scripts/call.py call svc_rad_ai '{"query":"BTC"}'  # 付费（真实扣款）
+python skills/coincall-consumer/scripts/call.py quote binance_future_ai_increase_top_n # 报价
+python skills/coincall-consumer/scripts/call.py call binance_future_ai_increase_top_n '{"query":"BTC"}'  # 付费（真实扣款）
 python skills/coincall-consumer/scripts/call.py report --recent 10                 # 账单
 ```
 

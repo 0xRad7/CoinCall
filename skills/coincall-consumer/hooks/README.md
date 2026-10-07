@@ -67,7 +67,7 @@ macOS 代理环境注意：脚本内 httpx 显式 `trust_env=False`（C-07），
 ## 手工验证
 
 ```bash
-echo '{"tool_name":"paid_service_call","tool_input":{"service_id":"svc_rad_ai","params":{}}}' \
+echo '{"tool_name":"paid_service_call","tool_input":{"service_id":"binance_future_ai_increase_top_n","params":{}}}' \
   | COINCALL_CORE_URL=http://127.0.0.1:8020 python pretooluse.py
 # → {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "[coincall-advice] verb=… "}}
 
