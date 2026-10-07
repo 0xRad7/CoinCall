@@ -24,7 +24,7 @@ from eth_utils import keccak, to_checksum_address
 DOMAIN_NAME = "PayVault"
 DOMAIN_VERSION = "1"
 CHAIN_ID = 968
-PAY_VAULT_ADDRESS = "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471"
+PAY_VAULT_ADDRESS = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"  # epoch2
 
 WORD_SIZE = 32  # EVM 字（地址左补齐与 nonce/私钥长度共用）
 
