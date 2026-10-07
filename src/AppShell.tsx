@@ -67,16 +67,16 @@ function WalletChipBar() {
 }
 
 /** 侧栏导航工厂：adminEnabled 决定总览副标注（管理员视图/目录与比价）。 */
-function navGroups(adminEnabled: boolean): Array<{
+function navGroups(adminEnabled: boolean, isAdmin: boolean): Array<{
   label: string;
   items: Array<{ to: string; end?: boolean; name: string; sub: string; identity?: "provider" | "consumer" }>;
 }> {
   return [
   {
     label: "公共",
-    items: adminEnabled
-      ? []  // 管理员门禁开启时非管理员看不到总览入口（管理员自己看正常入口）
-      : [{ to: "/", end: true, name: "总览", sub: "目录与比价" }],
+    items: adminEnabled && !isAdmin
+      ? []  // 管理员门禁开启+非管理员：不显示总览入口
+      : [{ to: "/", end: true, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" }],
   },
   {
     label: "工作台",
@@ -115,7 +115,7 @@ export function AppShell() {
           <span className="dot" />
           CoinCall 币应
         </div>
-        {navGroups(adminEnabled).map((g) => (
+        {navGroups(adminEnabled, isAdmin).map((g) => (
           <div key={g.label} className="nav-group">
             <div className="nav-group-label">{g.label}</div>
             {g.items
