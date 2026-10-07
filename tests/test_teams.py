@@ -108,8 +108,14 @@ def test_prepare_mints_identity(tmp_path):
             mint_http=FakeMintHttp(),
         )
     ) as c:
-        r = c.post("/teams/prepare", json={"display_name": "NewTeam"})
+        r = c.post(
+            "/teams/prepare",
+            json={"display_name": "NewTeam", "origin": "http://192.168.1.9:5173"},
+        )
     assert r.status_code in (200, 201), r.text
+    assert "192.168.1.9:5173/#/provider" in str(calls)
+    r2 = c.post("/teams/prepare", json={"display_name": "X", "origin": "ftp://bad"})
+    assert r2.status_code == 422
     body = r.json()
     assert body["agent_id"] == 233
     assert "typed_data_hint" in body or body.get("bind_required") is True
