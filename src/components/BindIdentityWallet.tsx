@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { botChainApi, agentWalletSetTypedData } from "../api/gateway";
 import { browserProvider, isUserRejected } from "../chain/injected";
-import { CHAIN_ID, IDENTITY_REGISTRY } from "../chain/constants";
+import { CHAIN_ID, EXPLORER_TX, IDENTITY_REGISTRY } from "../chain/constants";
 import { useWallet } from "../state/WalletContext";
 import { ErrorBox, WarnBox } from "./ui";
 import { ConnectWalletButton } from "./ConnectWalletButton";
@@ -93,7 +93,7 @@ export function BindIdentityWallet({ agentId, owner, onBound }: BindIdentityWall
         ✓ 身份钱包已绑定为当前连接的钱包 <span className="mono">{w.address?.slice(0, 10)}…</span>
         {txHash && (
           <>
-            （绑定交易 <a className="mono" href={`https://scan.bohr.life/tx/${txHash}`} target="_blank" rel="noreferrer">
+            （绑定交易 <a className="mono" href={EXPLORER_TX(txHash)} target="_blank" rel="noreferrer">
               {txHash.slice(0, 10)}… ↗
             </a>）
           </>

@@ -10,9 +10,9 @@ import { ProbeDialog } from "../components/ProbeDialog";
 import { schemaHasNestedObjects, type ExampleParam } from "../lib/schema-infer";
 import { agentWalletSetTypedData, botChainApi, type AgentIdentity } from "../api/gateway";
 import { ApiError } from "../api/client";
-import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY_VAULT, fromRaw, toRaw } from "../chain/constants";
+import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY_VAULT, RPC_URL, EXPLORER_HOST, EXPLORER_URL, fromRaw, toRaw } from "../chain/constants";
 import { fetchProviderCredits, encodeAddrUint } from "../chain/rpc";
-import { browserProvider, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureChain968, silentAccounts } from "../chain/injected";
+import { browserProvider, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureBotChain, silentAccounts } from "../chain/injected";
 import { useWallet } from "../state/WalletContext";
 import { CUSTODIAN } from "../lib/consts-extra";
 import { AmountInput } from "../components/AmountInput";
@@ -1126,10 +1126,10 @@ export function WithdrawStep() {
     setError(null);
     setCancelled(false);
     try {
-      // 与消费端同一共享路径：用户选中的 provider → 先确保在 968 链，再 eth_sendTransaction（20 gwei 固定费率）
+      // 与消费端同一共享路径：用户选中的 provider → 先确保在目标链（CHAIN_ID），再 eth_sendTransaction（20 gwei 固定费率）
       const sel = await w.requireProvider();
       if (!sel) throw new Error("未选择浏览器钱包。");
-      await ensureChain968(sel.provider);
+      await ensureBotChain(sel.provider);
       const from = (await silentAccounts(sel.provider)) ?? (await connectInjected(sel.provider)).address;
       const hash = await sendInjectedTx(sel.provider, from, VAULT_ADDR, encodeAddrUint(SEL_C.providerWithdraw, addr.trim(), credits!));
       setWaitingWallet(false);
@@ -1199,7 +1199,7 @@ export function WithdrawStep() {
             k="记账合约（PayVault）"
             value={<span style={{ fontSize: 16 }}>{PAY_VAULT.slice(0, 10)}…{PAY_VAULT.slice(-6)}</span>}
             sub="I4：合约内 USDT 余额恒等于总 credits"
-            evidence={<EvidencePair hash={PAY_VAULT} href="https://scan.bohr.life" label="去 scan.bohr.life 查看合约" />}
+            evidence={<EvidencePair hash={PAY_VAULT} href={EXPLORER_URL} label={`去 ${EXPLORER_HOST} 查看合约`} />}
           />
         </div>
       )}
@@ -1239,7 +1239,7 @@ export function WithdrawStep() {
         ) : (
           <WarnBox>
             检测到可提现余额，但本浏览器没有注入钱包。操作指引：① 在 OKX/MetaMask 中导入该服务收款钱包的账户；② 切到 BOT Chain
-            （chainId 968，RPC https://rpc.bohr.life/）；③ 刷新本页后点击「发起 providerWithdraw」。也可用任意脚本以该钱包调用
+            （chainId {CHAIN_ID}，RPC {RPC_URL}）；③ 刷新本页后点击「发起 providerWithdraw」。也可用任意脚本以该钱包调用
             <span className="mono"> PayVault({PAY_VAULT.slice(0, 10)}…).providerWithdraw(to, amount)</span>。
           </WarnBox>
         )
@@ -1331,7 +1331,7 @@ export function RevenueGrid({ onWithdrawn }: { onWithdrawn?: () => void }) {
             k="总收入（链上 Charged）"
             value={`${fromRaw(rev.data.totalRaw)} USDT`}
             sub={`raw=${rev.data.totalRaw.toString()} · ${rev.data.chargedCount} 笔`}
-            evidence={<EvidencePair hash={`Σ teams revenue_raw=${rev.data.totalRaw.toString()}`} href="https://scan.bohr.life" label="链上 Charged 口径，去 scan 核对" />}
+            evidence={<EvidencePair hash={`Σ teams revenue_raw=${rev.data.totalRaw.toString()}`} href={EXPLORER_URL} label="链上 Charged 口径，去 scan 核对" />}
           />
           <div className="stat-card">
             <div className="k">未提现收入（可提现）</div>
@@ -1382,7 +1382,7 @@ function WithdrawPanel({ wallets, onDone }: { wallets: string[]; onDone: () => v
     try {
       const sel = await w.requireProvider();
       if (!sel) throw new Error("未选择浏览器钱包。");
-      await ensureChain968(sel.provider);
+      await ensureBotChain(sel.provider);
       const from = (await silentAccounts(sel.provider)) ?? (await connectInjected(sel.provider)).address;
       const hash = await sendInjectedTx(sel.provider, from, VAULT_ADDR, encodeAddrUint(SEL_C.providerWithdraw, walletAddr, amount));
       setWaitingWallet(false);
@@ -1858,7 +1858,7 @@ export function TeamHome({ agentId, onBack, onPublish, onRenamed }: { agentId: n
                 k="团队收入"
                 value={fromRaw(BigInt(t.revenue.total_raw))}
                 sub={`${t.revenue.charged_count} 笔 Charged · raw=${t.revenue.total_raw}`}
-                evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href="https://scan.bohr.life" label="链上 Charged 口径，去 scan 核对" />}
+                evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href={EXPLORER_URL} label="链上 Charged 口径，去 scan 核对" />}
               />
               <StatCard k="服务数" value={t.services.length} sub="在售能力" />
               <StatCard

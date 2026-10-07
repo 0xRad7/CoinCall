@@ -1,6 +1,7 @@
 /** 服务端错误 → 人话 + 下一步动作。UX 核心：不裸抛 JSON。 */
 import { ApiError } from "../api/client";
 import type { Gateway402Challenge } from "../api/gateway";
+import { RPC_HOST } from "../chain/constants";
 
 export interface HumanError {
   title: string;
@@ -68,7 +69,7 @@ export function humanizeError(e: unknown): HumanError {
       return { title: "私钥格式不正确", hint: "应为 0x 开头 64 位十六进制字符。", raw: e.message };
     }
     if (/could not detect network|failed to fetch|NetworkError/i.test(e.message)) {
-      return { title: "连不上链节点（rpc.bohr.life）", hint: "检查本机网络（RPC 需要公网访问；npm 代理不影响浏览器直连）。", raw: e.message };
+      return { title: `连不上链节点（${RPC_HOST}）`, hint: "检查本机网络（RPC 需要公网访问；npm 代理不影响浏览器直连）。", raw: e.message };
     }
     if (/insufficient funds|余额不足/i.test(e.message)) {
       return { title: "钱包原生代币(gas)不足", hint: "链上交易需少量 BOHR 作 gas（恒 20 gwei）。请给该地址充值测试网代币后重试。", raw: e.message };

@@ -8,23 +8,23 @@
  *   ③ 候选 0 个 → 未装扩展提示；1 个 → 直连；≥2 个 → 钱包选择器（记住 rdns，下次默认选中、仍可重选）；
  *   ④ 一切链操作（switch/add/send）都走用户选中的那个 provider 引用，不再重查全局槽位。
  *
- * BOT Chain 测试网参数（权威来源 ../coincall-bot-chain-api：
+ * 目标链参数来自 ./constants（缺省测试网；权威来源 ../coincall-bot-chain-api：
  *   app/core/chains.py（chain_id/rpc/explorer）+ app/modules/accounts.py
  *   的 NATIVE_SYMBOL="BOT"、NATIVE_DECIMALS=18）。
  * 铁律不变：控制台不接触任何私钥；地址只读，签名/交易在扩展弹窗内完成。
  */
 import { BrowserProvider, TransactionReceipt, getAddress } from "ethers";
-import { CHAIN_ID, GAS_PRICE_GWEI } from "./constants";
+import { CHAIN_ID, CHAIN_NAME, EXPLORER_URL, GAS_PRICE_GWEI, RPC_URL } from "./constants";
 import { getRpcProvider } from "./rpc";
 
-export const BOT_CHAIN_HEX = "0x" + CHAIN_ID.toString(16); // 0x3C8
+export const BOT_CHAIN_HEX = "0x" + CHAIN_ID.toString(16); // CHAIN_ID 的 0x-hex
 
 export const BOT_CHAIN_PARAMS = {
   chainId: BOT_CHAIN_HEX,
-  chainName: "BOT Chain Testnet",
+  chainName: CHAIN_NAME,
   nativeCurrency: { name: "BOT", symbol: "BOT", decimals: 18 },
-  rpcUrls: ["https://rpc.bohr.life/"],
-  blockExplorerUrls: ["https://scan.bohr.life"],
+  rpcUrls: [RPC_URL],
+  blockExplorerUrls: [EXPLORER_URL],
 } as const;
 
 export interface Eip1193Provider {
@@ -204,10 +204,10 @@ export async function getInjectedChainId(p: Eip1193Provider): Promise<number> {
 }
 
 /**
- * 确保用户选中的钱包在 968 链：先 wallet_switchEthereumChain；
- * 4902（未添加）则 wallet_addEthereumChain（BOT Chain 测试网参数）。
+ * 确保用户选中的钱包在目标链（CHAIN_ID）：先 wallet_switchEthereumChain；
+ * 4902（未添加）则 wallet_addEthereumChain（BOT_CHAIN_PARAMS）。
  */
-export async function ensureChain968(p: Eip1193Provider): Promise<number> {
+export async function ensureBotChain(p: Eip1193Provider): Promise<number> {
   const current = await getInjectedChainId(p);
   if (current === CHAIN_ID) return current;
   try {
@@ -220,7 +220,7 @@ export async function ensureChain968(p: Eip1193Provider): Promise<number> {
     }
   }
   const after = await getInjectedChainId(p);
-  if (after !== CHAIN_ID) throw new Error(`切链后仍不是 968（当前 ${after}）。请在钱包里手动切换到 BOT Chain Testnet。`);
+  if (after !== CHAIN_ID) throw new Error(`切链后仍不是 ${CHAIN_ID}（当前 ${after}）。请在钱包里手动切换到 ${CHAIN_NAME}。`);
   return after;
 }
 

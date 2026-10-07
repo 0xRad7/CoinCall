@@ -6,6 +6,10 @@
  * 本模块是唯一的签名代码路径：试用调用（X-PAYMENT）与黄金向量测试共用同一函数。
  */
 import { Wallet, concat, toUtf8Bytes, keccak256, getAddress, randomBytes, hexlify, zeroPadValue, assertArgument } from "ethers";
+/** EIP-712 域 chainId 与链常量同源（缺省测试网；主网经 VITE_CHAIN_ID 切换，域随链重建）。 */
+import { CHAIN_ID } from "./constants";
+
+export { CHAIN_ID };
 
 const qtyHex = (v: bigint | number) => {
   const h = BigInt(v).toString(16);
@@ -15,7 +19,6 @@ const pad32 = (v: bigint | number | string) => zeroPadValue(typeof v === "bigint
 
 export const DOMAIN_NAME = "PayVault";
 export const DOMAIN_VERSION = "1";
-export const CHAIN_ID = 968;
 export const AUTH_WINDOW_S = 600;
 
 export const DOMAIN_TYPEHASH = keccak256(

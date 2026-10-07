@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { botChainApi } from "../api/gateway";
+import { EXPLORER_HOST } from "../chain/constants";
 import { ErrorBox, InfoBox, TxLink, WarnBox } from "./ui";
 import { BindIdentityWallet } from "./BindIdentityWallet";
 
@@ -93,7 +94,7 @@ export function IdentityRegister({ onRegistered, pollMs = 2_000, maxAttempts = 3
       const r = await botChainApi.registerResult(manualHash.trim());
       if (!settle(r)) {
         setPhase("timeout"); // 保持手动查询入口
-        setManualMsg(`该交易仍${r.found ? "未解析到铸造事件（可能不是注册交易）" : "未上链"}。稍后再查，或在 scan.bohr.life 搜该哈希确认。`);
+        setManualMsg(`该交易仍${r.found ? "未解析到铸造事件（可能不是注册交易）" : "未上链"}。稍后再查，或在 ${EXPLORER_HOST} 搜该哈希确认。`);
       }
     } catch (e) {
       setError(e);
@@ -164,7 +165,7 @@ export function IdentityRegister({ onRegistered, pollMs = 2_000, maxAttempts = 3
         {phase === "timeout" && !minted && (
           <div style={{ marginTop: 8 }}>
             <WarnBox>
-              {maxAttempts * (pollMs / 1000)}s 内未查到铸造回执（链上偶发延迟）。可稍后在下方粘贴交易哈希手动查询，或到 scan.bohr.life 搜该哈希确认。
+              {maxAttempts * (pollMs / 1000)}s 内未查到铸造回执（链上偶发延迟）。可稍后在下方粘贴交易哈希手动查询，或到 {EXPLORER_HOST} 搜该哈希确认。
             </WarnBox>
             <div className="flex" style={{ marginTop: 8 }}>
               <input

@@ -14,7 +14,7 @@ import {
   connectInjected,
   detectLegacyCandidate,
   discoverEip6963,
-  ensureChain968,
+  ensureBotChain,
   friendlyInjectedError,
   isUnrecognizedChain,
   isUserRejected,
@@ -114,7 +114,7 @@ describe("连接状态机（显式 provider）", () => {
   });
 });
 
-describe("切链：ensureChain968（走选中的 provider）", () => {
+describe("切链：ensureBotChain（走选中的 provider）", () => {
   it("已在 968：无操作", async () => {
     const calls: string[] = [];
     const p = mockWallet((m) => {
@@ -122,7 +122,7 @@ describe("切链：ensureChain968（走选中的 provider）", () => {
       if (m === "eth_chainId") return hex968;
       throw new Error(`unexpected ${m}`);
     });
-    expect(await ensureChain968(p)).toBe(968);
+    expect(await ensureBotChain(p)).toBe(968);
     expect(calls).toEqual(["eth_chainId"]);
   });
 
@@ -138,7 +138,7 @@ describe("切链：ensureChain968（走选中的 provider）", () => {
       }
       throw new Error(`unexpected ${m}`);
     });
-    expect(await ensureChain968(p)).toBe(968);
+    expect(await ensureBotChain(p)).toBe(968);
     expect(calls.map((c) => c.m)).toEqual(["eth_chainId", "wallet_switchEthereumChain", "eth_chainId"]);
     expect(calls[1]!.p).toEqual([{ chainId: hex968 }]);
   });
@@ -156,7 +156,7 @@ describe("切链：ensureChain968（走选中的 provider）", () => {
       }
       throw new Error(`unexpected ${m}`);
     });
-    expect(await ensureChain968(p)).toBe(968);
+    expect(await ensureBotChain(p)).toBe(968);
     expect(calls[2]!.m).toBe("wallet_addEthereumChain");
     expect(calls[2]!.p).toEqual([{ ...BOT_CHAIN_PARAMS }]);
   });
@@ -173,7 +173,7 @@ describe("切链：ensureChain968（走选中的 provider）", () => {
       }
       throw new Error(`unexpected ${m}`);
     });
-    expect(await ensureChain968(p)).toBe(968);
+    expect(await ensureBotChain(p)).toBe(968);
   });
 
   it("用户拒绝切链（4001）→ 可分类为友好取消", async () => {
@@ -183,7 +183,7 @@ describe("切链：ensureChain968（走选中的 provider）", () => {
       throw new Error(`unexpected ${m}`);
     });
     try {
-      await ensureChain968(p);
+      await ensureBotChain(p);
       expect.unreachable();
     } catch (e) {
       expect(isUserRejected(e)).toBe(true);
@@ -197,7 +197,7 @@ describe("切链：ensureChain968（走选中的 provider）", () => {
       if (m === "wallet_switchEthereumChain") return null; // 假装成功但链没变
       throw new Error(`unexpected ${m}`);
     });
-    await expect(ensureChain968(p)).rejects.toThrow(/仍不是 968/);
+    await expect(ensureBotChain(p)).rejects.toThrow(/仍不是 968/);
   });
 });
 

@@ -1,6 +1,7 @@
 /** 通用 UI 原子组件：四态展示、错误框（人话+折叠详情）、二次确认。 */
 import { ReactNode, useEffect, useState } from "react";
 import { humanizeError } from "../lib/errors";
+import { EXPLORER_TX } from "../chain/constants";
 
 export function Spinner({ label }: { label?: string }) {
   return (
@@ -67,10 +68,10 @@ export function Amount({ human, raw, token = "USDT" }: { human: string; raw: str
   );
 }
 
-/** 交易哈希外链（scan.bohr.life）。 */
+/** 交易哈希外链（区块浏览器，基址 EXPLORER_URL）。 */
 export function TxLink({ hash }: { hash: string }) {
   return (
-    <a href={`https://scan.bohr.life/tx/${hash}`} target="_blank" rel="noreferrer" className="mono">
+    <a href={EXPLORER_TX(hash)} target="_blank" rel="noreferrer" className="mono">
       {hash.slice(0, 10)}…{hash.slice(-8)} ↗
     </a>
   );

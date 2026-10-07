@@ -5,7 +5,7 @@ import { gatewayApi } from "../api/gateway";
 import { useAsync } from "../lib/useAsync";
 import { AsyncSection, Badge, CopyButton, ErrorBox, Spinner, TxLink } from "../components/ui";
 import { EvidencePair, PageHeader, StatCard } from "../components/shell";
-import { gatewayCallUrl, fromRaw } from "../chain/constants";
+import { gatewayCallUrl, fromRaw, EXPLORER_HOST, EXPLORER_TX, EXPLORER_URL } from "../chain/constants";
 
 export default function Overview() {
   const overview = useAsync(() => coreApi.overview(), []);
@@ -23,7 +23,7 @@ export default function Overview() {
         title="总览"
         sub="平台全局状态：链上 GMV（唯一真相）、服务目录、keeper 结算观测。数据每 30s 内随访问刷新。"
         actions={
-          <a className="btn small secondary" href="https://scan.bohr.life" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+          <a className="btn small secondary" href={EXPLORER_URL} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
             区块浏览器 ↗
           </a>
         }
@@ -43,7 +43,7 @@ export default function Overview() {
                   </>
                 }
                 sub={`raw=${o.gmv_raw} · ${o.charged_count} 笔`}
-                evidence={<EvidencePair hash={`charged_count=${o.charged_count} · synced_to_block=${o.synced_to_block}`} href="https://scan.bohr.life" label="去 scan.bohr.life 核对 Charged 事件" />}
+                evidence={<EvidencePair hash={`charged_count=${o.charged_count} · synced_to_block=${o.synced_to_block}`} href={EXPLORER_URL} label={`去 ${EXPLORER_HOST} 核对 Charged 事件`} />}
               />
               <StatCard k="调用笔数（成功 / 中止）" value={`${o.calls_success_total ?? "-"} / ${o.calls_aborted_total ?? "-"}`} sub="中止 = Provider 失败未扣款" />
               <StatCard k="服务（在售/全部）" value={`${o.services_active} / ${o.services_total}`} sub="paused 不参与调用" />
@@ -51,7 +51,7 @@ export default function Overview() {
             </div>
             {o.degraded.length > 0 && (
               <div className="alert warn">
-                <b>部分数据降级</b>：{o.degraded.join("、")} —— 展示值可能滞后，以链上（scan.bohr.life）为准。
+                <b>部分数据降级</b>：{o.degraded.join("、")} —— 展示值可能滞后，以链上（{EXPLORER_HOST}）为准。
               </div>
             )}
           </>
@@ -120,7 +120,7 @@ export default function Overview() {
                         {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
                         <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
                         {anchor && (
-                          <a className="badge muted" style={{ textDecoration: "none" }} href={`https://scan.bohr.life/tx/${anchor.anchor_tx}`} target="_blank" rel="noreferrer" title={`锚定 ${anchor.digest.slice(0, 16)}…`}>
+                          <a className="badge muted" style={{ textDecoration: "none" }} href={EXPLORER_TX(anchor.anchor_tx)} target="_blank" rel="noreferrer" title={`锚定 ${anchor.digest.slice(0, 16)}…`}>
                             🔗 {anchor.digest.slice(7, 15)}
                           </a>
                         )}
@@ -225,7 +225,7 @@ function ProviderRow(props: { idx: number; wallet: string; name: string | null; 
             ) : proof.data ? (
               <div>
                 <div className="dim" style={{ marginBottom: 8 }}>
-                  共 {proof.data.count} 笔 Charged 事件 · 每笔可点交易哈希到 scan.bohr.life 核对：
+                  共 {proof.data.count} 笔 Charged 事件 · 每笔可点交易哈希到 {EXPLORER_HOST} 核对：
                 </div>
                 <table className="list">
                   <thead>
@@ -483,7 +483,7 @@ function CatalogTeamsAxis({ decisionMap }: { decisionMap: Map<string, DecisionRo
                   k="收入"
                   value={fromRaw(BigInt(t.revenue.total_raw))}
                   sub={`${t.revenue.charged_count} 笔 · raw=${t.revenue.total_raw}`}
-                  evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href="https://scan.bohr.life" label="链上 Charged 口径，去 scan 核对" />}
+                  evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href={EXPLORER_URL} label="链上 Charged 口径，去 scan 核对" />}
                 />
                 <StatCard k="服务数" value={t.services.length} sub={t.team.display_name} />
                 <StatCard

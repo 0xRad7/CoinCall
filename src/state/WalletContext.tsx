@@ -5,7 +5,7 @@
  *   候选 0 → 未装扩展（demo 兜底可见）；1 → 直连；≥2 → 钱包选择器
  *   （记住 rdns：sessionStorage，下次默认选中、仍可「重选钱包」）
  * 连接：requireProvider() → 选中 provider 引用 → eth_requestAccounts（弹窗）→
- *   链 ≠ 968 → ensureChain968（switch → add 兑底；4001 → 友好态保持 connected+wrongChain）
+ *   链 ≠ CHAIN_ID → ensureBotChain（switch → add 兑底；4001 → 友好态保持 connected+wrongChain）
  * 之后一切签名/交易都走选中的 provider（switch/add/send 不再重查全局槽位）。
  *
  * 主路径 = 浏览器扩展（OKX/MetaMask/…）：控制台不接触任何私钥，地址只读。
@@ -18,7 +18,7 @@ import {
   collectCandidates,
   connectInjected,
   detectLegacyCandidate,
-  ensureChain968,
+  ensureBotChain,
   friendlyInjectedError,
   getInjectedChainId,
   resolveAutoChoice,
@@ -256,7 +256,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         // 连接后链不对 → 引导切链；切链失败保持 connected+wrongChain（顶栏可重试）
         try {
           setSwitching(true);
-          const after = await ensureChain968(sel.provider);
+          const after = await ensureBotChain(sel.provider);
           if (mountedRef.current) setChainId(after);
         } catch (e) {
           if (mountedRef.current) setIssue(friendlyInjectedError(e));
@@ -293,7 +293,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setIssue(null);
     setSwitching(true);
     try {
-      const cid = await ensureChain968(sel.provider);
+      const cid = await ensureBotChain(sel.provider);
       if (mountedRef.current) setChainId(cid);
     } catch (e) {
       if (mountedRef.current) setIssue(friendlyInjectedError(e));

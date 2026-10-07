@@ -121,7 +121,7 @@ export function AppShell() {
           </div>
         ))}
         <div className="nav-foot">
-          chainId 968 · BOT Chain
+          chainId {CHAIN_ID} · BOT Chain
           <br />
           不接触任何私钥
         </div>

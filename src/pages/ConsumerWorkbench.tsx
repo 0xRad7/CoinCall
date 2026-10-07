@@ -9,7 +9,7 @@ import { hashSha256HexStringish } from "../lib/idempotency";
 import { ApiError } from "../api/client";
 import { coreApi } from "../api/core";
 import { gatewayApi, type Gateway402Challenge } from "../api/gateway";
-import { USDT, FAUCET_URL, PAY_VAULT as VAULT, SEL, fromRaw, toRaw } from "../chain/constants";
+import { CHAIN_ID, USDT, FAUCET_URL, PAY_VAULT as VAULT, SEL, fromRaw, toRaw } from "../chain/constants";
 import { encodeAddrUint, fetchAllowance, fetchTokenBalance, type TxProgress } from "../chain/rpc";
 import { isUserRejected } from "../chain/injected";
 import { buildCallAuthorization, buildPaymentHeader } from "../chain/signing";
@@ -95,7 +95,7 @@ function ConnectSection() {
               className="btn small secondary"
               onClick={() => {
                 const blob = new Blob(
-                  [JSON.stringify({ address: w.address, privateKey: w.demoPrivateKey, network: "BOT Chain 968 (testnet)", warning: "一次性演示钱包：仅测试网、关页即焚、勿存资金" }, null, 2)],
+                  [JSON.stringify({ address: w.address, privateKey: w.demoPrivateKey, network: `BOT Chain ${CHAIN_ID} (testnet)`, warning: "一次性演示钱包：仅测试网、关页即焚、勿存资金" }, null, 2)],
                   { type: "application/json" }
                 );
                 const a = document.createElement("a");
@@ -114,7 +114,7 @@ function ConnectSection() {
         </div>
         {w.mode === "injected" && !w.chainOk && (
           <WarnBox>
-            当前钱包连的是链 {w.chainId ?? "?"}，不是 BOT Chain 测试网（968）——mint/授权/付费调用都会失败。
+            当前钱包连的是链 {w.chainId ?? "?"}，不是 BOT Chain 测试网（{CHAIN_ID}）——mint/授权/付费调用都会失败。
             <button className="btn small" style={{ marginLeft: 8 }} onClick={() => void w.ensureChain()}>
               引导钱包切链 / 添加 BOT Chain
             </button>
@@ -643,7 +643,7 @@ export function TrialCallSection() {
       <h3>④ 试用调用（钱包签名 → 402 网关）</h3>
       <p className="card-desc">
         选择服务 → 按其 input_schema 生成的表单填参数 → 点「付费调用」。钱包对 Authorization 六元组做 EIP-712
-        签名（域 PayVault/1/968，窗口 10 分钟）组 X-PAYMENT 头。Provider 失败不扣费；同参数重试自动带幂等键。
+        签名（域 PayVault/1/{CHAIN_ID}，窗口 10 分钟）组 X-PAYMENT 头。Provider 失败不扣费；同参数重试自动带幂等键。
       </p>
 
       <div className="field">
@@ -740,7 +740,7 @@ export function TrialCallSection() {
                 <button className="btn" disabled={approveBusy || chainBlocked || !/^[\d.]+$/.test(approveAmount)} onClick={runApprove}>
                   {approveBusy ? "等待钱包确认…" : "去钱包授权"}
                 </button>
-                {chainBlocked && <span className="dim">钱包不在 968 链，先在顶栏切链。</span>}
+                {chainBlocked && <span className="dim">钱包不在 {CHAIN_ID} 链，先在顶栏切链。</span>}
               </div>
               {approveTx && (
                 <div className={`alert ${approveTx.status === "confirmed" ? "ok" : approveTx.status === "failed" ? "err" : "info"}`} style={{ marginTop: 8 }}>
@@ -777,7 +777,7 @@ export function TrialCallSection() {
 
       {chainBlocked && (
         <WarnBox>
-          钱包当前在链 {w.chainId ?? "?"}，签名域是 BOT Chain（968）——先切链再调用。
+          钱包当前在链 {w.chainId ?? "?"}，签名域是 BOT Chain（{CHAIN_ID}）——先切链再调用。
           <button className="btn small" style={{ marginLeft: 8 }} onClick={() => void w.ensureChain()}>
             引导切链
           </button>
