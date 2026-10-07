@@ -8,8 +8,8 @@
  *   中文副语，身份色首次出现），选择后进对应工作台并 localStorage 粘滞；
  * - 已连接且已选过身份（非手动返回）→ 直接进对应工作台。
  */
-import { useEffect, useRef, type CSSProperties, type MouseEvent } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { ThemeToggle } from "../components/shell";
 import { useMode, type Mode } from "../state/ModeContext";
@@ -17,13 +17,16 @@ import { useWallet } from "../state/WalletContext";
 
 export default function Welcome() {
   const w = useWallet();
-  const { mode } = useMode();
-  const [params] = useSearchParams();
-  const switching = params.get("switch") === "1"; // 顶栏 pill / 手动返回：不自动跳工作台
-
-  if (!w.address) return <LoginFace />;
-  // 已连接且已选过身份（非换身份入口）→ 直接进工作台
-  if (mode && !switching) return <Navigate to={mode === "provider" ? "/provider" : "/consumer"} replace />;
+  // 不自动登录（发起人 2026-10-07 要求）：#/welcome 永远展示落地页——钱包静默恢复连接
+  // 也不劫持跳转；已连接时落地页提供手动「继续进入平台」入口，点了才进身份选择/工作台。
+  const [viewLanding, setViewLanding] = useState(true);
+  // 主动连接（地址从无→有）= 用户点了登录，直接进身份选择；静默恢复（刷新/回访）则留在落地页
+  const prevAddr = useRef<string | null>(null);
+  useEffect(() => {
+    if (!prevAddr.current && w.address) setViewLanding(false);
+    prevAddr.current = w.address ?? null;
+  }, [w.address]);
+  if (!w.address || viewLanding) return <LoginFace connected={!!w.address} onProceed={() => setViewLanding(false)} />;
   return <PickFace />;
 }
 
@@ -59,7 +62,7 @@ const CAPABILITIES: Array<{ no: string; title: string; tag: string; desc: string
 /** 副标题打字机文案（注入 data-text，便于以后配置化） */
 const SUB_TITLE = "AI Agent Integration Platform on BOT Chain";
 
-function LoginFace() {
+function LoginFace({ connected, onProceed }: { connected: boolean; onProceed: () => void }) {
   const subRef = useRef<HTMLSpanElement>(null);
 
   // 副标题打字机（JS 定时器链，文案读自身 data-text）：打出 70ms/字 → 停 2.4s → 倒删 35ms/字 → 歇 700ms → 重打，无限循环；
@@ -126,11 +129,17 @@ function LoginFace() {
           <span className="brand-title">CoinCall</span>
         </span>
         <div className="welcome-top-actions">
-          <ConnectWalletButton
-            size="normal"
-            label="连接钱包登录"
-            title="只读取钱包地址（eth_requestAccounts）；签名与交易都在钱包扩展弹窗里确认"
-          />
+          {connected ? (
+            <button type="button" className="btn" onClick={onProceed} title="钱包已连接——点击进入身份选择/工作台">
+              继续进入平台 →
+            </button>
+          ) : (
+            <ConnectWalletButton
+              size="normal"
+              label="连接钱包登录"
+              title="只读取钱包地址（eth_requestAccounts）；签名与交易都在钱包扩展弹窗里确认"
+            />
+          )}
         </div>
       </header>
       <main className="welcome-login">
