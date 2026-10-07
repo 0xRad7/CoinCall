@@ -8,6 +8,10 @@
                 success_rate=(success+settled)/(success+settled+aborted)，坏账不入分母）
 - freshness   = exp(-ln2*Δh/48)（Δh=as_of−last_activity；as_of 显式传入即演示时间注入）
 - norm = 窗口内 min-max（候选集=本次响应的分区内服务；零区间=0.5）
+
+/advice（decision-as-advice §3 方案一）：同一引擎的极简判定式投影——verb + 人话 reason
+（确定性模板拼接，禁 LLM）+ ≤2 备选 + 预算占比 + 证据二级指针；recommend 恒可从
+/decision/services 同分区排序复算（同引擎双视图：人看证据，Agent 听建议）。
 """
 
 import hashlib
@@ -15,7 +19,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -668,4 +672,213 @@ def anchor_result(body: AnchorResultRequest, request: Request) -> AnchorResultRe
     inserted = store.anchor_record(body.agent_id, body.digest, tx)
     return AnchorResultResponse(
         agent_id=body.agent_id, digest=body.digest, tx_hash=tx, duplicate=not inserted
+    )
+
+
+# ---------------------------------------------------------------------------
+# /advice 极简判定视图（decision-as-advice §3 方案一：同引擎双视图，Agent 消费）
+# ---------------------------------------------------------------------------
+
+#: indifferent 死区阈值：榜首与 current 分差小于该值 → 不值得换（阈值自描述，可辩）
+ADVICE_INDIFFERENT_MARGIN = 0.05
+#: reason 模板触发阈值（三信号分量分差人话化；全部由 finalized rows 数字确定性生成）
+ADVICE_REVENUE_GAP = 0.2
+ADVICE_SUCCESS_RATE_GAP = 0.1
+ADVICE_LATENCY_GAP_MS = 1000
+#: freshness 人话阈值：age_h<1="刚刚活跃"；<24="N 小时前活跃"
+ADVICE_FRESH_JUST_NOW_H = 1.0
+ADVICE_FRESH_RECENT_H = 24.0
+#: reason 信号段上限（三信号各至多一段；"较你选的 {current}" 子句另拼不计入）
+ADVICE_MAX_SIGNAL_SEGMENTS = 3
+ADVICE_INSUFFICIENT_REASON = "分区暂无足够数据，建议按价格与服务描述自选"
+
+AdviceVerb = Literal["recommend", "keep", "switch", "indifferent", "insufficient_data"]
+
+
+class AdviceAlternative(BaseModel):
+    id: str
+    why: str = Field(description="同模板取一条最显著差异；无命中→综合分差")
+
+
+class AdviceResponse(BaseModel):
+    """极简判定式（Agent 只需读 verb + reason 即可行动；证据退为二级指针）。"""
+
+    verb: AdviceVerb = Field(
+        description=(
+            "recommend=纯推荐（current 缺失/不在分区）；keep=current 即榜首；"
+            "switch=更优且分差≥0.05；indifferent=分差死区；insufficient_data=分区无数据"
+        )
+    )
+    recommend: str | None = Field(default=None, description="建议服务；insufficient_data 时 None")
+    confidence: float | None = Field(default=None, description="recommend 的 score（0~1）")
+    margin: float | None = Field(
+        default=None, description="与次名（无 current/即榜首时）或与 current 的分差"
+    )
+    reason: str = Field(description="确定性模板拼接（禁 LLM），数字全部来自 finalized rows")
+    alternatives: list[AdviceAlternative] = Field(default_factory=list, description="≤2 条")
+    budget_impact: str | None = Field(
+        default=None, description="daily_budget_raw 提供时 'price / 日额 share'；缺省 null"
+    )
+    evidence: str | None = Field(
+        default=None, description="证据二级指针 /decision/explain/{recommend}（非证据本体）"
+    )
+    as_of: str
+    category: str | None = None
+
+
+def _advice_signal_segments(rec: DecisionRow, cmp: DecisionRow | None) -> list[str]:
+    """三信号分量分差 → 人话段（确定性模板；顺序=权重序，截断至上限 3 段）。
+
+    - 收入分差>0.2 → "收入明显领先"/"收入明显落后"（rec 相对 cmp）
+    - 履约 success_rate 差>0.1 → "履约 X% vs Y%"（rec 在前）
+    - p95 差>1000ms → "延迟快/慢 N ms"（rec 更快=快）
+    - freshness（仅描述 rec 自身）：age_h<1 → "刚刚活跃"；<24 → "N 小时前活跃"
+    cmp=None（同分区唯一服务）时仅 freshness 可触发。
+    """
+    segs: list[str] = []
+    if cmp is not None:
+        rev_gap = rec.components.revenue.score_component - cmp.components.revenue.score_component
+        if rev_gap > ADVICE_REVENUE_GAP:
+            segs.append("收入明显领先")
+        elif rev_gap < -ADVICE_REVENUE_GAP:
+            segs.append("收入明显落后")
+        sr_rec = rec.components.fulfillment.success_rate
+        sr_cmp = cmp.components.fulfillment.success_rate
+        if (
+            sr_rec is not None
+            and sr_cmp is not None
+            and abs(sr_rec - sr_cmp) > (ADVICE_SUCCESS_RATE_GAP)
+        ):
+            segs.append(f"履约 {round(sr_rec * 100)}% vs {round(sr_cmp * 100)}%")
+        p_rec = rec.components.fulfillment.p95_ms
+        p_cmp = cmp.components.fulfillment.p95_ms
+        if p_rec is not None and p_cmp is not None and abs(p_rec - p_cmp) > ADVICE_LATENCY_GAP_MS:
+            diff = round(abs(p_rec - p_cmp))
+            segs.append(f"延迟{'快' if p_rec < p_cmp else '慢'} {diff} ms")
+    age_h = rec.components.freshness.age_h
+    if age_h is not None:
+        if age_h < ADVICE_FRESH_JUST_NOW_H:
+            segs.append("刚刚活跃")
+        elif age_h < ADVICE_FRESH_RECENT_H:
+            segs.append(f"{round(age_h)} 小时前活跃")
+    return segs[:ADVICE_MAX_SIGNAL_SEGMENTS]
+
+
+def _advice_reason(
+    rec: DecisionRow,
+    cmp: DecisionRow | None,
+    margin: float | None,
+    *,
+    current_id: str | None,
+) -> str:
+    """reason = 信号段（≤3）" + "连接 + 比较对象为 current 时另拼"较你选的 {current}"。
+
+    零命中回退（确定性）：分差达阈值→"综合分领先 X"，否则→"综合分接近"。
+    """
+    segs = _advice_signal_segments(rec, cmp)
+    if current_id is not None and cmp is not None and cmp.service_id == current_id:
+        segs.append(f"较你选的 {current_id}")
+    if not segs:
+        segs = [
+            f"综合分领先 {margin:.2f}"
+            if margin is not None and margin >= ADVICE_INDIFFERENT_MARGIN
+            else "综合分接近"
+        ]
+    text = " + ".join(segs)
+    return text[:1].upper() + text[1:]
+
+
+def _advice_alternative_why(alt: DecisionRow, rec: DecisionRow) -> str:
+    """备选一句话：同模板取最显著（权重序首条命中）差异；无命中→综合分差。"""
+    segs = _advice_signal_segments(alt, rec)
+    if segs:
+        return segs[0]
+    return f"综合分低 {round(rec.score - alt.score, 4):.2f}"
+
+
+def _fmt_ratio(value: float) -> str:
+    """占比 → 定点串（4 位小数去尾零）：0.05→"0.05"、0.2→"0.2"。"""
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+@router.get("/advice", response_model=AdviceResponse)
+def advice(
+    request: Request,
+    category: str = "",
+    current: str = Query("", description="Agent 本来想调的 service_id（缺省=纯推荐）"),
+    daily_budget_raw: int | None = Query(None, ge=1, description="L0 日预算现值（算占比用）"),
+    as_of: str = "",
+) -> AdviceResponse:
+    """极简判定视图（decision-as-advice §3 方案一）：同引擎的判定式投影。
+
+    判定序（确定性）：分区无 active 服务或全无履约数据 → insufficient_data（不给貌似
+    权威的建议，按价格升序兜底）；current 缺失/不在分区 → recommend；current 即榜首
+    （含同分区唯一服务）→ keep；榜首与 current 分差 <0.05 → indifferent；否则 switch。
+    reason 由 finalized rows 数字确定性模板拼接（禁 LLM）；recommend 恒等于
+    /decision/services 同分区榜首（同引擎一致性，可复算）。取数窗口恒用默认 168h
+    （引擎口径固定，与看板一致）。
+    """
+    partition = _check_category(category)
+    as_of_dt = parse_as_of(as_of)
+    ctx = _build_context(request, window_hours=DEFAULT_WINDOW_HOURS)
+    final = _sort_rows(_finalize_rows(ctx, _candidate_rows(ctx, partition, as_of_dt)), "score")
+
+    if not final or all(r.components.fulfillment.success_rate is None for r in final):
+        cheapest = sorted(final, key=lambda r: (int(r.price_raw), r.service_id))[:2]
+        return AdviceResponse(
+            verb="insufficient_data",
+            reason=ADVICE_INSUFFICIENT_REASON,
+            alternatives=[
+                AdviceAlternative(id=r.service_id, why=f"价格 {r.price}") for r in cheapest
+            ],
+            as_of=as_of_dt.isoformat(),
+            category=partition,
+        )
+
+    top = final[0]
+    runner_up = final[1] if len(final) > 1 else None
+    current_row = next((r for r in final if r.service_id == current), None) if current else None
+
+    verb: AdviceVerb
+    if current_row is None:
+        verb = "recommend"
+        cmp_row = runner_up
+        current_id: str | None = None
+    elif current_row.service_id == top.service_id:
+        verb = "keep"
+        cmp_row = runner_up
+        current_id = None
+    else:
+        current_id = current_row.service_id
+        cmp_row = current_row
+        if top.score - current_row.score < ADVICE_INDIFFERENT_MARGIN:
+            verb = "indifferent"
+        else:
+            verb = "switch"
+
+    margin = round(top.score - cmp_row.score, 4) if cmp_row is not None else None
+
+    budget_impact: str | None = None
+    if daily_budget_raw is not None:
+        share = int(top.price_raw) / daily_budget_raw
+        budget_impact = f"{top.price} / 日额 {_fmt_ratio(share)}"
+
+    alternatives = [
+        AdviceAlternative(id=r.service_id, why=_advice_alternative_why(r, top))
+        for r in final
+        if r.service_id != top.service_id
+    ][:2]
+
+    return AdviceResponse(
+        verb=verb,
+        recommend=top.service_id,
+        confidence=top.score,
+        margin=margin,
+        reason=_advice_reason(top, cmp_row, margin, current_id=current_id),
+        alternatives=alternatives,
+        budget_impact=budget_impact,
+        evidence=f"/decision/explain/{top.service_id}",
+        as_of=as_of_dt.isoformat(),
+        category=partition,
     )
