@@ -279,3 +279,31 @@ function CaptureConnect({ onReady }: { onReady: (c: () => void) => void }) {
   useEffect(() => onReady(() => void w.connect()), [w]);
   return null;
 }
+
+
+it("互斥：选定 provider 后侧栏隐藏 Consumer 入口；硬闯 /consumer 被弹回 /provider", async () => {
+  localStorage.setItem("coincall.mode", "provider");
+  window.location.hash = "#/";
+  render(
+    <MemoryRouter initialEntries={["/"]}>
+      <WalletProvider>
+        <ModeProvider>
+          <AppShell />
+        </ModeProvider>
+      </WalletProvider>
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(screen.getByText("Provider")).toBeTruthy());
+  expect(screen.queryByText("Consumer")).toBeNull(); // 互斥：对方入口不出现
+  cleanup();
+
+  window.location.hash = "#/consumer";
+  render(
+    <WalletProvider>
+      <ModeProvider>
+        <ConsumerWorkbench />
+      </ModeProvider>
+    </WalletProvider>,
+  );
+  await waitFor(() => expect(window.location.hash).toBe("#/provider")); // 弹回自己的台
+});

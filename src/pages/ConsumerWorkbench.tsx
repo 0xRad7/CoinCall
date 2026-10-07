@@ -32,6 +32,10 @@ export default function ConsumerWorkbench() {
   // 身份只能由 /welcome 选择卡设定：已连接但未选身份 → 送回选择页（禁止直达替用户选择）
   const { mode } = useMode();
   const needsChoice = connected && !mode;
+  // 互斥：Provider 身份硬闯 Consumer 台 → 弹回自己的台（换身份走顶栏 pill）
+  useEffect(() => {
+    if (mode === "provider") window.location.hash = "#/provider";
+  }, [mode]);
   useEffect(() => {
     if (needsChoice) window.location.hash = "#/welcome";
   }, [needsChoice]);

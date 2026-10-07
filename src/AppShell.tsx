@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useWallet } from "./state/WalletContext";
+import { useMode } from "./state/ModeContext";
 import { CHAIN_ID } from "./chain/constants";
 import { ConnectWalletButton } from "./components/ConnectWalletButton";
 import { ModePill, ThemeToggle } from "./components/shell";
@@ -92,6 +93,7 @@ const NAV_GROUPS: Array<{
 ];
 
 export function AppShell() {
+  const { mode } = useMode();
   return (
     <div className="app-shell">
       <nav className="side-nav">
@@ -102,7 +104,9 @@ export function AppShell() {
         {NAV_GROUPS.map((g) => (
           <div key={g.label} className="nav-group">
             <div className="nav-group-label">{g.label}</div>
-            {g.items.map((it) => (
+            {g.items
+              .filter((it) => !it.identity || !mode || it.identity === mode)
+              .map((it) => (
               <NavLink
                 key={it.to}
                 to={it.to}

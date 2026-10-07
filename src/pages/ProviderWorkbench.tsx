@@ -44,6 +44,10 @@ export default function ProviderWorkbench() {
   const { mode } = useMode();
   const pw = useWallet();
   const needsChoice = pw.address != null && !mode;
+  // 互斥：Consumer 身份硬闯 Provider 台 → 弹回自己的台（换身份走顶栏 pill）
+  useEffect(() => {
+    if (mode === "consumer") window.location.hash = "#/consumer";
+  }, [mode]);
   useEffect(() => {
     if (needsChoice) window.location.hash = "#/welcome";
   }, [needsChoice]);
