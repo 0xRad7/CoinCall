@@ -74,9 +74,9 @@ function navGroups(adminEnabled: boolean): Array<{
   return [
   {
     label: "公共",
-    items: [
-      { to: "/", end: true, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" },
-    ],
+    items: adminEnabled
+      ? []  // 管理员门禁开启时非管理员看不到总览入口（管理员自己看正常入口）
+      : [{ to: "/", end: true, name: "总览", sub: "目录与比价" }],
   },
   {
     label: "工作台",
