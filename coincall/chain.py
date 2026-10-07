@@ -4,10 +4,12 @@
   COINCALL_NETWORK=mainnet 切 677 / rpc.botchain.ai，字段级 env 可精确覆写）；
   POA 链 gas 恒 20 gwei；
 - web3 的 requests Session 显式 trust_env=False（继承 gateway C-07：系统代理不得劫持）；
+  DNS 污染等场景经 COINCALL_RPC_PROXY 显式逐用途开启（只作用于链 RPC，不影响其他客户端）；
 - 签名永远不在本模块发生：只构建 tx 字典（chainId==期望链 ID 断言先于任何签名）
   与发送已签名 raw bytes。
 """
 
+import os
 from typing import Any, Protocol
 
 import requests
@@ -19,6 +21,8 @@ from coincall.errors import WalletError
 from coincall.networks import TESTNET, resolve_network
 
 RPC_URL = TESTNET.rpc_url  # 向后兼容快照（import 时值）；运行期缺省走 resolve_network()
+#: 链 RPC 专用显式代理（C-07：系统代理不劫持；DNS 污染机器上按需开启，如 http://127.0.0.1:7890）
+ENV_RPC_PROXY = "COINCALL_RPC_PROXY"
 GAS_PRICE_GWEI = 20
 TX_TIMEOUT_S = 30
 RECEIPT_TIMEOUT_S = 90
@@ -94,6 +98,9 @@ class ChainConnection:
         )
         session = requests.Session()
         session.trust_env = False  # C-07：系统代理不得劫持链 RPC
+        rpc_proxy = os.environ.get(ENV_RPC_PROXY, "").strip()
+        if rpc_proxy:
+            session.proxies = {"http": rpc_proxy, "https": rpc_proxy}
         url = rpc_url or network.rpc_url
         self._w3 = Web3(
             Web3.HTTPProvider(url, session=session, request_kwargs={"timeout": TX_TIMEOUT_S})

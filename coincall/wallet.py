@@ -27,7 +27,6 @@ from coincall.chain import (
 from coincall.errors import WalletError
 from coincall.networks import resolve_network
 from coincall.signing import (
-    PAY_VAULT_ADDRESS,
     Authorization,
     PaymentSignature,
     sign_authorization,
@@ -102,9 +101,9 @@ def resolve_private_key(source: str | None = None, *, env_var: str = ENV_WALLET_
 class LocalWallet:
     """消费者本地付费钱包：持钥、本地直签、资金视图；repr/str 永不泄露私钥。
 
-    chain_id / rpc / token 缺省经 networks.resolve_network() 解析（缺省测试网
-    968 / rpc.bohr.life / USDT 0x75ed…；COINCALL_NETWORK=mainnet 切 677 主网），
-    显式参数永远优先于 env。
+    chain_id / rpc / token / pay_vault 缺省经 networks.resolve_network() 解析（缺省测试网
+    968 / rpc.bohr.life / USDT 0x75ed… / 金库 0xa6E8…；COINCALL_NETWORK=mainnet 切
+    677 主网含主网金库 0x39f9…），显式参数永远优先于 env。
     """
 
     def __init__(
@@ -115,7 +114,7 @@ class LocalWallet:
         rpc_url: str | None = None,
         token_address: str | None = None,
         token_decimals: int = TOKEN_DECIMALS,
-        pay_vault: str = PAY_VAULT_ADDRESS,
+        pay_vault: str | None = None,
         chain_id: int | None = None,
     ) -> None:
         network = resolve_network()
@@ -125,7 +124,7 @@ class LocalWallet:
         self._rpc_url = rpc_url
         self.token_address = token_address or network.token_address
         self.token_decimals = token_decimals
-        self.pay_vault = pay_vault
+        self.pay_vault = pay_vault or network.pay_vault
         self.chain_id = network.chain_id if chain_id is None else chain_id
 
     # -- 生成与导入 --
@@ -138,7 +137,7 @@ class LocalWallet:
         rpc_url: str | None = None,
         token_address: str | None = None,
         token_decimals: int = TOKEN_DECIMALS,
-        pay_vault: str = PAY_VAULT_ADDRESS,
+        pay_vault: str | None = None,
         chain_id: int | None = None,
     ) -> "LocalWallet":
         """本地生成专用付费钱包（03 §3 ①：Account.create，私钥不落任何平台）。"""
@@ -161,7 +160,7 @@ class LocalWallet:
         rpc_url: str | None = None,
         token_address: str | None = None,
         token_decimals: int = TOKEN_DECIMALS,
-        pay_vault: str = PAY_VAULT_ADDRESS,
+        pay_vault: str | None = None,
         chain_id: int | None = None,
     ) -> "LocalWallet":
         """导入已有钱包：0x 私钥 / env 变量 / 0600 本地 key 文件。"""

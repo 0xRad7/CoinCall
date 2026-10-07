@@ -18,6 +18,8 @@
   COINCALL_BUDGET_RAW    本地预算上限（最小单位；超出即拒绝调用）
   COINCALL_{TOTAL,DAILY,PER_CALL}_BUDGET_RAW / COINCALL_ALLOWED_SERVICES /
   COINCALL_MIN_INTERVAL_S / COINCALL_MAX_CALLS_PER_HOUR   L0 策略五变量
+  COINCALL_NETWORK      testnet|mainnet（缺省 testnet；切主网时链参数与金库一并对切）
+  COINCALL_RPC_PROXY    链 RPC 专用显式代理（DNS 污染机器按需，如 http://127.0.0.1:7890）
 
 stdio 帧：每行一个 JSON-RPC 2.0 消息（MCP stdio transport）。
 日志只写 stderr（stdout 是协议通道）。
@@ -41,6 +43,7 @@ from coincall.client import (
     Client,
 )
 from coincall.errors import CoinCallError
+from coincall.networks import resolve_network
 from coincall.policy import PolicyConfig
 from coincall.signing import PAY_VAULT_ADDRESS
 from coincall.wallet import LocalWallet
@@ -327,7 +330,7 @@ def wallet_status_payload(client: Client) -> dict[str, Any]:
         "address": None,
         "chain_id": None,
         "token_address": None,
-        "pay_vault": PAY_VAULT_ADDRESS,
+        "pay_vault": resolve_network().pay_vault,  # 无钱包时按 env 解析网络金库
         "usdt_balance_raw": None,
         "vault_allowance_raw": None,
         "available_raw": None,
@@ -352,7 +355,7 @@ def wallet_status_payload(client: Client) -> dict[str, Any]:
     payload.update(wallet)
     if wallet["usdt_balance_raw"] == 0:
         payload["hint_fund_wallet"] = (
-            "钱包 USDT 余额为 0：向该地址转入测试网 USDT（mint 受 MINTER_ROLE 门禁，"
+            "钱包 USDT 余额为 0：向该地址转入当前网络计价 USDT（测试网 mint 受 MINTER_ROLE 门禁，"
             "无公开水龙头，需从持有资金的钱钱包入）"
         )
     if wallet["vault_allowance_raw"] == 0:
