@@ -48,6 +48,7 @@ from app.modules.leaderboard import (
 from app.modules.probe import router as probe_router
 from app.modules.providers import router as providers_router
 from app.modules.receiptkey import ReceiptPubkeyClient, ReceiptPubkeySource
+from app.modules.teams import router as teams_router
 from app.storage.db import CoreStore
 
 
@@ -58,6 +59,7 @@ def create_app(
     chain_client: ChainSource | None = None,
     gateway_client: GatewayStatsSource | None = None,
     probe_http: httpx.Client | None = None,
+    mint_http: httpx.Client | None = None,
     receipt_key_client: ReceiptPubkeySource | None = None,
     feedback_payer: ReceiptPayerSource | None = None,
 ) -> FastAPI:
@@ -73,7 +75,8 @@ def create_app(
         app.state.credential_fernet = build_fernet(app_settings.credential_secret)
         app.state.probe_http = probe_http
         # trust_env=False：8010/8030 都是本机服务（gateway C-07 同源纪律）
-        http = httpx.Client(timeout=10.0, trust_env=False)
+        http = httpx.Client(timeout=30.0, trust_env=False)
+        app.state.mint_http = mint_http or http
         app.state.identities = identity_client or BotChainIdentityClient(
             http, app_settings.bot_chain_api_base_url, app_settings.identity_cache_ttl
         )
@@ -150,6 +153,7 @@ def create_app(
     app.include_router(providers_router)
     app.include_router(credentials_router)
     app.include_router(probe_router)
+    app.include_router(teams_router)
     app.include_router(leaderboard_router)
     app.include_router(decision_router)
     app.include_router(feedback_router)
