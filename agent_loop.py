@@ -141,8 +141,8 @@ def mock_llm(task: str, tools: dict[str, Any]) -> list[tuple[str, dict[str, Any]
     return [
         ("wallet_status", {}),
         ("catalog", {}),
-        ("service_quote", {"service_id": "svc_rad_ai"}),
-        ("paid_service_call", {"service_id": "svc_rad_ai", "params": {"query": "BTC 价格"}}),
+        ("service_quote", {"service_id": "binance_future_ai_increase_top_n"}),
+        ("paid_service_call", {"service_id": "binance_future_ai_increase_top_n", "params": {"query": "BTC 价格"}}),
     ]
 
 
@@ -155,7 +155,7 @@ def agent_loop(task: str) -> None:
         core_url=CORE,
         policy=PolicyConfig(  # L0：三重预算+白名单（引导配好后 Agent 永不越界）
             total_budget_raw=1_000_000, daily_budget_raw=100_000,
-            max_per_call_raw=10_000, allowed_service_ids=["svc_rad_ai"],
+            max_per_call_raw=10_000, allowed_service_ids=["binance_future_ai_increase_top_n"],
         ),
     )
     tools = build_tools(client)
