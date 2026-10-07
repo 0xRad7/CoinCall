@@ -78,6 +78,52 @@ def delete_credentials(service_id: str, request: Request) -> dict:
     return {"service_id": service_id, "deleted": True}
 
 
+TEAM_KEY_PREFIX = "team:"
+
+
+def _team_key(agent_id: int) -> str:
+    return f"{TEAM_KEY_PREFIX}{agent_id}"
+
+
+@router.put("/teams/{agent_id}/credentials")
+def put_team_credentials(agent_id: int, body: CredentialsPutRequest, request: Request) -> dict:
+    """团队默认认证头：同表异键 team:{agent_id}；服务级优先，团队级作回退（网关解析）。"""
+    if _store(request).get_provider(agent_id) is None:
+        raise HTTPException(status_code=404, detail="team_not_found")
+    for name in body.headers:
+        if not _HEADER_NAME_RE.match(name):
+            raise HTTPException(status_code=422, detail=f"非法头名: {name!r}")
+    cipher = request.app.state.credential_fernet.encrypt(_canonical_json(body.headers).encode())
+    _store(request).upsert_service_credentials(_team_key(agent_id), cipher, sorted(body.headers))
+    return {"agent_id": agent_id, "header_names": sorted(body.headers), "updated": True}
+
+
+@router.get("/teams/{agent_id}/credentials")
+def get_team_credentials_masked(agent_id: int, request: Request) -> dict:
+    row = _store(request).get_service_credentials_cipher(_team_key(agent_id))
+    return {"agent_id": agent_id, "header_names": row[1] if row else []}
+
+
+@router.delete("/teams/{agent_id}/credentials")
+def delete_team_credentials(agent_id: int, request: Request) -> dict:
+    _store(request).delete_service_credentials(_team_key(agent_id))
+    return {"agent_id": agent_id, "deleted": True}
+
+
+@router.get("/internal/teams/{agent_id}/credentials")
+def resolve_team_credentials(agent_id: int, request: Request) -> dict:
+    """internal：网关团队级回退取用。"""
+    row = _store(request).get_service_credentials_cipher(_team_key(agent_id))
+    if row is None:
+        return {"agent_id": agent_id, "headers": {}}
+    cipher, _names = row
+    try:
+        headers = _loads(request.app.state.credential_fernet.decrypt(cipher).decode())
+    except InvalidToken as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail="credential_decrypt_failed") from exc
+    return {"agent_id": agent_id, "headers": headers}
+
+
 @router.get("/internal/services/{service_id}/credentials")
 def resolve_credentials(service_id: str, request: Request) -> dict:
     """internal：网关取用（本机管理面，P0 无鉴权 posture 与 /internal/apikeys 一致）。"""
