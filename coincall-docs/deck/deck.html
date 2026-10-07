@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CoinCall · 产品演示片</title>
+<style>
+  :root{
+    --bg:#070b15;
+    --slide-a:#0b1222;
+    --slide-b:#0e1830;
+    --ink:#e8eef7;
+    --muted:#94a3bb;
+    --faint:#5f7089;
+    --line:#223150;
+    --line-soft:#1a2740;
+    --gold:#f5b84c;
+    --gold-dim:rgba(245,184,76,.12);
+    --blue:#5ba3f5;
+    --blue-dim:rgba(91,163,245,.12);
+    --green:#46cf82;
+    --green-dim:rgba(70,207,130,.12);
+    --red:#f4716a;
+    --red-dim:rgba(244,113,106,.12);
+    --card:#111a2e;
+    --card-edge:#1d2a47;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #stage{
+    position:absolute;left:50%;top:50%;
+    width:1280px;height:720px;
+    transform:translate(-50%,-50%);
+    transform-origin:center center;
+  }
+  .slide{
+    position:absolute;inset:0;
+    width:1280px;height:720px;
+    padding:50px 64px 70px;
+    display:none;flex-direction:column;
+    background:linear-gradient(155deg,var(--slide-a) 0%,var(--slide-b) 62%,#0c1526 100%);
+    border-radius:6px;
+  }
+  .slide.active{display:flex;animation:fadein .32s ease both;}
+  @keyframes fadein{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .slide::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+    background:linear-gradient(180deg,var(--gold),rgba(245,184,76,0) 70%);
+    border-radius:6px 0 0 6px;
+  }
+  /* ------- header ------- */
+  .kicker{
+    font-size:12px;letter-spacing:.28em;color:var(--gold);
+    text-transform:uppercase;margin-bottom:10px;font-weight:600;
+  }
+  h2{font-size:31px;font-weight:800;line-height:1.25;letter-spacing:.01em;}
+  .thesis{margin-top:8px;font-size:15.5px;color:var(--muted);line-height:1.55;}
+  .thesis b{color:var(--ink);font-weight:650;}
+  .s-head{margin-bottom:20px;flex:0 0 auto;}
+  .s-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}
+  /* ------- generic ------- */
+  .card{
+    background:var(--card);border:1px solid var(--card-edge);
+    border-radius:12px;padding:16px 18px;
+  }
+  .card h3{font-size:16.5px;font-weight:750;margin-bottom:8px;}
+  .card p,.card li{font-size:14px;color:var(--muted);line-height:1.6;}
+  .card p b,.card li b{color:var(--ink);font-weight:650;}
+  ul.clean{list-style:none;}
+  ul.clean li{padding-left:16px;position:relative;margin-bottom:6px;}
+  ul.clean li::before{content:"·";position:absolute;left:2px;color:var(--gold);font-weight:800;}
+  .chip{
+    display:inline-block;padding:1px 9px;border-radius:999px;
+    font-size:11.5px;border:1px solid var(--line);color:var(--muted);
+    vertical-align:2px;white-space:nowrap;
+  }
+  .chip.gold{border-color:rgba(245,184,76,.55);color:var(--gold);background:var(--gold-dim);}
+  .chip.blue{border-color:rgba(91,163,245,.5);color:var(--blue);background:var(--blue-dim);}
+  .chip.green{border-color:rgba(70,207,130,.5);color:var(--green);background:var(--green-dim);}
+  .chip.red{border-color:rgba(244,113,106,.5);color:var(--red);background:var(--red-dim);}
+  .mono{font-family:var(--mono);font-size:12.5px;}
+  /* ------- callout ------- */
+  .callout{
+    margin-top:14px;flex:0 0 auto;
+    border:1px solid rgba(245,184,76,.4);background:var(--gold-dim);
+    border-radius:10px;padding:11px 16px;
+    font-size:14px;line-height:1.55;color:var(--ink);
+  }
+  .callout .lab{color:var(--gold);font-weight:750;margin-right:8px;}
+  .callout.blue{border-color:rgba(91,163,245,.4);background:var(--blue-dim);}
+  .callout.blue .lab{color:var(--blue);}
+  .callout.red{border-color:rgba(244,113,106,.4);background:var(--red-dim);}
+  .callout.red .lab{color:var(--red);}
+  .callout.green{border-color:rgba(70,207,130,.4);background:var(--green-dim);}
+  .callout.green .lab{color:var(--green);}
+  /* ------- cover ------- */
+  .cover{justify-content:center;}
+  .cover .mark{
+    width:74px;height:74px;border-radius:50%;
+    border:3px solid var(--gold);display:flex;align-items:center;justify-content:center;
+    font-size:30px;color:var(--gold);font-weight:800;margin-bottom:24px;
+    background:radial-gradient(circle at 35% 30%,rgba(245,184,76,.28),rgba(245,184,76,.04));
+  }
+  .cover h1{font-size:72px;font-weight:850;letter-spacing:.01em;line-height:1;}
+  .cover .sub{font-size:25px;color:var(--ink);margin-top:18px;font-weight:700;}
+  .cover .sub2{font-size:16px;color:var(--muted);margin-top:10px;}
+  .cover .chips{margin-top:26px;display:flex;gap:12px;}
+  .cover .chips div{
+    font-size:15px;color:var(--muted);padding:8px 18px;
+    border:1px solid var(--line);border-radius:999px;line-height:1.4;
+  }
+  .cover .chips b{color:var(--gold);font-weight:750;}
+  .cover .foot{margin-top:26px;font-size:12.5px;color:var(--faint);letter-spacing:.18em;}
+  /* ------- cover chapter nav ------- */
+  .cover-nav{margin-top:30px;display:flex;align-items:center;gap:7px;flex-wrap:nowrap;}
+  .cover-nav .cn-lab{font-size:11.5px;color:var(--faint);letter-spacing:.22em;margin-right:5px;}
+  .cn-item{
+    display:inline-flex;align-items:baseline;gap:5px;
+    border:1px solid var(--line);border-radius:999px;padding:5px 13px;
+    font-size:13.5px;font-weight:650;color:var(--ink);cursor:pointer;white-space:nowrap;
+    user-select:none;
+  }
+  .cn-item em{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--gold);}
+  .cn-item:hover{border-color:var(--gold);background:var(--gold-dim);}
+  .cn-sep{color:#3d4d66;font-size:12px;}
+  /* ------- bridge (problem page) ------- */
+  .bridge{display:flex;align-items:stretch;gap:0;margin-bottom:16px;}
+  .b-box{
+    flex:1;background:var(--card);border:1px solid var(--card-edge);
+    border-radius:12px;padding:14px 16px;text-align:center;
+  }
+  .b-box .t{font-size:16px;font-weight:750;}
+  .b-box .d{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;}
+  .b-box.side{border-color:rgba(91,163,245,.45);background:linear-gradient(160deg,rgba(91,163,245,.1),var(--card) 60%);}
+  .b-box.gap{
+    flex:0 0 300px;border:2px dashed var(--red);background:var(--red-dim);
+    display:flex;flex-direction:column;justify-content:center;align-items:center;
+  }
+  .b-box.gap .x{font-size:26px;color:var(--red);font-weight:850;line-height:1;}
+  .b-box.gap .t{color:var(--red);margin-top:5px;font-size:15.5px;}
+  .b-gap-arrow{flex:0 0 90px;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 8px;}
+  .b-gap-arrow .lb{font-size:10.5px;color:var(--faint);text-align:center;line-height:1.35;margin-bottom:4px;}
+  .harrow{width:100%;height:2px;background:var(--line);position:relative;}
+  .harrow::after{
+    content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+    border:5px solid transparent;border-left-color:var(--line);border-right:none;
+  }
+  /* ------- value cards (3) ------- */
+  .val3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;flex:1;}
+  .val3 .card{display:flex;flex-direction:column;}
+  .val3 .big{font-size:22px;font-weight:800;color:var(--ink);margin-bottom:6px;}
+  .val3 .big span{color:var(--gold);}
+  .posbar{
+    border:1px solid rgba(245,184,76,.4);background:var(--gold-dim);border-radius:12px;
+    padding:14px 20px;font-size:17px;line-height:1.5;color:var(--ink);margin-bottom:16px;
+  }
+  .posbar b{color:var(--gold);font-weight:800;}
+  /* ------- capability grid 3x2 ------- */
+  .grid6{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr;gap:12px;flex:1;}
+  .grid6 .card{display:flex;flex-direction:column;padding:14px 16px;}
+  .ic{
+    width:34px;height:34px;border-radius:8px;
+    border:1px solid rgba(245,184,76,.5);color:var(--gold);background:var(--gold-dim);
+    display:flex;align-items:center;justify-content:center;
+    font-size:16px;font-weight:800;margin-bottom:8px;
+  }
+  .grid6 h3{font-size:15.5px;margin-bottom:5px;}
+  .grid6 p{font-size:13px;}
+  /* ------- horizontal journey flow ------- */
+  .flow{display:flex;align-items:stretch;gap:0;flex:1;}
+  .fstep{
+    flex:1;background:var(--card);border:1px solid var(--card-edge);
+    border-radius:12px;padding:14px 15px;position:relative;
+    display:flex;flex-direction:column;
+  }
+  .fstep .n{
+    width:30px;height:30px;border-radius:50%;
+    border:2px solid var(--gold);color:var(--gold);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:14px;font-weight:700;margin-bottom:9px;
+  }
+  .fstep h3{font-size:15.5px;font-weight:750;margin-bottom:5px;}
+  .fstep p{font-size:12.5px;color:var(--muted);line-height:1.55;}
+  .fstep p b{color:var(--ink);font-weight:650;}
+  .farrow{flex:0 0 34px;display:flex;align-items:center;justify-content:center;padding:0 3px;}
+  .farrow div{width:100%;height:2px;background:var(--line);position:relative;}
+  .farrow div::after{
+    content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+    border:5px solid transparent;border-left-color:var(--line);border-right:none;
+  }
+  /* ------- vertical timeline (mechanism) ------- */
+  .seq{position:relative;padding-left:44px;display:flex;flex-direction:column;gap:9px;justify-content:center;}
+  .seq::before{content:"";position:absolute;left:16px;top:14px;bottom:14px;width:2px;background:var(--line);}
+  .step{position:relative;display:flex;align-items:baseline;gap:12px;}
+  .step .num{
+    position:absolute;left:-44px;top:-1px;
+    width:32px;height:32px;border-radius:50%;
+    background:#131d33;border:2px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:13.5px;font-weight:700;color:var(--ink);
+  }
+  .step.hot .num{border-color:var(--gold);color:var(--gold);}
+  .step .st{flex:0 0 168px;font-size:14.5px;font-weight:750;}
+  .step .sd{font-size:13px;color:var(--muted);line-height:1.5;flex:1;}
+  .step .sd b{color:var(--ink);font-weight:650;}
+  /* ------- trust mini cards ------- */
+  .trust{display:flex;flex-direction:column;gap:12px;justify-content:center;}
+  .trust .card{padding:13px 16px;border-left:3px solid var(--green);}
+  .trust .card h3{font-size:14.5px;margin-bottom:4px;color:var(--green);}
+  .trust .card p{font-size:12.5px;}
+  /* ------- pillars ------- */
+  .pillar3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;flex:1;}
+  .pillar3 .card{display:flex;flex-direction:column;}
+  .pillar3 .ic{font-size:22px;margin-bottom:8px;}
+  /* ------- now/stages ------- */
+  .stage3{display:grid;grid-template-columns:1fr 44px 1fr 44px 1fr;gap:0;flex:1;align-items:stretch;}
+  .stage3 .card{display:flex;flex-direction:column;justify-content:flex-start;}
+  .stage3 .s-arrow{display:flex;align-items:center;justify-content:center;}
+  .stage3 .s-arrow div{width:100%;height:2px;background:var(--line);position:relative;}
+  .stage3 .s-arrow div::after{
+    content:"";position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+    border:5px solid transparent;border-left-color:var(--line);border-right:none;
+  }
+  .stage3 .tagline{font-size:12.5px;color:var(--faint);margin-top:auto;padding-top:8px;line-height:1.5;}
+  /* ------- split ------- */
+  .split2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .acts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:14px;}
+  .acts .card{padding:13px 15px;}
+  .acts .an{font-size:12px;color:var(--gold);letter-spacing:.15em;font-weight:750;margin-bottom:5px;}
+  .acts h3{font-size:15px;margin-bottom:4px;}
+  .acts p{font-size:12.5px;}
+  /* ------- closing ------- */
+  .closing{justify-content:center;align-items:flex-start;}
+  .closing .big{font-size:46px;font-weight:850;line-height:1.35;max-width:1020px;}
+  .closing .big em{font-style:normal;color:var(--gold);}
+  .closing .rest{margin-top:24px;font-size:17px;color:var(--muted);line-height:1.7;}
+  .closing .rest b{color:var(--ink);}
+  .closing .stats{display:flex;gap:14px;margin-top:34px;}
+  .closing .stats .st{
+    border:1px solid var(--line);border-radius:12px;padding:14px 24px;text-align:center;
+    background:var(--card);
+  }
+  .closing .stats .st .n{font-size:25px;font-weight:800;color:var(--gold);}
+  .closing .stats .st .l{font-size:12px;color:var(--faint);margin-top:5px;}
+  /* ------- nav ui ------- */
+  #counter{
+    position:absolute;right:22px;bottom:16px;
+    font-family:var(--mono);font-size:12.5px;color:var(--faint);z-index:30;
+  }
+  #hint{
+    position:absolute;left:22px;bottom:16px;
+    font-size:11px;color:#3d4d66;z-index:30;letter-spacing:.06em;
+  }
+  #bar{
+    position:absolute;left:0;bottom:0;height:3px;width:0;
+    background:linear-gradient(90deg,var(--gold),#ffd98a);z-index:31;
+    transition:width .25s ease;border-radius:0 2px 2px 0;
+  }
+  .navbtn{
+    position:absolute;top:50%;transform:translateY(-50%);
+    width:40px;height:56px;border:1px solid var(--line);border-radius:10px;
+    background:rgba(11,18,34,.75);color:var(--muted);font-size:19px;
+    display:flex;align-items:center;justify-content:center;z-index:32;
+    cursor:pointer;user-select:none;
+  }
+  .navbtn:hover{border-color:var(--gold);color:var(--gold);}
+  #prevBtn{left:14px;}
+  #nextBtn{right:14px;}
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- PAGE 01 · 封面 -->
+<section class="slide cover active">
+  <div class="mark">C</div>
+  <h1>CoinCall</h1>
+  <div class="sub">让 Agent 能力按次收费，让 Agent 调用按次付费</div>
+  <div class="sub2">Agent 经济缺一个支付层，我们把它做出来了。</div>
+  <div class="chips">
+    <div><b>30 秒</b> 上架一个收费服务</div>
+    <div><b>0.01 USDT</b> 调用一次</div>
+    <div><b>失败</b>不扣款</div>
+  </div>
+  <div class="cover-nav">
+    <span class="cn-lab">本片脉络</span>
+    <span class="cn-item" data-goto="2">问题<em>02</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="3">方案<em>03</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="4">能力<em>04</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="5">故事<em>05-06</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="7">机制<em>07</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="8">信任<em>08</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="9">时机<em>09</em></span><span class="cn-sep">→</span>
+    <span class="cn-item" data-goto="10">演示<em>10</em></span>
+  </div>
+  <div class="foot">COINCALL · AGENT 按次付费层 · ETH WUHAN 2026 · BOT CHAIN</div>
+</section>
+
+<!-- PAGE 02 · 用户问题 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">02 · 用户问题</div>
+    <h2>机器对机器的交易，今天没有支付方式</h2>
+    <p class="thesis">Agent 经济两边都有真实需求，却被同一个缺口卡死：<b>人和人做生意有支付宝，机器和机器做生意什么都没有</b>。</p>
+  </header>
+  <div class="s-body" style="justify-content:center;">
+    <div class="bridge">
+      <div class="b-box side">
+        <div class="t">有 Agent 能力的人</div>
+        <div class="d">会翻译、会查链上数据、会扫合约……<br>能力是现成的，想卖</div>
+      </div>
+      <div class="b-gap-arrow"><div class="lb">想按次卖 ↔ 想按次买</div><div class="harrow"></div></div>
+      <div class="b-box gap">
+        <div class="x">✗</div>
+        <div class="t">按次付费通道：不存在</div>
+      </div>
+      <div class="b-gap-arrow"><div class="lb">付不了小钱</div><div class="harrow"></div></div>
+      <div class="b-box side">
+        <div class="t">做 Agent 的人</div>
+        <div class="d">Agent 任务里需要外部能力，<br>想按需买，不想养订阅</div>
+      </div>
+    </div>
+    <div class="split2">
+      <div class="card">
+        <h3>供给侧：能力卖不出去</h3>
+        <ul class="clean">
+          <li>能力只能<b>白送</b>（开源、免费接口），或者升级成<b>商务合同 / 订阅</b>——没有「按次卖」的通道</li>
+          <li>机器调用是<b>几分几厘的小钱</b>，合同谈下来的成本比收入还高，收不到</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>消费侧：想买买不成</h3>
+        <ul class="clean">
+          <li><b>订阅制对机器不成立</b>：Agent 只调 3 次，凭什么包月</li>
+          <li><b>按次买没处买</b>：没有 Agent 能自己逛、自己下单的市场</li>
+          <li><b>预充值不敢充</b>：钱进了平台口袋，怕跑路、怕乱扣</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <span class="lab">一句话</span>人有支付宝 / Stripe；Agent 什么都没有。<b>这就是我们要填的坑。</b>
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 03 · 我们解决什么 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">03 · 我们解决什么</div>
+    <h2>CoinCall：Agent 世界的按次付费层</h2>
+    <p class="thesis">对齐行业 x402 方向——把「一次调用」变成「一笔干净的按次支付」，供需两端直接成交。</p>
+  </header>
+  <div class="s-body">
+    <div class="posbar">有能力的，<b>30 秒开卖</b>；要用的，<b>用一次付一次</b>——价格公开、钱不经平台、失败不付钱。</div>
+    <div class="val3">
+      <div class="card">
+        <div class="big">按次<span>明码标价</span></div>
+        <p>价格直接写在服务目录里（如 <b>0.01 USDT / 次</b>），用一次付一次。人和 Agent 都能读到同一个价，没有议价、没有套餐。</p>
+      </div>
+      <div class="card">
+        <div class="big">钱<span>不经平台</span></div>
+        <p>你的钱包通过链上合约<b>直接付给服务方</b>。平台没有收款账户这回事——「怕跑路」「怕乱扣」不是被承诺掉的，是<b>结构上不存在</b>。</p>
+      </div>
+      <div class="card">
+        <div class="big">失败<span>不扣款</span></div>
+        <p>调用成功才收钱；服务失败、超时，<b>一分不扣</b>。也不存在退款流程——因为钱从未离手。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 04 · 产品能力总览 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">04 · 产品能力</div>
+    <h2>六件事，把「按次买卖 Agent 能力」变成现实</h2>
+    <p class="thesis">供给侧三件（上架、目录、收款）+ 消费侧三件（凭证、签名支付、接入工具），合起来就是一个完整市场。</p>
+  </header>
+  <div class="s-body">
+    <div class="grid6">
+      <div class="card">
+        <div class="ic">卖</div>
+        <h3>30 秒上架收费服务</h3>
+        <p>发一份服务说明——做什么、怎么调、单价多少（如 0.01 USDT / 次）——<b>立即进目录开卖</b>。</p>
+      </div>
+      <div class="card">
+        <div class="ic">逛</div>
+        <h3>机读目录 + 商店页</h3>
+        <p><b>Agent 自己能挑</b>（机器读目录），人也能逛（商店页）；按真实收入排序，一眼看出谁靠谱。</p>
+      </div>
+      <div class="card">
+        <div class="ic">钥</div>
+        <h3>api key 接入凭证</h3>
+        <p>生成一把 key 即完成接入，<b>无需注册流程</b>；随时可吊销，立即生效。</p>
+      </div>
+      <div class="card">
+        <div class="ic">签</div>
+        <h3>一次调用 = 一笔签名支付</h3>
+        <p>专用付费钱包<b>本地签名</b>「这一笔付多少、付给谁、何时前有效」——不经任何中间账户。</p>
+      </div>
+      <div class="card">
+        <div class="ic">结</div>
+        <h3>链上结算 + 随时提现</h3>
+        <p>每次成功调用，收入自动结算到服务方名下，<b>随时提走、无人能冻结</b>；收入记录就是信誉证明。</p>
+      </div>
+      <div class="card">
+        <div class="ic">具</div>
+        <h3>SDK + 两个 MCP 工具</h3>
+        <p>装个包，两个工具：<b>查目录</b> 和 <b>付费调用</b>——Agent 框架挂载即接入，接入文档只有一页。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 05 · 用户故事：供给侧 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">05 · 用户故事 · 供给侧</div>
+    <h2>从能力到收入：你的 Agent 技能，第一次有了柜台</h2>
+    <p class="thesis">以「技术翻译」为例——四步，从一个人人可白嫖的技能，变成一门自动收钱的生意。</p>
+  </header>
+  <div class="s-body">
+    <div class="flow">
+      <div class="fstep">
+        <div class="n">1</div>
+        <h3>上架</h3>
+        <p><b>30 秒</b>发布服务说明：技术翻译，<b>0.01 USDT / 次</b>，绑定自己的收款钱包。</p>
+      </div>
+      <div class="farrow"><div></div></div>
+      <div class="fstep">
+        <div class="n">2</div>
+        <h3>被发现</h3>
+        <p>服务进入目录后，<b>任何接入平台的 Agent</b> 都可能在任务中挑中它——机器客户，全天候在线。</p>
+      </div>
+      <div class="farrow"><div></div></div>
+      <div class="fstep">
+        <div class="n">3</div>
+        <h3>收入实时进账</h3>
+        <p>每次被成功调用，收入<b>自动结算到你名下</b>；想用就提现，进的是你自己的钱包。</p>
+      </div>
+      <div class="farrow"><div></div></div>
+      <div class="fstep">
+        <div class="n">4</div>
+        <h3>收入即信誉</h3>
+        <p>排行榜按<b>真实收入</b>排序，每一笔都在链上、可被核验——比任何评分、认证都硬。</p>
+      </div>
+    </div>
+    <div class="callout green">
+      <span class="lab">他得到了什么</span>不用找客户、不用谈合同、不用做收款系统——<b>把能力挂上去，剩下的事平台和链来办</b>。
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 06 · 用户故事：消费侧 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">06 · 用户故事 · 消费侧</div>
+    <h2>从想用到用上：你的 Agent，只需要会 HTTP</h2>
+    <p class="thesis">你在做 Agent 产品，任务里需要翻译 / 链上数据 / 合约快查——四步，能力即插即用。</p>
+  </header>
+  <div class="s-body">
+    <div class="flow">
+      <div class="fstep">
+        <div class="n">1</div>
+        <h3>挑服务</h3>
+        <p>Agent 在目录里<b>自己找</b>（查目录工具），或你在商店页指定；价格、用法一目了然。</p>
+      </div>
+      <div class="farrow"><div></div></div>
+      <div class="fstep">
+        <div class="n">2</div>
+        <h3>备好小钱包</h3>
+        <p>本地生成<b>专用付费钱包</b>（私钥不出你的机器），转入一点 USDT，设一个额度上限。</p>
+      </div>
+      <div class="farrow"><div></div></div>
+      <div class="fstep">
+        <div class="n">3</div>
+        <h3>自动付费调用</h3>
+        <p>任务需要能力时，Agent <b>自动签名、自动付费</b>，一次一结——全程无需人工插手。</p>
+      </div>
+      <div class="farrow"><div></div></div>
+      <div class="fstep">
+        <div class="n">4</div>
+        <h3>花得放心</h3>
+        <p><b>失败不扣款</b>；额度自己封顶、随时可调可撤；平台从头到尾碰不到你的钱。</p>
+      </div>
+    </div>
+    <div class="callout blue">
+      <span class="lab">他得到了什么</span>不用买订阅、不用预充值给平台、不用改 Agent 架构——<b>装个 SDK，Agent 立刻多出一双能付费的手</b>。
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 07 · 怎么解决的 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">07 · 怎么解决的</div>
+    <h2>一次付费调用的旅程：六步，全程秒级</h2>
+    <p class="thesis">左边是用户走的路，右边是让这条路可信的三个设计——<b>没有一个环节需要信任任何人</b>。</p>
+  </header>
+  <div class="s-body">
+    <div style="display:grid;grid-template-columns:1.55fr 1fr;gap:20px;flex:1;min-height:0;">
+      <div class="seq">
+        <div class="step"><div class="num">1</div><div class="st">出示凭证</div><div class="sd">api key 证明「你是谁」——一把钥匙，随发随用、随时吊销</div></div>
+        <div class="step"><div class="num">2</div><div class="st">挑中服务</div><div class="sd">从目录选中，价格与用法<b>事前完全可见</b></div></div>
+        <div class="step hot"><div class="num">3</div><div class="st">签名授权</div><div class="sd">钱包对<b>这一笔</b>签名：付多少、付给谁、何时前有效——只授权一次，不交出钱包</div></div>
+        <div class="step"><div class="num">4</div><div class="st">平台校验转发</div><div class="sd">秒级校验签名与额度，把请求转给服务方——<b>不用等链上确认</b>，体验与普通接口无差</div></div>
+        <div class="step hot"><div class="num">5</div><div class="st">成功才扣款</div><div class="sd">服务返回结果，这笔支付才生效；<b>失败 / 超时 = 一分未扣</b></div></div>
+        <div class="step"><div class="num">6</div><div class="st">收入上链</div><div class="sd">服务方收入自动记账上链，<b>随时提现、笔笔可查</b></div></div>
+      </div>
+      <div class="trust">
+        <div class="card">
+          <h3>钱只走链上合约</h3>
+          <p>扣款由合约按你的签名执行，平台不经手——无款可卷、无权乱扣。</p>
+        </div>
+        <div class="card">
+          <h3>成功才扣</h3>
+          <p>先拿到结果，钱才离手。服务不好用，直接损失的是服务方。</p>
+        </div>
+        <div class="card">
+          <h3>浪费有上限</h3>
+          <p>在途额度自动封顶，最坏情况损失 = 几次调用的小钱，且随时可撤额止损。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 08 · 为什么可信 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">08 · 为什么可信</div>
+    <h2>不靠承诺，靠结构</h2>
+    <p class="thesis">可信不是「我们保证」，而是<b>即使我们作恶也偷不走一分钱</b>——三根柱子撑起这句话。</p>
+  </header>
+  <div class="s-body">
+    <div class="pillar3">
+      <div class="card">
+        <div class="ic">盾</div>
+        <h3>平台不托管任何资金</h3>
+        <p>没有「平台收款账户」这个东西。消费者的钱始终在自己钱包里，扣款只由链上合约按签名执行——<b>想跑路也没有账户可跑</b>。</p>
+      </div>
+      <div class="card">
+        <div class="ic">规</div>
+        <h3>结算规则开源可查</h3>
+        <p>谁能扣钱、一次扣多少、服务方怎么提现——全部<b>白纸黑字写死在开源合约里</b>，部署后任何人都改不了，包括我们自己。</p>
+      </div>
+      <div class="card">
+        <div class="ic">链</div>
+        <h3>每笔收入都是链上公开事实</h3>
+        <p>服务方的收入逐笔上链、公开可查，<b>现场就能核验</b>——没有可以后台修饰的数字。</p>
+      </div>
+    </div>
+    <div class="callout red">
+      <span class="lab">我们不做什么</span>不做资金托管 · 不做裁判（不裁决交付好坏——「成功才扣款」让裁判失业）· 不抽佣（钱在供需两端之间全额直达）。
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 09 · 为什么是现在 -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">09 · 为什么是现在</div>
+    <h2>方向已是共识，闭环还没人跑通</h2>
+    <p class="thesis">我们不赌一个方向，我们补一个所有人都知道缺、但还没人补上的环节。</p>
+  </header>
+  <div class="s-body">
+    <div class="stage3">
+      <div class="card">
+        <h3>方向已是行业共识</h3>
+        <p>Agent 按次付费是明确趋势：<b>x402 协议</b>把「按次付费调用」标准化，BOT Chain 官方路线图也已点名 Agent 支付。</p>
+        <div class="tagline">不用教育市场——市场已经在等这个答案。</div>
+      </div>
+      <div class="s-arrow"><div></div></div>
+      <div class="card">
+        <h3>但链上还没人跑通</h3>
+        <p>方向有了，<b>可用的产品没有</b>：链上至今不存在一个完整可用的「上架 → 付费调用 → 收入上链」闭环。</p>
+        <div class="tagline">第一个跑通的人，定义这个生态的默认入口。</div>
+      </div>
+      <div class="s-arrow"><div></div></div>
+      <div class="card">
+        <h3>我们率先做出闭环</h3>
+        <p>CoinCall 补上这一环。未来官方方案上线 = <b>生态多一条通道</b>，我们天然兼容、共存互补。</p>
+        <div class="tagline">赛点不是「对抗官方」，是「比官方早跑通」。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 10 · 进度与演示（实录） -->
+<section class="slide">
+  <header class="s-head">
+    <div class="kicker">10 · 进度与演示</div>
+    <h2>全部就绪：五件套交付，闭环真链跑通</h2>
+    <p class="thesis">不再有「开发中」——从管理面到消费端 SDK 全部交付，端到端付费闭环已在真实链上完整跑通。</p>
+  </header>
+  <div class="s-body">
+    <div class="split2">
+      <div class="card">
+        <h3><span class="chip green">已交付</span> 全栈五件套</h3>
+        <p style="margin-top:6px;">管理面（目录 / 商店）、付费网关、链上适配、结算合约、消费端 SDK——<b>五个部分全部交付</b>，不留演示桩。</p>
+      </div>
+      <div class="card">
+        <h3><span class="chip green">已验证</span> 端到端闭环</h3>
+        <p style="margin-top:6px;">上架 → 付费调用 → 链上结算 → 提现，<b>全流程在真实链上跑通</b>——赛时演的与交付的是同一套系统。</p>
+      </div>
+    </div>
+    <div class="acts">
+      <div class="card">
+        <div class="an">第一幕</div>
+        <h3>30 秒上架</h3>
+        <p>现场把一个 Agent 能力变成收费服务——<b>彩排实测 2.3 秒</b>，目录立即可见。</p>
+      </div>
+      <div class="card">
+        <div class="an">第二幕</div>
+        <h3>一次真实付费调用</h3>
+        <p>Agent 自动选服务、自动签名、自动付费，结果当场返回。</p>
+      </div>
+      <div class="card">
+        <div class="an">第三幕</div>
+        <h3>收入上链大屏</h3>
+        <p>调用收入实时上链刷新——<b>Provider 提现到账 0.22 USDT</b>，链上可核。</p>
+      </div>
+    </div>
+    <div class="callout green">
+      <span class="lab">彩排实录</span>三幕全程 <b>5 分 58 秒，零人工干预</b>——台上演的每一笔，都是真实发生的交易。
+    </div>
+  </div>
+</section>
+
+<!-- PAGE 11 · 收尾记忆点 -->
+<section class="slide closing">
+  <div class="kicker">11 · 一句话记忆点</div>
+  <div class="big">人有支付宝和 Stripe，<br>Agent 现在有了<em> CoinCall</em>。</div>
+  <div class="rest">
+    按次明码标价 · 钱不经平台 · 失败不扣款——<b>Agent 经济的支付层，已经通电。</b>
+  </div>
+  <div class="stats">
+    <div class="st"><div class="n">30 秒</div><div class="l">上架一个收费服务</div></div>
+    <div class="st"><div class="n">0.01 USDT</div><div class="l">调用一次</div></div>
+    <div class="st"><div class="n">失败不扣款</div><div class="l">先拿到结果，钱才离手</div></div>
+  </div>
+  <div style="margin-top:16px;font-size:13px;color:var(--faint);">累计链上结算 <span style="color:var(--gold);font-weight:700;">30+ 笔</span>，逐笔可核验。</div>
+  <div class="foot" style="margin-top:40px;font-size:12.5px;color:var(--faint);letter-spacing:.18em;">COINCALL · ETH WUHAN 2026 · BOT CHAIN</div>
+</section>
+
+<div id="counter">01 / 11</div>
+<div id="hint">← → 翻页 · 点击左右侧翻页 · 封面脉络条目可跳转</div>
+<div id="bar"></div>
+<div class="navbtn" id="prevBtn">‹</div>
+<div class="navbtn" id="nextBtn">›</div>
+</div>
+
+<script>
+(function(){
+  var stage  = document.getElementById('stage');
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var counter= document.getElementById('counter');
+  var bar    = document.getElementById('bar');
+  var cur    = 0;
+  var N      = slides.length;
+
+  function pad(x){ return (x < 10 ? '0' : '') + x; }
+  function show(i){
+    if(i < 0) i = 0;
+    if(i > N - 1) i = N - 1;
+    slides[cur].classList.remove('active');
+    cur = i;
+    slides[cur].classList.add('active');
+    counter.textContent = pad(cur + 1) + ' / ' + pad(N);
+    bar.style.width = ((cur + 1) / N * 100) + '%';
+  }
+
+  document.addEventListener('keydown', function(e){
+    if(e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if(k === 'ArrowRight' || k === ' ' || k === 'PageDown' || k === 'Down'){ show(cur + 1); e.preventDefault(); }
+    else if(k === 'ArrowLeft' || k === 'PageUp' || k === 'Up'){ show(cur - 1); e.preventDefault(); }
+    else if(k === 'Home'){ show(0); e.preventDefault(); }
+    else if(k === 'End'){ show(N - 1); e.preventDefault(); }
+  });
+
+  document.addEventListener('click', function(e){
+    var g = e.target.closest ? e.target.closest('[data-goto]') : null;
+    if(g){ show(parseInt(g.getAttribute('data-goto'), 10) - 1); return; }
+    var x = e.clientX / window.innerWidth;
+    if(x < 0.25){ show(cur - 1); } else { show(cur + 1); }
+  });
+
+  function fit(){
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    stage.style.transform = 'translate(-50%,-50%) scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+  show(0);
+})();
+</script>
+</body>
+</html>
