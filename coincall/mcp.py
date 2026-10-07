@@ -433,6 +433,8 @@ def _summarize_quote(q: dict[str, Any]) -> str:
             f"│   {sec.get('billing_truth')} · {sec.get('fulfillment_anchor')} · "
             f"状态 {sec.get('service_status')}"
         )
+        if sec.get("content_scan"):
+            lines.append(f"│   {sec['content_scan']}")
         for note in (sec.get("notes") or [])[:2]:
             lines.append(f"└ {note}")
     if advice.get("alternatives"):
