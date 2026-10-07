@@ -128,7 +128,7 @@ export default function Overview() {
                     );
                   })()}
                   <div className="call-endpoint-box">
-                    <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
+                    <div className="dim" style={{ fontSize: 11 }}>琢信调用端点</div>
                     <div className="flex" style={{ gap: 6 }}>
                       <span className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
                         POST {gatewayCallUrl(s.service_id)}
@@ -138,7 +138,7 @@ export default function Overview() {
                       </span>
                       <CopyButton text={`POST ${gatewayCallUrl(s.service_id)}`} label="复制" />
                     </div>
-                    <div className="dim" style={{ fontSize: 11 }}>真实上游由平台中转，消费者只看到 CoinCall 端点</div>
+                    <div className="dim" style={{ fontSize: 11 }}>真实上游由平台中转，消费者只看到琢信端点</div>
                   </div>
                   {s.manifest.description && <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-2)" }}>{s.manifest.description}</div>}
                 </div>

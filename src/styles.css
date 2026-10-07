@@ -331,20 +331,21 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .login .welcome-top .theme-toggle { background: transparent; border-color: #2b3850; color: #94a3bd; }
 .login .welcome-top .theme-toggle:hover { background: #131b2b; }
 
-/* ---- 登录态：深色叙事面（居中窄卡外大留白 + 通栏大按钮） ---- */
+/* ---- 登录态：深色叙事面（登录入口在右上角顶栏，页面中部纯叙事） ---- */
+.welcome-top-actions { display: flex; align-items: center; gap: var(--space-3); }
+.welcome-browse-link { font-size: var(--fs-13); color: #9db9ff; }
+.welcome-browse-link:hover { text-decoration: underline; }
+.login .welcome-top .btn { padding: 7px 14px; }
 .welcome-login { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-5) var(--space-4); gap: var(--space-4); }
-.welcome-login h1 { font-size: 30px; font-weight: 600; line-height: 1.4; letter-spacing: -0.01em; margin: 0; text-align: center; color: #f2f5fb; }
-.welcome-lede { color: #94a3bd; font-size: var(--fs-16); margin: -8px 0 0; text-align: center; max-width: 60ch; }
-.welcome-login-card { width: 400px; max-width: 94vw; background: #101827; border: 1px solid #223049; border-radius: var(--radius); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
-.welcome-login-card .btn { width: 100%; padding: 13px 16px; font-size: 15px; border-radius: var(--radius); justify-content: center; }
-.welcome-browse { text-align: center; font-size: var(--fs-13); color: #7d8ba6; }
-.welcome-browse a { color: #9db9ff; }
-.welcome-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); width: 100%; max-width: 760px; }
-@media (max-width: 720px) { .welcome-points { grid-template-columns: 1fr; } }
+.welcome-eyebrow { font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.16em; color: #7d8ba6; text-transform: uppercase; }
+.welcome-login h1 { font-size: 34px; font-weight: 600; line-height: 1.45; letter-spacing: -0.01em; margin: 0; text-align: center; color: #f2f5fb; }
+.welcome-lede { color: #94a3bd; font-size: var(--fs-16); margin: -8px 0 0; text-align: center; max-width: 56ch; }
+.welcome-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); width: 100%; max-width: 860px; }
+@media (max-width: 720px) { .welcome-points { grid-template-columns: 1fr; } .welcome-login h1 { font-size: 26px; } }
 .welcome-point { border: 1px solid #223049; border-radius: var(--radius); padding: var(--card-pad); background: #0f1725; }
 .welcome-point .pt { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 4px; color: #f2f5fb; }
 .welcome-point .pd { font-size: var(--fs-13); color: #94a3bd; margin: 0; line-height: 1.6; }
-.welcome-stats { border-top: 1px solid #1e293c; padding-top: var(--space-3); width: 100%; max-width: 760px; display: flex; align-items: center; justify-content: center; gap: var(--space-3); flex-wrap: wrap; color: #94a3bd; font-size: var(--fs-13); }
+.welcome-stats { border-top: 1px solid #1e293c; padding-top: var(--space-3); width: 100%; max-width: 860px; display: flex; align-items: center; justify-content: center; gap: var(--space-3); flex-wrap: wrap; color: #94a3bd; font-size: var(--fs-13); }
 .welcome-stats .ws-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-16); color: #f2f5fb; }
 .welcome-stats .evidence a.evidence-link { border-color: #2b3850; color: #9db9ff; background: transparent; }
 .welcome-stats .evidence a.evidence-link:hover { background: #131b2b; }

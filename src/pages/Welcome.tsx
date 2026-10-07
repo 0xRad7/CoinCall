@@ -1,7 +1,7 @@
 /**
  * 落地页 /welcome（登录 + 选身份单页流，两态）：
- * - 未连接 = 登录态（=落地页）：深色叙事面——产品一句话 + 三个记忆点 + 底部链上数据自证 +
- *   居中窄卡「Connect Wallet」通栏大按钮（同一 6963 连接流）+ 次级入口「先逛逛目录」；
+ * - 未连接 = 登录态（=落地页）：深色叙事面——登录入口在右上角顶栏（连接钱包按钮 + 「先逛逛目录」次级链接），
+ *   页面中部纯叙事：眉题 + 一句话主张 + 三个记忆点 + 底部链上数据自证，不再放居中登录卡；
  * - 已连接 = 选身份态：工具面亮色——两张大模式卡 I'm a provider / I'm a consumer（英文主标签 +
  *   中文副语，身份色首次出现），选择后进对应工作台并 localStorage 粘滞；
  * - 已连接且已选过身份（非手动返回）→ 直接进对应工作台。
@@ -26,7 +26,7 @@ export default function Welcome() {
   return <PickFace />;
 }
 
-/* ============ 登录态（深色叙事面） ============ */
+/* ============ 登录态（深色叙事面，登录入口在右上角顶栏） ============ */
 function LoginFace() {
   const overview = useAsync(() => coreApi.overview().catch(() => null), []);
   const o = overview.data;
@@ -35,37 +35,43 @@ function LoginFace() {
       <header className="welcome-top">
         <span className="brand">
           <span className="dot" />
-          CoinCall
+          琢信
         </span>
-        <ThemeToggle />
-      </header>
-      <main className="welcome-login">
-        <h1>让 Agent 能力按次收费，<br />让 Agent 调用按次付费</h1>
-        <p className="welcome-lede">钱包即账户：连接一次钱包，既能上架你的 Agent 能力，也能按次调用别人的——定价、扣费、结算全部链上可核验。</p>
-
-        <div className="welcome-login-card">
+        <div className="welcome-top-actions">
+          <a className="welcome-browse-link" href="#/?browse=1">
+            先逛逛目录
+          </a>
           <ConnectWalletButton
             size="normal"
-            label="Connect Wallet"
+            label="连接钱包登录"
             title="只读取钱包地址（eth_requestAccounts）；签名与交易都在钱包扩展弹窗里确认"
           />
-          <div className="welcome-browse">
-            还不想连？<a href="#/?browse=1">先逛逛目录 →</a>（总览与比价公开可看）
-          </div>
+          <ThemeToggle />
         </div>
+      </header>
+      <main className="welcome-login">
+        <div className="welcome-eyebrow">按次计费 · 链上结算 · BOT Chain 测试网</div>
+        <h1>
+          让 Agent 能力按次收费，
+          <br />
+          让 Agent 调用按次付费
+        </h1>
+        <p className="welcome-lede">
+          钱包即账户：连接一次钱包，既能把你的 Agent 接口按次出售，也能按次调用别人的能力——定价、扣费、结算全程链上可核验。
+        </p>
 
         <div className="welcome-points">
           <div className="welcome-point">
             <div className="pt">30 秒上架</div>
-            <p className="pd">连上钱包、填一份 manifest，你的 Agent 接口就成为货架上的按次服务。</p>
+            <p className="pd">连上钱包、填一张服务表单，你的 Agent 接口就变成货架上的按次服务。</p>
           </div>
           <div className="welcome-point">
-            <div className="pt">0.01 USDT 一次</div>
-            <p className="pd">按次计费、明码标价；一次钱包授权可以连续调用，不必逐笔发交易。</p>
+            <div className="pt">0.01 USDT / 次</div>
+            <p className="pd">明码标价、按次计费；一次钱包授权即可连续调用，不必逐笔发交易。</p>
           </div>
           <div className="welcome-point">
             <div className="pt">失败不扣款</div>
-            <p className="pd">Provider 没履约就不结算——链上 Charged 事件是唯一计费真相。</p>
+            <p className="pd">Provider 未履约就不结算——链上记录是唯一计费真相，随时可核。</p>
           </div>
         </div>
 
@@ -129,7 +135,7 @@ function PickFace() {
       <header className="welcome-top">
         <span className="brand">
           <span className="dot" />
-          CoinCall
+          琢信
         </span>
         <span className="dim mono" title={w.address ?? undefined}>
           {w.address ? `${w.address.slice(0, 10)}…${w.address.slice(-6)}` : ""}
