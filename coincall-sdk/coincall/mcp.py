@@ -9,7 +9,9 @@
   - spend_report       本地账本聚合：已花/剩余/最近 N 笔（intent→receipt→onchain）
 
 环境变量（全部必填项缺省时给出人话指引）：
-  COINCALL_API_KEY       core 签发的 api key（POST /apikeys，仅回显一次）
+  COINCALL_API_KEY       core 签发的 api key（POST /apikeys，仅回显一次）；
+                         未设时回读 ~/.coincall/apikey 0600 缓存（ensure_api_key 落盘），
+                         宿主 json 配置可省去明文 key
   COINCALL_GATEWAY_URL   网关地址（默认 http://127.0.0.1:8030）
   COINCALL_CORE_URL      core 地址（默认 http://127.0.0.1:8020）
   COINCALL_WALLET_KEY    付费钱包私钥：0x hex 或 0600 key 文件路径
@@ -31,7 +33,13 @@ from typing import Any, TextIO
 
 import httpx
 
-from coincall.client import DEFAULT_CORE_URL, DEFAULT_GATEWAY_URL, CallResult, Client
+from coincall.client import (
+    DEFAULT_APIKEY_FILE,
+    DEFAULT_CORE_URL,
+    DEFAULT_GATEWAY_URL,
+    CallResult,
+    Client,
+)
 from coincall.errors import CoinCallError
 from coincall.policy import PolicyConfig
 from coincall.signing import PAY_VAULT_ADDRESS
@@ -142,11 +150,29 @@ TOOLS_SPEC: list[dict[str, Any]] = [
 ]
 
 
+def _api_key_from_env_or_cache() -> str:
+    """api key 装配：env 优先；缺省回读 ensure_api_key 落的 0600 缓存文件。
+
+    让 MCP 宿主配置（claude_desktop_config.json 等）不必携带明文 key——
+    缓存与 wallet.key 同目录同权限（~/.coincall/），由 ensure_api_key 或
+    宿主机器上的 CLI 引导签发。两者皆无 → 空串（付费调用 402 人话指引）。
+    """
+    env_key = os.environ.get(ENV_API_KEY, "")
+    if env_key:
+        return env_key
+    try:
+        cached = DEFAULT_APIKEY_FILE.read_text().strip()
+    except OSError:
+        return ""
+    return cached
+
+
 def build_client_from_env() -> Client:
     """从环境变量装配 Client。
 
-    api key 缺省为空串：catalog 可用；付费调用将由网关 402(missing_api_key)
-    给出人话指引（不在装配期硬失败，保住"挂载即 list_tools"的体验）。
+    api key：env → ~/.coincall/apikey 缓存 → 空串。空串时 catalog 可用；
+    付费调用将由网关 402(missing_api_key) 给出人话指引（不在装配期硬失败，
+    保住"挂载即 list_tools"的体验）。
     """
     wallet: LocalWallet | None = None
     if os.environ.get(ENV_WALLET_KEY, ""):
@@ -157,7 +183,7 @@ def build_client_from_env() -> Client:
     policy = _policy_from_env()
     policy.total_budget_raw = policy.total_budget_raw or budget_raw  # BUDGET_RAW 兼容映射总额
     return Client(
-        api_key=os.environ.get(ENV_API_KEY, ""),
+        api_key=_api_key_from_env_or_cache(),
         wallet=wallet,
         gateway_url=os.environ.get(ENV_GATEWAY_URL, DEFAULT_GATEWAY_URL),
         core_url=os.environ.get(ENV_CORE_URL, DEFAULT_CORE_URL),

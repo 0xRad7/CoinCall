@@ -103,8 +103,8 @@ cp -r skills/coincall-consumer ~/.agents/skills/
 
 # CLI 直用（内部走 SDK，天然带 L0；stdout=结果 JSON，stderr=人话错误）：
 python skills/coincall-consumer/scripts/call.py status            # 自查
-python skills/coincall-consumer/scripts/call.py quote svc_rad_ai  # 报价
-python skills/coincall-consumer/scripts/call.py call svc_rad_ai '{"query":"BTC"}'  # 付费（真实扣款）
+python skills/coincall-consumer/scripts/call.py quote binance_future_ai_increase_top_n  # 报价
+python skills/coincall-consumer/scripts/call.py call binance_future_ai_increase_top_n '{"query":"BTC"}'  # 付费（真实扣款）
 python skills/coincall-consumer/scripts/call.py report            # 账单
 ```
 
@@ -166,7 +166,7 @@ c = Client(
         total_budget_raw=1_000_000,  # 总额硬顶（0.01 USDT=10000 raw）
         daily_budget_raw=200_000,  # 日额（UTC 日界自动重置）
         max_per_call_raw=50_000,  # 单笔上限
-        allowed_service_ids=["svc_rad_ai"],  # 服务白名单（默认拒绝）
+        allowed_service_ids=["binance_future_ai_increase_top_n"],  # 服务白名单（默认拒绝）
         min_interval_s=2.0,  # 最小调用间隔
         max_calls_per_hour=60,  # 小时速率
     ),

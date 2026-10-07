@@ -17,6 +17,7 @@ import pytest
 from fake_chain import FakeChain
 from test_client import ADVICE, ANVIL1_ADDR, ANVIL1_KEY, CATALOG, RECEIPT_HEADERS
 
+from coincall import mcp as mcp_module
 from coincall.client import DEFAULT_CORE_URL, DEFAULT_GATEWAY_URL, Client
 from coincall.errors import CoinCallError
 from coincall.policy import PolicyConfig
@@ -453,7 +454,9 @@ def test_build_client_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_build_client_from_env_defaults_and_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_client_from_env_defaults_and_missing_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     for var in (
         "COINCALL_API_KEY",
         "COINCALL_WALLET_KEY",
@@ -462,6 +465,8 @@ def test_build_client_from_env_defaults_and_missing_key(monkeypatch: pytest.Monk
         "COINCALL_CORE_URL",
     ):
         monkeypatch.delenv(var, raising=False)
+    # 隔离开发机真实缓存（~/.coincall/apikey 存在时回退会读到它）
+    monkeypatch.setattr(mcp_module, "DEFAULT_APIKEY_FILE", tmp_path / "absent-apikey")
     client = build_client_from_env()
     assert client.api_key == ""
     assert client.gateway_url == DEFAULT_GATEWAY_URL
@@ -471,6 +476,28 @@ def test_build_client_from_env_defaults_and_missing_key(monkeypatch: pytest.Monk
     monkeypatch.setenv("COINCALL_WALLET_KEY", "/nonexistent/wallet.key")
     with pytest.raises(CoinCallError, match="私钥"):
         build_client_from_env()
+
+
+@pytest.mark.unit
+def test_api_key_cache_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """api key 装配顺序：env 优先 → ~/.coincall/apikey 缓存 → 空串（宿主 json 免明文）。"""
+    for var in (
+        "COINCALL_API_KEY",
+        "COINCALL_WALLET_KEY",
+        "COINCALL_BUDGET_RAW",
+        "COINCALL_GATEWAY_URL",
+        "COINCALL_CORE_URL",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    cache = tmp_path / "apikey"
+    cache.write_text("cck_from_cache\n")
+    monkeypatch.setattr(mcp_module, "DEFAULT_APIKEY_FILE", cache)
+    assert build_client_from_env().api_key == "cck_from_cache"
+    monkeypatch.setenv("COINCALL_API_KEY", "cck_env")  # env 压过缓存
+    assert build_client_from_env().api_key == "cck_env"
+    monkeypatch.delenv("COINCALL_API_KEY", raising=False)
+    monkeypatch.setattr(mcp_module, "DEFAULT_APIKEY_FILE", tmp_path / "absent")
+    assert build_client_from_env().api_key == ""
 
 
 @pytest.mark.unit
