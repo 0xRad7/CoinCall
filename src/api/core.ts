@@ -334,3 +334,66 @@ export const feedbackApi = {
     }).then((r) => r.data),
   summary: (serviceId: string) => apiFetch<FeedbackSummary>(`${CORE_BASE}/feedback/services/${serviceId}`).then((r) => r.data),
 };
+
+// ---- Teams 产品形态（钱包 1 → Teams N → 服务 N） ----
+
+export interface MyTeam {
+  agent_id: number;
+  display_name: string;
+  claim_wallet: string | null;
+  service_count: number;
+  created_at: string;
+}
+
+export interface MineResponse {
+  wallet: string;
+  teams: MyTeam[];
+}
+
+export interface PrepareTeamResponse {
+  agent_id: number;
+  tx_hash: string;
+  bind_required: boolean;
+  next?: string;
+}
+
+export interface TeamFulfillmentService {
+  service_id: string;
+  calls_success: number;
+  calls_aborted: number;
+  p50_ms: number;
+  p95_ms: number;
+  distinct_payers: number;
+  last_activity_at: string | null;
+}
+
+export interface TeamFeedbackService {
+  service_id: string;
+  count: number;
+  avg: number | null;
+}
+
+export interface TeamDetail {
+  team: {
+    agent_id: number;
+    display_name: string;
+    wallet: string;
+    claim_wallet: string | null;
+    created_at: string;
+  };
+  services: Array<CatalogService>;
+  revenue: { total_raw: number; charged_count: number; wallets: string[]; proof: string };
+  fulfillment: { services: TeamFulfillmentService[] };
+  feedback: { services: TeamFeedbackService[] };
+  degraded: string[];
+}
+
+export const teamsApi = {
+  /** 连接钱包 → 反查"我的团队"（大小写不敏感）。 */
+  mine: (wallet: string) => apiFetch<MineResponse>(`${CORE_BASE}/providers/mine?wallet=${encodeURIComponent(wallet)}`).then((r) => r.data),
+  /** 平台代发铸造新身份（≤30s 上链）→ 前端走 AgentWalletSet 签名→绑定→认领。 */
+  prepare: (display_name: string) =>
+    apiFetch<PrepareTeamResponse>(`${CORE_BASE}/teams/prepare`, { ...jsonInit("POST", { display_name }), timeoutMs: 60_000 }).then((r) => r.data),
+  /** Team 主页聚合（收入/履约/反馈，全链上+流水口径）。 */
+  detail: (agentId: number) => apiFetch<TeamDetail>(`${CORE_BASE}/teams/${agentId}`).then((r) => r.data),
+};

@@ -3,7 +3,7 @@
  * 发布服务 → 我的服务 → 提现。步骤间状态保持（父级 state），进度指示可点击回跳。
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { coreApi, credentialsApi, type ClaimState, type ServiceManifest } from "../api/core";
+import { coreApi, credentialsApi, teamsApi, type ClaimState, type MyTeam, type ServiceManifest } from "../api/core";
 import { CredentialHeadersEditor, rowsToHeaders, type CredentialRow } from "../components/CredentialHeadersEditor";
 import { ExampleRequestEditor } from "../components/ExampleRequestEditor";
 import { ProbeDialog } from "../components/ProbeDialog";
@@ -14,11 +14,12 @@ import { CHAIN_ID, IDENTITY_REGISTRY, PAY_VAULT as VAULT_ADDR, SEL as SEL_C, PAY
 import { fetchProviderCredits, encodeAddrUint } from "../chain/rpc";
 import { browserProvider, isUserRejected, sendInjectedTx, waitForInjectedReceipt, connectInjected, ensureChain968, silentAccounts } from "../chain/injected";
 import { useWallet } from "../state/WalletContext";
+import { CUSTODIAN } from "../lib/consts-extra";
 import { AmountInput } from "../components/AmountInput";
 import { IdentityRegister } from "../components/IdentityRegister";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { JsonEditor } from "../components/JsonEditor";
-import { AsyncSection, Badge, ConfirmDialog, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
+import { AsyncSection, Badge, ConfirmDialog, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeError, labelField } from "../lib/errors";
 import { useAsync } from "../lib/useAsync";
 
@@ -94,7 +95,7 @@ export default function ProviderWorkbench() {
  *   c agentWallet=平台托管且无人认领 → 黄，「绑定我的钱包并认领」一键链（AgentWalletSet 签名→自动登记）；
  *   d 被他人认领/他人非托管绑定 → 红死路（明示，不给操作）。
  */
-export function ClaimStep({ initial, onNext }: { initial: { agent_id: number; display_name: string; wallet: string } | null; onNext: (r: { agent_id: number; display_name: string; wallet: string }) => void }) {
+export function ClaimStep({ initial, onNext, hideNext }: { initial: { agent_id: number; display_name: string; wallet: string } | null; onNext: (r: { agent_id: number; display_name: string; wallet: string }) => void; hideNext?: boolean }) {
   const w = useWallet();
   const [agentId, setAgentId] = useState(initial?.agent_id ? String(initial.agent_id) : "");
   const [name, setName] = useState(initial?.display_name ?? "");
@@ -305,11 +306,13 @@ export function ClaimStep({ initial, onNext }: { initial: { agent_id: number; di
         <div className="alert ok">
           ✓ 认领完成：身份 <b>#{done.agent_id}</b> · 认领钱包 <span className="mono">{done.wallet.slice(0, 10)}…</span> · 「{done.display_name}」。
           可进入第 ② 步发布服务（收入默认进认领钱包）。
-          <div className="btn-row" style={{ marginTop: 8 }}>
-            <button className="btn" onClick={() => onNext(done)}>
-              下一步：发布服务 →
-            </button>
-          </div>
+          {!hideNext && (
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={() => onNext(done)}>
+                下一步：发布服务 →
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1218,6 +1221,260 @@ export function WithdrawStep() {
         )
       )}
       {credits === 0n && <div className="dim">该地址暂无可提现 credits（keeper 结算入账后这里会有数字——去总览页看结算观测）。</div>}
+    </div>
+  );
+}
+
+/* ============ Teams 形态：我的 Teams（新首步）+ Team 主页 ============ */
+
+/** 新首步：我的 Teams（连接钱包 → mine 列表 / 空态创建 / 认领降级折叠）。 */
+export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: number) => void; onPublish: (team: MyTeam) => void }) {
+  const w = useWallet();
+  const mine = useAsync(() => (w.address ? teamsApi.mine(w.address) : Promise.resolve(null)), [w.address]);
+
+  if (!w.address) {
+    return (
+      <div className="card">
+        <h3>我的 Teams</h3>
+        <p className="card-desc">一个钱包可建多个团队，每个团队发布多个服务。连接钱包查看/创建你的团队。</p>
+        <div className="flex">
+          <span className="dim">团队的身份与收款都锚定你的钱包：</span>
+          <ConnectWalletButton size="small" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <h3>我的 Teams（{w.address.slice(0, 8)}…）</h3>
+      <p className="card-desc">钱包 → Teams → 服务：一个钱包可建多个团队，每个团队发布多个服务。</p>
+      <AsyncSection state={mine} empty="还没有团队">
+        {(m) =>
+          m.teams.length === 0 ? (
+            <div className="empty" style={{ padding: "24px 0" }}>还没有团队——创建你的第一个团队，开始上架服务。</div>
+          ) : (
+            <div className="svc-grid">
+              {m.teams.map((t) => (
+                <div key={t.agent_id} className="svc-card" onClick={() => onOpenTeam(t.agent_id)} role="button" aria-label={`打开团队 ${t.display_name}`}>
+                  <div className="flex" style={{ justifyContent: "space-between" }}>
+                    <span className="svc-name">{t.display_name}</span>
+                    <Badge kind="ok">{t.service_count} 服务</Badge>
+                  </div>
+                  <div className="mono dim" style={{ fontSize: 11 }}>team #{t.agent_id} · 创建于 {t.created_at.slice(0, 10)}</div>
+                  <div className="btn-row" style={{ marginTop: 8 }}>
+                    <button className="btn small" onClick={(e) => { e.stopPropagation(); onOpenTeam(t.agent_id); }}>打开团队</button>
+                    <button className="btn small secondary" onClick={(e) => { e.stopPropagation(); onPublish(t); }}>发布新服务</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        }
+      </AsyncSection>
+
+      <CreateTeamButton onCreated={() => mine.reload()} />
+
+      <details style={{ marginTop: 16 }}>
+        <summary className="dim" style={{ cursor: "pointer", fontSize: 12 }}>导入已有身份（高级）</summary>
+        <div style={{ marginTop: 10, padding: 12, border: "1px dashed var(--border-strong)", borderRadius: 8, background: "var(--surface-2)" }}>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>已有 ERC-8004 身份/Agent ID 的老用户入口——认领（绑定+登记）与注册新身份闭环都在这里。</div>
+          <ClaimStep initial={null} onNext={() => mine.reload()} hideNext />
+        </div>
+      </details>
+    </div>
+  );
+}
+
+/** 创建团队：输入名 → prepare（代发铸造）→ AgentWalletSet 签名 → 绑定 → providers → 打开新团队主页。 */
+export function CreateTeamButton({ onCreated }: { onCreated?: (agentId: number) => void }) {
+  const w = useWallet();
+  const [name, setName] = useState("");
+  const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState<null | "prepare" | "sign" | "bind" | "claim" | "done">(null);
+  const [agentId, setAgentId] = useState<number | null>(null);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState(0);
+  const [error, setError] = useState<unknown>(null);
+  const [cancelled, setCancelled] = useState(false);
+  const phaseRef = useRef<null | string>(null);
+  phaseRef.current = phase;
+
+  useEffect(() => {
+    if (deadline == null) return;
+    const t = setInterval(() => setCountdown(Math.max(0, deadline - Math.floor(Date.now() / 1000))), 1000);
+    return () => clearInterval(t);
+  }, [deadline]);
+
+  const run = async () => {
+    setError(null);
+    setCancelled(false);
+    setPhase("prepare");
+    try {
+      const prep = await teamsApi.prepare(name.trim());
+            setAgentId(prep.agent_id);
+      setPhase("sign");
+      const sel = await w.requireProvider();
+      if (!sel) throw new Error("未选择浏览器钱包。");
+      const dl = Math.floor(Date.now() / 1000) + 300;
+      setDeadline(dl);
+      setCountdown(300);
+      const td = agentWalletSetTypedData({
+        agentId: prep.agent_id,
+        newWallet: w.address!,
+        owner: CUSTODIAN,
+        deadline: dl,
+        verifyingContract: IDENTITY_REGISTRY,
+        chainId: CHAIN_ID,
+      });
+      const signer = await browserProvider(sel.provider).getSigner(w.address!);
+      const sig = await signer.signTypedData(td.domain, td.types, td.message);
+      setPhase("bind");
+      await botChainApi.bindWallet(prep.agent_id, w.address!, sig, dl);
+      setPhase("claim");
+      await coreApi.registerProvider(prep.agent_id, name.trim(), w.address!);
+      setPhase("done");
+      onCreated?.(prep.agent_id);
+    } catch (e) {
+      if (isUserRejected(e)) setCancelled(true);
+      else setError(e);
+      setPhase(null);
+    }
+  };
+
+  if (!w.address) return null;
+  const busy = phase != null && phase !== "done";
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      {open ? (
+        <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginBottom: 0 }}>
+          <div className="field" style={{ marginBottom: 8 }}>
+            <label>团队名称</label>
+            <input type="text" value={name} maxLength={128} placeholder="例如 RadAI" onChange={(e) => setName(e.target.value)} aria-label="团队名称" />
+            <div className="help">将创建链上团队身份并绑定到你的钱包——只需<b>一次钱包签名</b>，链上身份由平台自动管理。</div>
+          </div>
+          <div className="btn-row">
+            <button className="btn" disabled={name.trim().length < 1 || busy} onClick={run}>
+              {phase === "prepare" ? "正在创建团队身份…"
+                : phase === "sign" ? "等待钱包签名确认…"
+                : phase === "bind" ? "绑定上链中…"
+                : phase === "claim" ? "登记团队…"
+                : phase === "done" ? "✓ 创建成功"
+                : "创建团队"}
+            </button>
+            {deadline != null && (phase === "sign" || phase === "bind") && (
+              <span className={`badge ${countdown < 60 ? "warn" : "muted"}`}>签名窗口 {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")}</span>
+            )}
+            <button className="btn secondary" onClick={() => { setOpen(false); setPhase(null); setName(""); }} disabled={busy}>收起</button>
+          </div>
+          {agentId != null && phase === "done" && (
+            <SuccessBox>团队 #{agentId}「{name}」创建成功！收入将进你的钱包。</SuccessBox>
+          )}
+          {cancelled && <WarnBox>你取消了签名（钱包弹窗里拒绝）。团队身份已创建但未绑定——展开下方「导入已有身份（高级）」输入 #{agentId} 完成认领，或稍后重试创建。</WarnBox>}
+          {error != null && <ErrorBox error={error} />}
+        </div>
+      ) : (
+        <button className="btn" onClick={() => setOpen(true)}>+ 创建团队</button>
+      )}
+    </div>
+  );
+}
+
+/** Team 主页：聚合战绩卡 + 服务管理。 */
+export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBack: () => void; onPublish: (team: MyTeam) => void }) {
+  const team = useAsync(() => teamsApi.detail(agentId), [agentId]);
+
+  return (
+    <div className="card">
+      <div className="flex" style={{ justifyContent: "space-between" }}>
+        <button className="btn small secondary" onClick={onBack}>← 我的 Teams</button>
+        <button className="btn small" onClick={() => team.data && onPublish({ agent_id: agentId, display_name: team.data.team.display_name, claim_wallet: team.data.team.claim_wallet, service_count: team.data.services.length, created_at: team.data.team.created_at })}>
+          发布新服务
+        </button>
+      </div>
+
+      <AsyncSection state={team} empty="团队不存在">
+        {(t) => (
+          <>
+            <h3 style={{ marginTop: 12 }}>{t.team.display_name}</h3>
+            <div className="dim mono" style={{ fontSize: 11, marginBottom: 10 }}>
+              team #{t.team.agent_id} · 认领钱包 {t.team.claim_wallet?.slice(0, 10) ?? "未认领"}… · 创建于 {t.team.created_at.slice(0, 19)}
+            </div>
+            <div className="stat-grid">
+              <div className="stat-card">
+                <div className="k">团队收入</div>
+                <div className="v num">{fromRaw(BigInt(t.revenue.total_raw))}</div>
+                <div className="s num">{t.revenue.charged_count} 笔 Charged · raw={t.revenue.total_raw}</div>
+              </div>
+              <div className="stat-card">
+                <div className="k">服务数</div>
+                <div className="v num">{t.services.length}</div>
+                <div className="s">在售能力</div>
+              </div>
+              <div className="stat-card">
+                <div className="k">履约汇总</div>
+                <div className="v num" style={{ fontSize: 18 }}>
+                  {(() => {
+                    const svcs = t.fulfillment.services;
+                    const ok = svcs.reduce((a, s) => a + s.calls_success, 0);
+                    const abort = svcs.reduce((a, s) => a + s.calls_aborted, 0);
+                    return `${ok + abort > 0 ? Math.round((ok / (ok + abort)) * 100) : 100}%`;
+                  })()}
+                </div>
+                <div className="s num">p95 最慢 {Math.max(0, ...t.fulfillment.services.map((s) => s.p95_ms))}ms</div>
+              </div>
+              <div className="stat-card">
+                <div className="k">反馈</div>
+                <div className="v num" style={{ fontSize: 18 }}>
+                  {(() => {
+                    const total = t.feedback.services.reduce((a, s) => a + s.count, 0);
+                    if (total === 0) return "—";
+                    const sum = t.feedback.services.reduce((a, s) => a + (s.avg ?? 0) * s.count, 0);
+                    return `★${(sum / total).toFixed(1)}`;
+                  })()}
+                </div>
+                <div className="s num">{t.feedback.services.reduce((a, s) => a + s.count, 0)} 条</div>
+              </div>
+            </div>
+            {t.degraded.length > 0 && <WarnBox>部分数据降级：{t.degraded.join("、")}</WarnBox>}
+
+            <div className="section-title">团队服务</div>
+            {t.services.length === 0 ? (
+              <Empty text="还没有服务——点右上「发布新服务」" />
+            ) : (
+              <table className="list">
+                <thead>
+                  <tr><th>服务</th><th>价格</th><th>履约</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  {t.services.map((s) => {
+                    const m = s.manifest;
+                    const ful = t.fulfillment.services.find((f) => f.service_id === s.service_id);
+                    return (
+                      <tr key={s.service_id}>
+                        <td>
+                          <div><b>{m.name}</b>{" "}{m.endpoint.type === "http_json" && <span className="badge muted">{m.endpoint.method ?? "POST"}</span>}</div>
+                          <div className="mono dim" style={{ fontSize: 11 }}>{s.service_id}</div>
+                        </td>
+                        <td className="num">{m.pricing.amount}</td>
+                        <td className="num dim" style={{ fontSize: 12 }}>
+                          {ful ? `${ful.calls_success}✓/${ful.calls_aborted}✗ · p95 ${ful.p95_ms}ms · ${ful.distinct_payers} 支付者` : "—"}
+                        </td>
+                        <td>
+                          <a className="btn small secondary" style={{ textDecoration: "none", display: "inline-flex" }} href="#/" onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent("coincall:view-team", { detail: agentId })); }}>
+                            公共视图
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </AsyncSection>
     </div>
   );
 }
