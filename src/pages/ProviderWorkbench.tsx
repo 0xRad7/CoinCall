@@ -459,166 +459,183 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
   const urlInvalid = endpointType === "http_json" && !/^https?:\/\//.test(endpointUrl.trim());
 
   return (
-    <div className="card">
-      <h3>发布服务（ServiceManifest 表单）</h3>
-      <p className="card-desc">
-        团队：{claimed.display_name}（team #{claimed.agent_id}，认领钱包 {claimed.wallet.slice(0, 10)}…）
-        {identityWallet ? ` · 链上身份钱包 ${identityWallet.slice(0, 10)}…` : " · 正在读取链上身份钱包…"}
-      </p>
-
-      <div className="field">
-        <label>服务收款钱包（收入到账地址）</label>
-        <div className="flex">
-          <div className="grow">
-            <input
-              type="text"
-              className={!revenueWalletValid || fieldErr("provider.wallet") ? "invalid" : ""}
-              value={revenueWallet}
-              placeholder="0x…（连接钱包自动填入，或手动填写）"
-              onChange={(e) => setRevenueWallet(e.target.value.trim())}
-              aria-label="服务收款钱包地址"
-            />
-          </div>
-          {!wctx.address ? (
-            <ConnectWalletButton size="small" label="连接钱包自动填" title="连接后此字段自动填入你的钱包地址" />
-          ) : (
-            <button
-              type="button"
-              className="btn small"
-              onClick={() => setRevenueWallet(wctx.address!)}
-              title="把字段设为当前连接的钱包地址（手动改过也能一键填回）"
-            >
-              使用当前钱包 {wctx.address.slice(0, 6)}…
-            </button>
-          )}
-        </div>
-        <div className="help">
-          付费调用的收入将进入此地址（PayVault Charged 记账键），与身份钱包相互独立；连接钱包后默认自动填入你的地址，也可手动填写任意地址。
-        </div>
-        {walletDiffers && (
-          <div className="help" style={{ color: "var(--warn)" }}>
-            注意：此地址与链上身份钱包（{identityWallet!.slice(0, 10)}…）不同——收入只进上面的服务收款钱包；若想用身份钱包收款，请到第 ①/④ 步把身份钱包绑成同一地址。
-          </div>
-        )}
-        {fieldErr("provider.wallet") && (
-          <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>服务端：{fieldErr("provider.wallet")}</div>
-        )}
-      </div>
-
-      <div className="field">
-        <label>所属团队</label>
-        <input type="text" value={`${claimed.display_name} · team #${claimed.agent_id}`} disabled readOnly aria-label="所属团队" />
-        <div className="help">团队由「我的 Teams」选择；发布后 provider.agent_id 自动指向该团队。</div>
-      </div>
-      <div className="field">
-        <label>服务 ID（全局唯一 slug）</label>
-        <input type="text" className={fieldErr("service_id") ? "invalid" : ""} value={serviceId} placeholder="例如 svc_my_translate" onChange={(e) => setServiceId(e.target.value)} />
-        {fieldErr("service_id") && <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>{labelField("service_id")}：{fieldErr("service_id")}</div>}
-      </div>
-      <div className="field">
-        <label>服务名称</label>
-        <input type="text" className={fieldErr("name") ? "invalid" : ""} value={name} placeholder="例如 中英技术翻译" onChange={(e) => setName(e.target.value)} />
-        {fieldErr("name") && <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>{fieldErr("name")}</div>}
-      </div>
-      <div className="field">
-        <label>描述（可空）</label>
-        <input type="text" value={desc} onChange={(e) => setDesc(e.target.value)} />
-      </div>
-      <div className="field">
-        <label>版本号</label>
-        <input type="text" value={version} onChange={(e) => setVersion(e.target.value)} />
-        <div className="help">semantic version；改价/改状态重新发布时建议递增。</div>
-      </div>
-
-      <AmountInput human={amount} onHumanChange={setAmount} fieldError={fieldErr("amount") ?? fieldErr("amount_raw") ?? fieldErr("pricing")} />
-
-      <div className="field">
-        <label>端点类型</label>
-        <div className="seg">
-          <button className={endpointType === "internal" ? "active" : ""} onClick={() => setEndpointType("internal")}>
-            internal（平台内置实现）
-          </button>
-          <button className={endpointType === "http_json" ? "active" : ""} onClick={() => setEndpointType("http_json")}>
-            http_json（自运营 URL）
-          </button>
-        </div>
-        {endpointType === "http_json" && (
-          <div style={{ marginTop: 10 }}>
-            <input type="text" className={urlInvalid || fieldErr("endpoint.url") ? "invalid" : ""} value={endpointUrl} placeholder="https://your-host/endpoint" onChange={(e) => setEndpointUrl(e.target.value)} />
-            <div className="help">网关会代理调用该 URL；请确保公网可达。method={endpointMethod} 时 {endpointMethod === "GET" ? "参数映射为上游 query（标量直传、数组同 key 重复）" : "参数以 JSON body 转发"}。</div>
-            <div className="flex" style={{ marginTop: 10, alignItems: "center" }}>
-              <label className="dim" style={{ fontWeight: 600, marginRight: 8 }}>请求方式</label>
-              <div className="seg">
-                <button type="button" className={endpointMethod === "POST" ? "active" : ""} onClick={() => setEndpointMethod("POST")}>
-                  POST（默认）
-                </button>
-                <button type="button" className={endpointMethod === "GET" ? "active" : ""} onClick={() => setEndpointMethod("GET")}>
-                  GET
-                </button>
-              </div>
-              <button type="button" className="btn small secondary" onClick={() => setProbeOpen(true)} disabled={!/^https?:\/\//.test(endpointUrl.trim())}>
-                探测接口
-              </button>
+    <div>
+      {/* 服务收款钱包（收入锚点，放最前） */}
+      <div className="card form-group-card">
+        <h3>服务收款钱包</h3>
+        <p className="card-desc">付费调用的收入将进入此地址（PayVault Charged 记账键），与身份钱包相互独立。</p>
+        <div className="field">
+          <label>服务收款钱包（收入到账地址）</label>
+          <div className="flex">
+            <div className="grow">
+              <input
+                type="text"
+                className={!revenueWalletValid || fieldErr("provider.wallet") ? "invalid" : ""}
+                value={revenueWallet}
+                placeholder="0x…（连接钱包自动填入，或手动填写）"
+                onChange={(e) => setRevenueWallet(e.target.value.trim())}
+                aria-label="服务收款钱包地址"
+              />
             </div>
-            {endpointMethod === "GET" && (
-              <div className="alert info" style={{ marginTop: 8, fontSize: 13 }}>
-                GET 模式：消费者仍 POST JSON 给网关，网关把参数映射成上游 query——仅支持<b>标量与标量数组</b>（嵌套对象请用 POST）。
-              </div>
+            {!wctx.address ? (
+              <ConnectWalletButton size="small" label="连接钱包自动填" title="连接后此字段自动填入你的钱包地址" />
+            ) : (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => setRevenueWallet(wctx.address!)}
+                title="把字段设为当前连接的钱包地址（手动改过也能一键填回）"
+              >
+                使用当前钱包 {wctx.address.slice(0, 6)}…
+              </button>
             )}
           </div>
-        )}
-        {endpointType === "internal" && <div className="help">internal 端点由平台内置模块实现（无需 URL），适合演示与兜底。</div>}
+          <div className="help">连接钱包后默认自动填入你的地址（默认=认领钱包 {claimed.wallet.slice(0, 10)}…），也可手动填写任意地址。</div>
+          {walletDiffers && (
+            <div className="help" style={{ color: "var(--warn)" }}>
+              注意：此地址与链上身份钱包（{identityWallet!.slice(0, 10)}…）不同——收入只进上面的服务收款钱包。
+            </div>
+          )}
+          {fieldErr("provider.wallet") && (
+            <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>服务端：{fieldErr("provider.wallet")}</div>
+          )}
+        </div>
       </div>
 
-      {endpointType === "http_json" && (
+      {/* 基本信息 */}
+      <div className="card form-group-card">
+        <h3>基本信息</h3>
         <div className="field">
-          <label>上游认证头（转发时注入，消费者不可见）</label>
-          <CredentialHeadersEditor rows={credRows} onChange={(rows) => { setCredRows(rows); }} />
-          <div className="help">
-            此密钥<b>加密存储于平台</b>、仅网关转发你的上游 URL 时使用（60s 缓存，消费者请求头不透传）；不会出现在目录或公开 manifest 中。
-            不想交给平台？可自包一层薄适配服务再上架。留空 = 不配置。
-          </div>
+          <label>所属团队（只读）</label>
+          <input type="text" value={`${claimed.display_name} · team #${claimed.agent_id}`} disabled readOnly aria-label="所属团队" />
+          <div className="help">团队由「我的 Teams」选择；发布后 provider.agent_id 自动指向该团队。</div>
         </div>
-      )}
-
-      <div className="field">
-        <label>超时 timeout_ms</label>
-        <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value) || 30000)} />
+        <div className="field">
+          <label>服务 ID（全局唯一 slug）</label>
+          <input type="text" className={fieldErr("service_id") ? "invalid" : ""} value={serviceId} placeholder="例如 svc_my_translate" onChange={(e) => setServiceId(e.target.value)} />
+          {fieldErr("service_id") && <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>{labelField("service_id")}：{fieldErr("service_id")}</div>}
+        </div>
+        <div className="field">
+          <label>服务名称</label>
+          <input type="text" className={fieldErr("name") ? "invalid" : ""} value={name} placeholder="例如 中英技术翻译" onChange={(e) => setName(e.target.value)} />
+          {fieldErr("name") && <div className="err" style={{ color: "var(--danger)", fontSize: 12 }}>{fieldErr("name")}</div>}
+        </div>
+        <div className="field">
+          <label>描述（可空）</label>
+          <input type="text" value={desc} onChange={(e) => setDesc(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>版本号</label>
+          <input type="text" value={version} onChange={(e) => setVersion(e.target.value)} />
+          <div className="help">semantic version；改价/改状态重新发布时建议递增。</div>
+        </div>
       </div>
 
-      {endpointType === "http_json" && endpointMethod === "GET" && schemaHasNestedObjects(inputSchema) && (
-        <div className="alert warn">
-          <b>GET 模式不支持嵌套对象参数</b>：input_schema 里有 type 为 object 的属性——发布会被 422 拒绝。请改用 POST，或把参数拍平为标量/标量数组。
+      {/* 定价 */}
+      <div className="card form-group-card">
+        <h3>定价</h3>
+        <AmountInput human={amount} onHumanChange={setAmount} fieldError={fieldErr("amount") ?? fieldErr("amount_raw") ?? fieldErr("pricing")} />
+      </div>
+
+      {/* 端点 */}
+      <div className="card form-group-card">
+        <h3>端点</h3>
+        <div className="field">
+          <label>端点类型</label>
+          <div className="seg">
+            <button className={endpointType === "internal" ? "active" : ""} onClick={() => setEndpointType("internal")}>
+              internal（平台内置实现）
+            </button>
+            <button className={endpointType === "http_json" ? "active" : ""} onClick={() => setEndpointType("http_json")}>
+              http_json（自运营 URL）
+            </button>
+          </div>
+          {endpointType === "internal" && <div className="help">internal 端点由平台内置模块实现（无需 URL），适合演示与兜底。</div>}
         </div>
-      )}
-      <JsonEditor
-        label="input_schema（消费端参数校验，决定调用表单）"
-        value={inputSchema}
-        onChange={(v) => {
-          setInputSchema(v);
-          setInputAutoNote(false);
-        }}
-        fieldError={fieldErr("input_schema")}
-        rows={8}
-        badge={inputAutoNote ? "自动识别，请核对" : undefined}
-        help={endpointType === "http_json" ? "示例请求区（探测 / 生成 input_schema 用）：" : undefined}
-      />
+        {endpointType === "http_json" && (
+          <>
+            <div className="field">
+              <label>上游 URL</label>
+              <input type="text" className={urlInvalid || fieldErr("endpoint.url") ? "invalid" : ""} value={endpointUrl} placeholder="https://your-host/endpoint" onChange={(e) => setEndpointUrl(e.target.value)} />
+              <div className="help">网关会代理调用该 URL；请确保公网可达。</div>
+            </div>
+            <div className="field">
+              <label>请求方式</label>
+              <div className="flex">
+                <div className="seg">
+                  <button type="button" className={endpointMethod === "POST" ? "active" : ""} onClick={() => setEndpointMethod("POST")}>
+                    POST（默认）
+                  </button>
+                  <button type="button" className={endpointMethod === "GET" ? "active" : ""} onClick={() => setEndpointMethod("GET")}>
+                    GET
+                  </button>
+                </div>
+                <button type="button" className="btn small secondary" onClick={() => setProbeOpen(true)} disabled={!/^https?:\/\//.test(endpointUrl.trim())}>
+                  探测接口
+                </button>
+              </div>
+              {endpointMethod === "GET" && (
+                <div className="alert info" style={{ marginTop: 8, fontSize: 13 }}>
+                  GET 模式：消费者仍 POST JSON 给网关，网关把参数映射成上游 query——仅支持<b>标量与标量数组</b>（嵌套对象请用 POST）。
+                </div>
+              )}
+            </div>
+            <div className="field">
+              <label>超时 timeout_ms</label>
+              <input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(Number(e.target.value) || 30000)} />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Schema 与探测 */}
+      <div className="card form-group-card">
+        <h3>Schema 与探测</h3>
+        {endpointType === "http_json" && endpointMethod === "GET" && schemaHasNestedObjects(inputSchema) && (
+          <div className="alert warn">
+            <b>GET 模式不支持嵌套对象参数</b>：input_schema 里有 type 为 object 的属性——发布会被 422 拒绝。请改用 POST，或把参数拍平为标量/标量数组。
+          </div>
+        )}
+        {endpointType === "http_json" && (
+          <details className="raw-detail" style={{ marginBottom: 12 }}>
+            <summary style={{ fontSize: 13 }}>示例请求区（探测 / 生成 input_schema 用）——点开编辑</summary>
+            <div style={{ marginTop: 8 }}>
+              <ExampleRequestEditor method={endpointMethod} params={exampleParams} onParamsChange={setExampleParams} json={exampleJson} onJsonChange={setExampleJson} />
+            </div>
+          </details>
+        )}
+        <JsonEditor
+          label="input_schema（消费端参数校验，决定调用表单）"
+          value={inputSchema}
+          onChange={(v) => {
+            setInputSchema(v);
+            setInputAutoNote(false);
+          }}
+          fieldError={fieldErr("input_schema")}
+          rows={8}
+          badge={inputAutoNote ? "自动识别，请核对" : undefined}
+        />
+        <JsonEditor
+          label="output_schema"
+          value={outputSchema}
+          onChange={(v) => {
+            setOutputSchema(v);
+            setOutputAutoNote(false);
+          }}
+          fieldError={fieldErr("output_schema")}
+          rows={5}
+          badge={outputAutoNote ? "自动识别，请核对" : undefined}
+        />
+      </div>
+
+      {/* 上游认证头 */}
       {endpointType === "http_json" && (
-        <div style={{ marginBottom: 16 }}>
-          <ExampleRequestEditor method={endpointMethod} params={exampleParams} onParamsChange={setExampleParams} json={exampleJson} onJsonChange={setExampleJson} />
+        <div className="card form-group-card">
+          <h3>上游认证头</h3>
+          <p className="card-desc">转发时注入、消费者不可见。此密钥<b>加密存储于平台</b>、仅网关转发你的上游 URL 时使用（60s 缓存，消费者请求头不透传）；不会出现在目录或公开 manifest 中。不想交给平台？可自包一层薄适配服务再上架。留空 = 不配置。</p>
+          <CredentialHeadersEditor rows={credRows} onChange={(rows) => { setCredRows(rows); }} />
         </div>
       )}
-      <JsonEditor
-        label="output_schema"
-        value={outputSchema}
-        onChange={(v) => {
-          setOutputSchema(v);
-          setOutputAutoNote(false);
-        }}
-        fieldError={fieldErr("output_schema")}
-        rows={5}
-        badge={outputAutoNote ? "自动识别，请核对" : undefined}
-      />
 
       {error && <ErrorBox error={error} />}
       {ok && (
@@ -633,7 +650,7 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
       )}
       {ok && credState?.kind === "warn" && (
         <div className="alert warn">
-          <b>服务已发布，凭证保存失败</b>（manifest 未回滚）——可在第 ③ 步「我的服务 → 上游认证头」重试。
+          <b>服务已发布，凭证保存失败</b>（manifest 未回滚）——可在团队详情 → 服务管理重试。
         </div>
       )}
       {ok && credError != null && credState?.kind === "warn" && <ErrorBox error={credError} />}
@@ -661,16 +678,22 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
         />
       )}
 
-      <div className="btn-row">
-        <button className="btn secondary" onClick={onBack}>
-          ← 上一步
-        </button>
-        <button className="btn" disabled={busy || !conv.ok || urlInvalid || !serviceId.trim() || !name.trim() || !revenueWalletValid} onClick={submit}>
-          {busy ? <Spinner label="发布中…" /> : "发布服务"}
-        </button>
-        <button className="btn secondary" disabled={!ok} onClick={onNext}>
-          下一步：我的服务 →
-        </button>
+      {/* 粘性操作条：发布按钮常驻，不必滚到底 */}
+      <div className="sticky-action-bar" role="toolbar" aria-label="发布操作">
+        <span className="dim" style={{ fontSize: 12 }}>
+          {ok ? "✓ 已发布——可返回仪表盘或继续调整" : `${endpointType === "http_json" ? "http_json" : "internal"} · ${amount} USDT/次`}
+        </span>
+        <div className="btn-row">
+          <button className="btn secondary" onClick={onBack}>
+            ← 返回仪表盘
+          </button>
+          <button className="btn" disabled={busy || !conv.ok || urlInvalid || !serviceId.trim() || !name.trim() || !revenueWalletValid} onClick={submit}>
+            {busy ? <Spinner label="发布中…" /> : ok ? "重新发布（更新）" : "发布服务"}
+          </button>
+          <button className="btn secondary" disabled={!ok} onClick={onNext}>
+            完成 →
+          </button>
+        </div>
       </div>
     </div>
   );

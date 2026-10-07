@@ -145,24 +145,30 @@ describe("我的 Teams（mine）", () => {
       </WalletProvider>
     );
     await connect();
-    expect(await screen.findByText(/还没有团队——创建你的第一个团队/)).toBeTruthy();
+    expect(await screen.findByText(/还没有团队——点右上角「\+ 创建团队」/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "+ 创建团队" })).toBeTruthy();
     expect(screen.getByText(/导入已有身份（高级）/)).toBeTruthy();
   });
 
-  it("列表渲染：团队卡片（名称/服务数/入口）", async () => {
+  it("列表渲染：团队卡片（名称/服务数/入口）+ 整卡点击进详情", async () => {
+    const openTeamSpy = vi.fn();
     mineTeams = [{ agent_id: 170, display_name: "RadAI", claim_wallet: MY, service_count: 3, created_at: "2026-10-06 09:41:56" }];
     render(
       <WalletProvider>
-        <MyTeamsStep onOpenTeam={vi.fn()} onPublish={vi.fn()} />
+        <MyTeamsStep onOpenTeam={openTeamSpy} onPublish={vi.fn()} />
         <ConnectProbe />
       </WalletProvider>
     );
     await connect();
     expect(await screen.findByText("RadAI")).toBeTruthy();
     expect(screen.getByText("3 服务")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "打开团队" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "发布新服务" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开团队" })).toBeNull(); // 已移除：整卡可点
+    expect(screen.getByRole("button", { name: "发布新服务" })).toBeTruthy(); // 卡内次级保留
+    // 整卡可点进详情（fireEvent.click 卡片本体）
+    const card = screen.getByRole("button", { name: "打开团队 RadAI" });
+    expect(card.getAttribute("tabindex")).toBe("0"); // 键盘可达
+    fireEvent.click(card);
+    expect(openTeamSpy).toHaveBeenCalledWith(170);
   });
 });
 
@@ -270,5 +276,58 @@ describe("主路径字样残留扫描", () => {
       .replace(/导入已有身份（高级）[\s\S]*?<\/details>/g, "…");
     expect(sanitized).not.toContain("认领");
     expect(sanitized).not.toContain("Agent ID");
+  });
+});
+
+describe("微调：创建按钮位置 + 整卡可点 + 发布页分组", () => {
+  it("「+ 创建团队」在「我的 Teams」标题行右侧（同 flex 行内）", async () => {
+    mineTeams = [];
+    render(
+      <WalletProvider>
+        <MyTeamsStep onOpenTeam={vi.fn()} onPublish={vi.fn()} />
+        <ConnectProbe />
+      </WalletProvider>
+    );
+    await connect();
+    const btn = await screen.findByRole("button", { name: "+ 创建团队" });
+    const headerRow = btn.closest("div.flex")!;
+    expect(headerRow.textContent).toContain("我的 Teams"); // 按钮与标题同在 header 行
+  });
+
+  it("团队卡无「打开团队」按钮；fireEvent.click 卡片触发 onOpenTeam；键盘可达（tabIndex=0+role=button）", async () => {
+    const openTeamSpy = vi.fn();
+    mineTeams = [{ agent_id: 170, display_name: "RadAI", claim_wallet: MY, service_count: 1, created_at: "t" }];
+    render(
+      <WalletProvider>
+        <MyTeamsStep onOpenTeam={openTeamSpy} onPublish={vi.fn()} />
+        <ConnectProbe />
+      </WalletProvider>
+    );
+    await connect();
+    await waitFor(() => expect(screen.getByText("RadAI")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "打开团队" })).toBeNull();
+    const card = screen.getByRole("button", { name: "打开团队 RadAI" });
+    expect(card.getAttribute("tabindex")).toBe("0");
+    fireEvent.click(card);
+    expect(openTeamSpy).toHaveBeenCalledWith(170);
+    // 卡内「发布新服务」stopPropagation：点击不触发 onOpenTeam
+    openTeamSpy.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "发布新服务" }));
+    expect(openTeamSpy).not.toHaveBeenCalled();
+  });
+
+  it("发布页：分组卡标题齐全 + 粘性操作条（role=toolbar 含发布按钮）+ 返回按钮", async () => {
+    render(
+      <WalletProvider>
+        <PublishStep claimed={{ agent_id: 170, display_name: "RadAI", wallet: MY }} onNext={vi.fn()} onBack={vi.fn()} />
+      </WalletProvider>
+    );
+    for (const t of ["基本信息", "定价", "端点", "Schema 与探测"]) {
+      expect(screen.getByText(t)).toBeTruthy();
+    }
+    const bar = screen.getByRole("toolbar", { name: "发布操作" });
+    expect(bar.className).toContain("sticky-action-bar");
+    expect(bar.textContent).toContain("发布服务");
+    expect(screen.getByRole("button", { name: "← 返回仪表盘" })).toBeTruthy();
   });
 });

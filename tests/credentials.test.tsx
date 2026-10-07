@@ -110,14 +110,14 @@ describe("发布表单：上游认证头区块显隐", () => {
   it("http_json 才显示区块；internal 不显示", () => {
     renderPublish();
     // 默认 internal
-    expect(screen.queryByText(/上游认证头（转发时注入，消费者不可见）/)).toBeNull();
+    expect(screen.queryByText(/^上游认证头$/)).toBeNull();
     // 切到 http_json
     fireEvent.click(screen.getByText("http_json（自运营 URL）"));
-    expect(screen.getByText(/上游认证头（转发时注入，消费者不可见）/)).toBeTruthy();
+    expect(screen.getByText(/^上游认证头$/)).toBeTruthy();
     expect(screen.getByText(/不会出现在目录或公开 manifest 中/)).toBeTruthy();
     // 切回 internal → 消失
     fireEvent.click(screen.getByText("internal（平台内置实现）"));
-    expect(screen.queryByText(/上游认证头（转发时注入，消费者不可见）/)).toBeNull();
+    expect(screen.queryByText(/^上游认证头$/)).toBeNull();
   });
 });
 
@@ -159,7 +159,7 @@ describe("发布链式 PUT credentials", () => {
 
     fireEvent.click(screen.getByText("发布服务"));
     await waitFor(() => expect(screen.getByText(/服务已发布，凭证保存失败/)).toBeTruthy());
-    expect(screen.getByText(/可在第 ③ 步「我的服务 → 上游认证头」重试/)).toBeTruthy();
+    expect(screen.getByText(/可在团队详情 → 服务管理重试/)).toBeTruthy();
     // manifest 只 POST 了一次且未回滚（无 DELETE /manifests）
     expect(calls.filter((c) => c.url === "/api/core/manifests").length).toBe(1);
     expect(screen.getAllByText(/已发布/).length).toBeGreaterThanOrEqual(1); // manifest 成功提示仍在（未回滚）
