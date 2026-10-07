@@ -1789,16 +1789,6 @@ export function TeamHome({ agentId, onBack, onPublish, onRenamed }: { agentId: n
                 })()}
                 sub={`p95 最慢 ${Math.max(0, ...t.fulfillment.services.map((s) => s.p95_ms))}ms`}
               />
-              <StatCard
-                k="反馈"
-                value={(() => {
-                  const total = t.feedback.services.reduce((a, s) => a + s.count, 0);
-                  if (total === 0) return "—";
-                  const sum = t.feedback.services.reduce((a, s) => a + (s.avg ?? 0) * s.count, 0);
-                  return `★${(sum / total).toFixed(1)}`;
-                })()}
-                sub={`${t.feedback.services.reduce((a, s) => a + s.count, 0)} 条`}
-              />
             </div>
             {t.degraded.length > 0 && <WarnBox>部分数据降级：{t.degraded.join("、")}</WarnBox>}
 

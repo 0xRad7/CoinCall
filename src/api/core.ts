@@ -218,8 +218,8 @@ export interface DecisionCategories {
 export interface DecisionWeights {
   revenue: number;
   fulfillment: number;
-  feedback: number;
   freshness: number;
+  feedback?: number; // 兼容旧形状（决策层已移除反馈分量）
 }
 
 export interface DecisionRow {
@@ -256,14 +256,14 @@ export interface DecisionRow {
       formula?: string;
       proof?: { digest: string; anchor_tx: string } | string | null;
     };
-    feedback: {
+    feedback?: {
       count: number;
       avg: number | null;
       bayesian_avg?: number;
       score_component: number | null;
       formula?: string;
       proof?: string;
-    };
+    }; // 可选（决策层已移除）
     freshness: {
       last_activity_at: string | null;
       age_h?: number;
@@ -367,12 +367,6 @@ export interface TeamFulfillmentService {
   last_activity_at: string | null;
 }
 
-export interface TeamFeedbackService {
-  service_id: string;
-  count: number;
-  avg: number | null;
-}
-
 export interface TeamDetail {
   team: {
     agent_id: number;
@@ -384,7 +378,6 @@ export interface TeamDetail {
   services: Array<CatalogService>;
   revenue: { total_raw: number; charged_count: number; wallets: string[]; proof: string };
   fulfillment: { services: TeamFulfillmentService[] };
-  feedback: { services: TeamFeedbackService[] };
   degraded: string[];
 }
 

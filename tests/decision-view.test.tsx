@@ -85,11 +85,13 @@ describe("决策视图", () => {
     expect(screen.getByText("Beta")).toBeTruthy();
     expect(screen.getByText("0.9000")).toBeTruthy(); // 综合分
     expect(screen.getByText("0.6000")).toBeTruthy();
-    // 徽章：成功率/p95/反馈星/时钟衰减
+    // 徽章：成功率/p95/时钟衰减（反馈分量已移除——★徽章不应出现）
     expect(screen.getAllByText(/95%/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/p95 11ms/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/★4.7（3）/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/★/); // 无反馈星徽章
     expect(screen.getAllByText(/衰减 90%/).length).toBeGreaterThanOrEqual(1); // fresh 0.9
+    // 公式三信号文案
+    expect(screen.getByText(/score = 0\.5×收入 \+ 0\.3×履约 \+ 0\.2×新鲜度/)).toBeTruthy();
   });
 
   it("点类目 chip 触发重新请求带 category", async () => {

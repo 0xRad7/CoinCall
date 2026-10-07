@@ -118,7 +118,6 @@ export default function Overview() {
                       <div className="flex" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }} title="决策层履约信号（付费窗口内实测）">
                         <span className="badge ok">✓ {pct(dr.components.fulfillment.success_rate)}</span>
                         {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
-                        {dr.components.feedback.count > 0 && <span className="badge warn">★{dr.components.feedback.avg?.toFixed(1)}（{dr.components.feedback.count}）</span>}
                         <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
                         {anchor && (
                           <a className="badge muted" style={{ textDecoration: "none" }} href={`https://scan.bohr.life/tx/${anchor.anchor_tx}`} target="_blank" rel="noreferrer" title={`锚定 ${anchor.digest.slice(0, 16)}…`}>
@@ -271,10 +270,9 @@ function pct(x: number | null | undefined): string {
 /** 四分量迷你条形（rev/ful/fb/fresh 各自 score_component；配色纳入单色体系，随主题双态） */
 function ScoreBars({ row }: { row: DecisionRow }) {
   const parts: Array<{ key: string; label: string; v: number | null; w: number; color: string }> = [
-    { key: "rev", label: `收入 ${(row.components.revenue.score_component * 100).toFixed(0)}%`, v: row.components.revenue.score_component, w: 0.4, color: "var(--chart-1)" },
-    { key: "ful", label: `履约 ${pct(row.components.fulfillment.score_component)}`, v: row.components.fulfillment.score_component, w: 0.25, color: "var(--chart-2)" },
-    { key: "fb", label: `反馈 ${pct(row.components.feedback.score_component)}`, v: row.components.feedback.score_component, w: 0.2, color: "var(--chart-3)" },
-    { key: "fresh", label: `新鲜 ${pct(row.components.freshness.score_component)}`, v: row.components.freshness.score_component, w: 0.15, color: "var(--chart-4)" },
+    { key: "rev", label: `收入 ${(row.components.revenue.score_component * 100).toFixed(0)}%`, v: row.components.revenue.score_component, w: 0.5, color: "var(--chart-1)" },
+    { key: "ful", label: `履约 ${pct(row.components.fulfillment.score_component)}`, v: row.components.fulfillment.score_component, w: 0.3, color: "var(--chart-2)" },
+    { key: "fresh", label: `新鲜 ${pct(row.components.freshness.score_component)}`, v: row.components.freshness.score_component, w: 0.2, color: "var(--chart-4)" },
   ];
   return (
     <div style={{ display: "flex", gap: 1, alignItems: "center", height: 8, width: 140, borderRadius: 4, overflow: "hidden", background: "var(--code-bg)" }} title={parts.map((p) => `${p.label}（权重 ${p.w}）`).join(" · ")}>
@@ -328,7 +326,7 @@ export function DecisionView() {
         </div>
       </div>
       <p className="card-desc" style={{ marginTop: 6 }}>
-        按综合分排序：score = 0.4×收入 + 0.25×履约 + 0.2×反馈 + 0.15×新鲜度（详见帮助页「决策层怎么算的」）。拖动时间拨针看排序随时间衰减重排。
+        按综合分排序：score = 0.5×收入 + 0.3×履约 + 0.2×新鲜度（详见帮助页「决策层怎么算的」）。拖动时间拨针看排序随时间衰减重排。
       </p>
 
       {cats.data && (
@@ -380,11 +378,6 @@ export function DecisionView() {
                       {r.components.fulfillment.p95_ms != null && (
                         <span className="badge muted" title="p95 延迟">
                           p95 {r.components.fulfillment.p95_ms}ms
-                        </span>
-                      )}
-                      {r.components.feedback.count > 0 && (
-                        <span className="badge warn" title="验证付费的评价（贝叶斯均值防小样本刷分）">
-                          ★{r.components.feedback.avg?.toFixed(1) ?? "-"}（{r.components.feedback.count}）
                         </span>
                       )}
                       <span className="badge muted" title={`最近活跃 ${timeAgo(r.components.freshness.last_activity_at)}（48h 半衰期）`}>
@@ -503,7 +496,6 @@ function CatalogTeamsAxis({ decisionMap }: { decisionMap: Map<string, DecisionRo
                   })()}
                   sub={`p95 最慢 ${Math.max(0, ...t.fulfillment.services.map((x) => x.p95_ms))}ms`}
                 />
-                <StatCard k="反馈" value={`${t.feedback.services.reduce((a, x) => a + x.count, 0)} 条`} sub="验证付费评价" />
               </div>
             )}
           </AsyncSection>

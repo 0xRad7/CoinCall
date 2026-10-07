@@ -44,7 +44,6 @@ function teamDetail(agentId: number, name: string, revRaw: number, wallets: stri
         { service_id: `svc_${agentId}`, calls_success: 3, calls_aborted: 1, p50_ms: 757, p95_ms: 4961, distinct_payers: 2, last_activity_at: "2026-10-06T20:37:42Z" },
       ],
     },
-    feedback: { services: [{ service_id: `svc_${agentId}`, count: 1, avg: 5.0 }] },
     degraded: [],
   };
 }

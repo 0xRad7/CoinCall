@@ -45,7 +45,6 @@ const TEAM_DETAIL: TeamDetail = {
   ],
   revenue: { total_raw: 20000, charged_count: 2, wallets: [MY], proof: "/proof" },
   fulfillment: { services: [{ service_id: "svc_rad_ai", calls_success: 3, calls_aborted: 0, p50_ms: 757, p95_ms: 4961, distinct_payers: 1, last_activity_at: "2026-10-06T20:37:42Z" }] },
-  feedback: { services: [{ service_id: "svc_rad_ai", count: 2, avg: 4.5 }] },
   degraded: [],
 };
 
@@ -208,7 +207,7 @@ describe("创建团队全链", () => {
 });
 
 describe("Team 主页", () => {
-  it("聚合数字来自 teams 端点（收入 0.02/2 笔/1 服务/履约 100%/反馈★4.5）", async () => {
+  it("聚合数字来自 teams 端点（收入 0.02/2 笔/1 服务/履约 100%）", async () => {
     render(
       <WalletProvider>
         <TeamHome agentId={170} onBack={vi.fn()} onPublish={vi.fn()} />
@@ -224,7 +223,7 @@ describe("Team 主页", () => {
     expect(row.textContent).toContain("RadAI Report");
     expect(row.textContent).toContain("757ms"); // p50
     expect(screen.getAllByText("4961ms").length).toBeGreaterThanOrEqual(1); // p95（表+汇总卡）
-    expect(screen.getByText("★4.5")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("★"); // 反馈卡已移除
     expect(screen.getByRole("button", { name: "发布新服务" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "← 我的 Teams" })).toBeTruthy();
   });
