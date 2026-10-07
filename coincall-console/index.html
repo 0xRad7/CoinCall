@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <title>币应 · CoinCall</title>
+    <script>
+      /* 首帧前恢复主题（避免亮/暗闪跳）：与 ThemeContext 的 localStorage 键一致 */
+      try {
+        if (localStorage.getItem("coincall.theme") === "dark") document.documentElement.dataset.theme = "dark";
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <!-- JS 加载前的品牌骨架（消除白屏体感；React 挂载后整体被替换） -->
+      <div id="boot" style="position:fixed;inset:0;background:#0a0e14;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;">
+        <div style="width:14px;height:14px;border-radius:50%;background:linear-gradient(105deg,#2dd4bf,#3b82f6);animation:bootpulse 1.2s ease-in-out infinite;"></div>
+        <div style="font-size:13px;color:#6b7488;letter-spacing:0.08em;">CoinCall 币应</div>
+      </div>
+    </div>
+    <style>@keyframes bootpulse{0%,100%{transform:scale(0.7);opacity:.5}50%{transform:scale(1);opacity:1}}</style>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
