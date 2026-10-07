@@ -81,6 +81,8 @@ print(w.approve_vault('10'))   # 授权 10 USDT 额度给 PayVault（后续可�
         "COINCALL_WALLET_KEY": "/Users/你/.coincall/wallet.key",
         "COINCALL_GATEWAY_URL": "http://127.0.0.1:8030",
         "COINCALL_CORE_URL": "http://127.0.0.1:8020",
+        "COINCALL_NETWORK": "mainnet",
+        "COINCALL_RPC_PROXY": "http://127.0.0.1:7890",
         "COINCALL_TOTAL_BUDGET_RAW": "1000000",
         "COINCALL_DAILY_BUDGET_RAW": "200000",
         "COINCALL_PER_CALL_BUDGET_RAW": "50000",
