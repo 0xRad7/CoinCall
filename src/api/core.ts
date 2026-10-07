@@ -391,9 +391,12 @@ export interface TeamDetail {
 export const teamsApi = {
   /** 连接钱包 → 反查"我的团队"（大小写不敏感）。 */
   mine: (wallet: string) => apiFetch<MineResponse>(`${CORE_BASE}/providers/mine?wallet=${encodeURIComponent(wallet)}`).then((r) => r.data),
-  /** 平台代发铸造新身份（≤30s 上链）→ 前端走 AgentWalletSet 签名→绑定→认领。 */
-  prepare: (display_name: string) =>
-    apiFetch<PrepareTeamResponse>(`${CORE_BASE}/teams/prepare`, { ...jsonInit("POST", { display_name }), timeoutMs: 60_000 }).then((r) => r.data),
+  /** 平台代发铸造新身份（≤30s 上链）→ 前端走 AgentWalletSet 签名→绑定→认领。origin 进 agentURI（内网/局域网可达）。 */
+  prepare: (display_name: string, origin?: string) =>
+    apiFetch<PrepareTeamResponse>(`${CORE_BASE}/teams/prepare`, {
+      ...jsonInit("POST", { display_name, ...(origin ? { origin } : {}) }),
+      timeoutMs: 60_000,
+    }).then((r) => r.data),
   /** Team 主页聚合（收入/履约/反馈，全链上+流水口径）。 */
   detail: (agentId: number) => apiFetch<TeamDetail>(`${CORE_BASE}/teams/${agentId}`).then((r) => r.data),
 };

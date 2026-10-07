@@ -1671,18 +1671,25 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
 }
 
 /** 创建团队：输入名 → prepare（代发铸造）→ AgentWalletSet 签名 → 绑定 → providers → 打开新团队主页。 */
-export function CreateTeamButton({ onCreated, inline }: { onCreated?: (agentId: number) => void; inline?: boolean }) {
+export function CreateTeamButton({
+  onCreated,
+  inline,
+  hero,
+  label,
+}: {
+  onCreated?: (agentId: number) => void;
+  /** 挂在标题行的小号形态 */
+  inline?: boolean;
+  /** 新用户空态大卡形态（居中主 CTA，一键发起） */
+  hero?: boolean;
+  label?: string;
+}) {
   const w = useWallet();
-  const [name, setName] = useState("");
-  const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<null | "prepare" | "sign" | "bind" | "claim" | "done">(null);
-  const [agentId, setAgentId] = useState<number | null>(null);
   const [deadline, setDeadline] = useState<number | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState<unknown>(null);
   const [cancelled, setCancelled] = useState(false);
-  const phaseRef = useRef<null | string>(null);
-  phaseRef.current = phase;
 
   useEffect(() => {
     if (deadline == null) return;
@@ -1695,8 +1702,7 @@ export function CreateTeamButton({ onCreated, inline }: { onCreated?: (agentId: 
     setCancelled(false);
     setPhase("prepare");
     try {
-      const prep = await teamsApi.prepare(name.trim());
-            setAgentId(prep.agent_id);
+      const prep = await teamsApi.prepare("我的团队", window.location.origin); // 链上 agentURI = {origin}/#/provider（内网可达）
       setPhase("sign");
       const sel = await w.requireProvider();
       if (!sel) throw new Error("未选择浏览器钱包。");
@@ -1716,7 +1722,7 @@ export function CreateTeamButton({ onCreated, inline }: { onCreated?: (agentId: 
       setPhase("bind");
       await botChainApi.bindWallet(prep.agent_id, w.address!, sig, dl);
       setPhase("claim");
-      await coreApi.registerProvider(prep.agent_id, name.trim(), w.address!);
+      await coreApi.registerProvider(prep.agent_id, "我的团队", w.address!);
       setPhase("done");
       onCreated?.(prep.agent_id);
     } catch (e) {
@@ -1729,38 +1735,51 @@ export function CreateTeamButton({ onCreated, inline }: { onCreated?: (agentId: 
   if (!w.address) return null;
   const busy = phase != null && phase !== "done";
 
-  return (
-    <div style={inline ? {} : { marginTop: 14 }}>
-      {open ? (
-        <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginBottom: 0, marginTop: 12 }}>
-          <div className="field" style={{ marginBottom: 8 }}>
-            <label>团队名称</label>
-            <input type="text" value={name} maxLength={128} placeholder="例如 RadAI" onChange={(e) => setName(e.target.value)} aria-label="团队名称" />
-            <div className="help">将创建链上团队身份并绑定到你的钱包——只需<b>一次钱包签名</b>，链上身份由平台自动管理。</div>
-          </div>
-          <div className="btn-row">
-            <button className="btn" disabled={name.trim().length < 1 || busy} onClick={run}>
-              {phase === "prepare" ? "正在创建团队身份…"
-                : phase === "sign" ? "等待钱包签名确认…"
-                : phase === "bind" ? "绑定上链中…"
-                : phase === "claim" ? "登记团队…"
-                : phase === "done" ? "✓ 创建成功"
-                : "创建团队"}
+  if (hero) {
+    // 新用户空态：居中大卡，一键发起全流程（无名字输入步，默认「我的团队」，落地后可改名）
+    return (
+      <div className="card" style={{ textAlign: "center", padding: "48px 32px" }}>
+        <h2 style={{ margin: "0 0 8px" }}>创建你的第一个团队</h2>
+        <p className="card-desc" style={{ fontSize: 14 }}>一次钱包签名，链上身份自动管理。团队名默认「我的团队」，创建后可随时改。</p>
+        <div style={{ marginTop: 20 }}>
+          {phase == null && !cancelled && (
+            <button className="btn" style={{ fontSize: 16, padding: "12px 36px" }} onClick={run}>
+              创建团队
             </button>
-            {deadline != null && (phase === "sign" || phase === "bind") && (
-              <span className={`badge ${countdown < 60 ? "warn" : "muted"}`}>签名窗口 {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")}</span>
-            )}
-            <button className="btn secondary" onClick={() => { setOpen(false); setPhase(null); setName(""); }} disabled={busy}>收起</button>
-          </div>
-          {agentId != null && phase === "done" && (
-            <SuccessBox>团队 #{agentId}「{name}」创建成功！收入将进你的钱包。</SuccessBox>
           )}
-          {cancelled && <WarnBox>你取消了签名（钱包弹窗里拒绝）。团队身份已创建但未绑定——展开下方「导入已有身份（高级）」输入 #{agentId} 完成导入，或稍后重试创建。</WarnBox>}
+          {busy && (
+            <div className="alert info" style={{ maxWidth: 420, margin: "0 auto" }}>
+              <span className="flex" style={{ justifyContent: "center" }}><span className="spin" />
+                {phase === "prepare" ? "正在创建团队身份…" : phase === "sign" ? "等待钱包签名确认…" : phase === "bind" ? "绑定上链中…" : "登记团队…"}
+              </span>
+              {deadline != null && (phase === "sign" || phase === "bind") && (
+                <div style={{ marginTop: 6 }}>
+                  <span className={`badge ${countdown < 60 ? "warn" : "muted"}`}>签名窗口 {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {phase === "done" && <SuccessBox>✓ 创建成功——正在进入团队…</SuccessBox>}
+          {cancelled && (
+            <div>
+              <WarnBox>你取消了签名（钱包弹窗里拒绝）。团队身份未完成绑定，可重新点「创建团队」。</WarnBox>
+              <button className="btn" style={{ marginTop: 12 }} onClick={run}>重试创建</button>
+            </div>
+          )}
           {error != null && <ErrorBox error={error} />}
         </div>
-      ) : (
-        <button className={inline ? "btn small" : "btn"} onClick={() => setOpen(true)}>+ 创建团队</button>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={inline ? {} : { marginTop: 14 }}>
+      <button className={inline ? "btn small" : "btn"} disabled={busy} onClick={run} title="一键创建：一次钱包签名，链上身份自动管理（默认名「我的团队」，进详情可改）">
+        {busy ? (phase === "prepare" ? "创建身份…" : phase === "sign" ? "等待签名…" : phase === "bind" ? "绑定中…" : "登记…") : (label ?? "+ 创建团队")}
+      </button>
+      {phase === "done" && <span className="badge ok" style={{ marginLeft: 8 }}>✓ 已创建</span>}
+      {cancelled && <WarnBox>你取消了签名——团队未完成创建，可重试。</WarnBox>}
+      {error != null && <ErrorBox error={error} />}
     </div>
   );
 }
