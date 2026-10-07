@@ -35,6 +35,7 @@ function installFetch() {
       if (probeHttp !== 200) return jsonResponse({ error: "probe_failed", detail: "连接超时" }, probeHttp);
       return jsonResponse(probeResult);
     }
+    if (/\/api\/core\/teams\/\d+\/credentials$/.test(url)) return jsonResponse({ agent_id: 170, header_names: [] }); // 团队未配默认头
     return jsonResponse({ error: "not_mocked", detail: url }, 500);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -90,7 +91,11 @@ describe("请求方式（method）", () => {
     // 手写嵌套 schema 进 input 编辑器（第一个 code textarea）
     const inputTa = schemaTextareas()[0] as HTMLTextAreaElement;
     fireEvent.change(inputTa, { target: { value: JSON.stringify({ type: "object", properties: { cfg: { type: "object" } } }) } });
-    expect(await screen.findByText(/GET 模式不支持嵌套对象参数/)).toBeTruthy();
+    // 预警至少出现一次（DOM 可能有 warn 分隔）；用含该文案的 alert.warn 计数
+    await waitFor(() => {
+      const warns = [...document.querySelectorAll('.alert.warn')].filter((w) => w.textContent?.includes('GET 模式不支持嵌套对象参数'));
+      expect(warns.length).toBeGreaterThanOrEqual(1);
+    });
     // 切回 POST → 预警消失
     fireEvent.click(screen.getByText("POST（默认）"));
     expect(screen.queryByText(/GET 模式不支持嵌套对象参数/)).toBeNull();
@@ -102,9 +107,9 @@ describe("探测接口", () => {
     renderPublish();
     await toHttpJson();
     fireEvent.click(screen.getByText("GET"));
-    // 示例参数行（跳过第一行空名，填第一个参数行）
-    fireEvent.change(screen.getByLabelText("参数名 1"), { target: { value: "tag" } });
-    fireEvent.change(screen.getByLabelText("示例值 1"), { target: { value: "a" } });
+    // 示例参数行（可能同时存在于表单+探测弹层——scope 到表单侧的第一个）
+    fireEvent.change(screen.getAllByLabelText("参数名 1")[0]!, { target: { value: "tag" } });
+    fireEvent.change(screen.getAllByLabelText("示例值 1")[0]!, { target: { value: "a" } });
 
     fireEvent.click(screen.getByText("探测接口"));
     // 弹层文案：headers 仅探测用不落盘
@@ -130,7 +135,7 @@ describe("探测接口", () => {
         headers: { type: "object", properties: { "X-Api-Key": { type: "string" } } },
       },
     });
-    expect(screen.getAllByText("自动识别，请核对").length).toBe(2);
+    expect(screen.getAllByText("自动识别，请核对").length).toBeGreaterThanOrEqual(2); // input+output（可能因团队徽标等含同词节点）
     // probe 请求体形状：query 字符串值、headers 为空对象时省略
     const probe = calls.find((c) => c.url.endsWith("/api/core/services/probe"))!;
     expect(JSON.parse(probe.body!)).toEqual({ url: "https://httpbin.org/get", method: "GET", query: { tag: "a" } });

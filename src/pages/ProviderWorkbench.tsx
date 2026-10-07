@@ -735,15 +735,6 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
         />
       </div>
 
-      {/* 上游认证头 */}
-      {endpointType === "http_json" && (
-        <div className="card form-group-card">
-          <h3>上游认证头</h3>
-          <p className="card-desc">转发时注入、消费者不可见。此密钥<b>加密存储于平台</b>、仅网关转发你的上游 URL 时使用（60s 缓存，消费者请求头不透传）；不会出现在目录或公开 manifest 中。不想交给平台？可自包一层薄适配服务再上架。留空 = 不配置。</p>
-          <CredentialHeadersEditor rows={credRows} onChange={(rows) => { setCredRows(rows); }} />
-        </div>
-      )}
-
       {error && <ErrorBox error={error} />}
       {ok && (
         <SuccessBox>
@@ -1019,7 +1010,7 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
                     <tr>
                       <td colSpan={5} style={{ background: "var(--surface-2)" }}>
                         <div style={{ padding: "8px 10px" }}>
-                          <ServiceCredentialsPanel serviceId={s.service_id} />
+                          <ServiceCredentialsPanel serviceId={s.service_id} teamAgentId={m.provider.agent_id} />
                         </div>
                       </td>
                     </tr>
@@ -1074,8 +1065,10 @@ export function ManageStep({ claimedAgentId, onNext, onBack }: { claimedAgentId:
 }
 
 /** 上游认证头管理面板（仅 http_json；internal 无上游概念不显示）。值永不回显，只有头名。 */
-function ServiceCredentialsPanel({ serviceId }: { serviceId: string }) {
+function ServiceCredentialsPanel({ serviceId, teamAgentId }: { serviceId: string; teamAgentId: number | null }) {
   const [names, setNames] = useState<string[] | null>(null);
+  // 团队默认认证头（网关回退）：服务级为空时展示
+  const [teamNames, setTeamNames] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<CredentialRow[]>([]);
@@ -1097,11 +1090,14 @@ function ServiceCredentialsPanel({ serviceId }: { serviceId: string }) {
     }
   };
 
-  // 展开即自动加载已配置头名
+  // 展开即自动加载已配置头名 + 团队默认头名
   useEffect(() => {
     void load();
+    if (teamAgentId != null) {
+      teamCredentialsApi.list(teamAgentId).then((i) => setTeamNames(i.header_names)).catch(() => setTeamNames(null));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceId]);
+  }, [serviceId, teamAgentId]);
 
   const currentCount = names?.length ?? 0;
 
@@ -1146,7 +1142,16 @@ function ServiceCredentialsPanel({ serviceId }: { serviceId: string }) {
       {loading ? (
         <Spinner label="读取已配置头名…" />
       ) : names == null ? null : names.length === 0 ? (
-        <div className="dim">尚未配置任何认证头。</div>
+        teamNames != null && teamNames.length > 0 ? (
+          <div className="flex" style={{ marginBottom: 8 }}>
+            <span className="badge info" title="服务未单独配置凭证——转发时自动复用团队默认认证头（网关回退）">
+              团队默认（{teamNames.map((n) => `${n} ✓`).join(" ")}）
+            </span>
+            <span className="dim">服务级为空，网关自动回退团队头（在团队详情管理）</span>
+          </div>
+        ) : (
+          <div className="dim">尚未配置任何认证头。</div>
+        )
       ) : (
         <div className="flex" style={{ marginBottom: 8 }}>
           {names.map((n) => (

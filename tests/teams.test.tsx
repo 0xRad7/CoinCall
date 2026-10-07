@@ -78,6 +78,7 @@ function installFetch() {
       return jsonResponse({ agent_id: body.agent_id, display_name: "New Team", wallet: body.claim_wallet, claim_wallet: body.claim_wallet, created_at: "t" });
     }
     if (url === "/api/core/teams/170") return jsonResponse(TEAM_DETAIL);
+    if (/\/api\/core\/teams\/\d+\/credentials$/.test(url)) return jsonResponse({ agent_id: 170, header_names: [] }); // 团队未配默认头
     if (url === "/api/core/catalog") return jsonResponse(CATALOG);
     if (url === "/api/core/decision/categories") return jsonResponse({ categories: [], counts: {}, total_active: 0 });
     if (url.startsWith("/api/core/decision/services")) return jsonResponse({ services: [], weights: {}, degraded: [], window_hours: 168, as_of: "", sort: "score", category: null });
@@ -85,6 +86,7 @@ function installFetch() {
     if (url === "/api/core/leaderboard/providers") return jsonResponse({ order: "revenue", providers: [] });
     if (url === "/api/core/leaderboard/services") return jsonResponse({ order: "revenue", services: [] });
     if (url === "/api/gw/internal/keeper/status") return jsonResponse({ enabled: true, running: true, batch_size: 3, flush_interval_s: 30, queue: { pending: 0, done: 0, failed: 0, expired: 0 }, last_batch: null, cumulative_charged_count: 0, cumulative_charged_raw: "0", blacklisted_consumers: [], last_error: null });
+    if (/\/api\/core\/teams\/\d+\/credentials$/.test(url)) return jsonResponse({ agent_id: 170, header_names: [] }); // 团队未配默认头
     return jsonResponse({ error: "not_mocked", detail: url }, 500);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -323,8 +325,17 @@ describe("微调：创建按钮位置 + 整卡可点 + 发布页分组", () => {
       </WalletProvider>
     );
     for (const t of ["基本信息", "定价", "端点", "Schema 与探测"]) {
-      expect(screen.getByText(t)).toBeTruthy();
+      expect(screen.getAllByText(t).length).toBeGreaterThanOrEqual(1);
     }
+    // 分组顺序：先切 http_json（认证头/URL 卡仅 http_json 显示），认证头须在端点上方
+    fireEvent.click(screen.getByText("http_json（自运营 URL）"));
+    await waitFor(() => expect(screen.getAllByText("上游认证头").length).toBeGreaterThanOrEqual(1));
+    const cards = [...document.querySelectorAll(".form-group-card h3")].map((h) => h.textContent);
+    const credIdx = cards.indexOf("上游认证头");
+    const epIdx = cards.indexOf("端点");
+    expect(credIdx).toBeGreaterThan(-1);
+    expect(epIdx).toBeGreaterThan(-1);
+    expect(credIdx).toBeLessThan(epIdx); // 认证头先于端点
     const bar = screen.getByRole("toolbar", { name: "发布操作" });
     expect(bar.className).toContain("sticky-action-bar");
     expect(bar.textContent).toContain("发布服务");

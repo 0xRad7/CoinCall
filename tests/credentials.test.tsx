@@ -79,6 +79,7 @@ function installFetch(catalog: Catalog) {
       if (method === "DELETE") return jsonResponse({ service_id: "svc_new", deleted: true });
       return jsonResponse({ service_id: "svc_new", header_names: ["X-API-KEY"] }); // GET：只有头名，绝无值
     }
+    if (/\/api\/core\/teams\/\d+\/credentials$/.test(url)) return jsonResponse({ agent_id: 170, header_names: [] }); // 团队未配默认头
     return jsonResponse({ error: "not_mocked", detail: url }, 500);
   });
   vi.stubGlobal("fetch", fetchMock);
