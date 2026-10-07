@@ -28,6 +28,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TextIO
 
+import httpx
+
 # 仓内直跑支持（uv run python tools/mcp_server.py）：本项目无 build-system，
 # uv sync 只装依赖不装包——必须先补 sys.path 再 import coincall（tests 侧靠 PYTHONPATH）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,6 +89,7 @@ TOOLS_SPEC: list[dict[str, Any]] = [
             "单服务报价详情（免费）：目录定价、收款方 PayVault、你的钱包 USDT 余额与"
             "授权额度、L0 预算余量。Agent 花钱前先本工具看价；价格超单笔限额、"
             "余额/授权/预算不足时，把返回的 hints 转告用户并等待指示，不要直接调用。"
+            "返回含 advice 建议：verb=switch 时改调 recommend 并向用户说明理由。"
         ),
         "inputSchema": {
             "type": "object",
@@ -173,6 +176,33 @@ class _ToolOutcome:
 
 
 # ---- 新三只读工具的载荷构造（决策闭环：看价 / 自查 / 汇报；实现参考 agent_loop.py） ----
+
+#: advice 通道短超时（consumer-agent-interface advice 通道）：core 慢不拖报价本体
+ADVICE_TIMEOUT_S = 3.0
+
+
+def _advice_view(
+    client: Client,
+    service_id: str,
+    manifest: dict[str, Any],
+    budget: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """core /advice 判定式投影嵌入报价（Agent 默认介入通道）。
+
+    失败一律降级 {"error": "unavailable"}——advice 是增强不是依赖，绝不拖垮报价。
+    category 口径与 core 读取侧一致（manifest 缺省 other）；daily 透传 L0 日额现值。
+    """
+    category = manifest.get("category")
+    daily = budget.get("daily_budget_raw") if budget is not None else None
+    try:
+        return client.advice(
+            category=str(category) if category else "other",
+            current=service_id,
+            daily_budget_raw=daily if isinstance(daily, int) and daily > 0 else None,
+            timeout_s=ADVICE_TIMEOUT_S,
+        )
+    except (CoinCallError, httpx.HTTPError, ValueError):
+        return {"error": "unavailable"}
 
 
 def _wallet_view(client: Client) -> tuple[dict[str, Any] | None, str | None]:
@@ -263,6 +293,7 @@ def service_quote_payload(client: Client, service_id: str) -> dict[str, Any]:
         "affordable_by_wallet": affordable_by_wallet,
         "budget": budget,
         "affordable_by_budget": affordable_by_budget,
+        "advice": _advice_view(client, service_id, manifest, budget),
         "hints": hints,
     }
 
