@@ -178,7 +178,7 @@ class TestDecisionServices:
             assert client.post("/manifests", json=_manifest("svc_t1", 137, W_A)).status_code == 201
             body = client.get("/decision/services").json()
             assert body["weights"] == WEIGHTS
-            assert "0.4" in body["formula"] and "norm" in body["formula"]
+            assert "0.5*revenue" in body["formula"] and "norm" in body["formula"]
             assert body["window_hours"] == 168
             assert body["sort"] == "score"
             assert body["as_of"]  # 默认 now
@@ -390,7 +390,7 @@ class TestAnchoring:
             assert row["digest"].startswith("sha256:")
             svc = row["payload"]["services"]["svc_t1"]
             assert svc["fulfillment"]["calls_success"] == 2
-            assert svc["feedback"]["count"] == 0
+            assert "feedback" not in svc  # 反馈层已移除（78c8974），锚定载荷不再含该键
 
             # 语义/形态校验失败 → 422
             bad_tx = client.post(
