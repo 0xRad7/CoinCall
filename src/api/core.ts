@@ -397,3 +397,20 @@ export const teamsApi = {
   /** Team 主页聚合（收入/履约/反馈，全链上+流水口径）。 */
   detail: (agentId: number) => apiFetch<TeamDetail>(`${CORE_BASE}/teams/${agentId}`).then((r) => r.data),
 };
+
+/** 团队级默认认证头（掩码 GET 只回头名；internal 出明文——控制台只用掩码+写入）。 */
+export interface TeamCredentialsInfo {
+  agent_id: number;
+  header_names: string[];
+  updated?: boolean;
+  deleted?: boolean;
+}
+
+export const teamCredentialsApi = {
+  list: (agentId: number) =>
+    apiFetch<TeamCredentialsInfo>(`${CORE_BASE}/teams/${agentId}/credentials`).then((r) => r.data),
+  put: (agentId: number, headers: Record<string, string>) =>
+    apiFetch<TeamCredentialsInfo>(`${CORE_BASE}/teams/${agentId}/credentials`, { ...jsonInit("PUT", { headers }) }).then((r) => r.data),
+  remove: (agentId: number) =>
+    apiFetch<TeamCredentialsInfo>(`${CORE_BASE}/teams/${agentId}/credentials`, { method: "DELETE" }).then((r) => r.data),
+};

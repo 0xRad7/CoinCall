@@ -3,7 +3,7 @@
  * 发布服务 → 我的服务 → 提现。步骤间状态保持（父级 state），进度指示可点击回跳。
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { coreApi, credentialsApi, teamsApi, type ClaimState, type MyTeam, type ServiceManifest } from "../api/core";
+import { coreApi, credentialsApi, teamCredentialsApi, teamsApi, type ClaimState, type MyTeam, type ServiceManifest } from "../api/core";
 import { CredentialHeadersEditor, rowsToHeaders, type CredentialRow } from "../components/CredentialHeadersEditor";
 import { ExampleRequestEditor } from "../components/ExampleRequestEditor";
 import { ProbeDialog } from "../components/ProbeDialog";
@@ -357,6 +357,10 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
   const [ok, setOk] = useState<{ service_id: string; manifest_hash: string } | null>(null);
   // 上游认证头（仅 http_json）：发布成功后链式 PUT credentials
   const [credRows, setCredRows] = useState<CredentialRow[]>([]);
+  // 团队默认认证头（网关回退）：已配则开关默认开（复用，不发服务级 PUT）
+  const [teamCredNames, setTeamCredNames] = useState<string[] | null>(null);
+  const [teamCredLoaded, setTeamCredLoaded] = useState(false);
+  const [useTeamCred, setUseTeamCred] = useState(true);
   const [credState, setCredState] = useState<{ kind: "ok" | "warn"; names: string[] } | null>(null);
   const [credError, setCredError] = useState<unknown>(null);
 
@@ -366,6 +370,26 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
     () => (claimed ? botChainApi.identity(claimed.agent_id).catch(() => null) : Promise.resolve(null)),
     [claimed?.agent_id]
   );
+
+  // 团队默认认证头名（决定复用开关默认态）
+  useEffect(() => {
+    if (!claimed) return;
+    let alive = true;
+    teamCredentialsApi
+      .list(claimed.agent_id)
+      .then((info) => {
+        if (!alive) return;
+        setTeamCredNames(info.header_names);
+        setTeamCredLoaded(true);
+        setUseTeamCred(info.header_names.length > 0); // 团队已配 → 默认开
+      })
+      .catch(() => {
+        if (alive) setTeamCredLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [claimed?.agent_id]);
 
   // 默认=认领钱包（认证先行：收入默认进经过认证的钱包）；认领后又连接了别的钱包不自动覆盖手填值
   useEffect(() => {
@@ -423,8 +447,8 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
     try {
       const ack = await coreApi.publishManifest(manifest);
       setOk({ service_id: ack.service_id, manifest_hash: ack.manifest_hash });
-      // 链式保存上游认证头（仅当填写了；失败不回滚 manifest）
-      const headers = rowsToHeaders(credRows);
+      // 链式保存上游认证头：复用团队头（开关开）→ 留空回退不发；否则填了才 PUT（失败不回滚 manifest）
+      const headers = useTeamCred && teamCredNames != null && teamCredNames.length > 0 ? {} : rowsToHeaders(credRows);
       if (Object.keys(headers).length > 0) {
         try {
           const info = await credentialsApi.put(ack.service_id, headers);
@@ -537,6 +561,49 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
         <AmountInput human={amount} onHumanChange={setAmount} fieldError={fieldErr("amount") ?? fieldErr("amount_raw") ?? fieldErr("pricing")} />
       </div>
 
+      {/* 上游认证头（已上移至端点上方；团队回退开关） */}
+      {endpointType === "http_json" && (
+        <div className="card form-group-card">
+          <h3>上游认证头</h3>
+          {teamCredNames != null && teamCredNames.length > 0 ? (
+            <div className="field">
+              <label className="flex" style={{ cursor: "pointer" }}>
+                <input type="checkbox" checked={useTeamCred} onChange={(e) => setUseTeamCred(e.target.checked)} aria-label="默认复用团队认证头" style={{ width: "auto", marginRight: 8 }} />
+                默认复用团队认证头
+              </label>
+              {useTeamCred ? (
+                <div className="alert ok" style={{ fontSize: 13, marginTop: 8 }}>
+                  将复用团队默认头：{teamCredNames.map((n) => (
+                    <span key={n} className="badge ok" style={{ marginLeft: 4 }}>{n} ✓</span>
+                  ))}
+                  <span className="dim">（在团队详情管理；本服务不单独配置，网关自动回退团队头）</span>
+                </div>
+              ) : (
+                <>
+                  <div className="help">开关已关——下方为服务级凭证，优先于团队默认头。</div>
+                  <CredentialHeadersEditor rows={credRows} onChange={(rows) => { setCredRows(rows); }} />
+                  <div className="help">
+                    此密钥<b>加密存储于平台</b>、仅网关转发你的上游 URL 时使用；不会出现在目录或公开 manifest 中。留空 = 不配置（回退团队默认头）。
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              {teamCredLoaded && (
+                <div className="alert warn" style={{ fontSize: 13 }}>
+                  团队还没有默认认证头，可在团队详情 →「团队默认认证头」配置后零配置复用。下方为服务级凭证：
+                </div>
+              )}
+              <CredentialHeadersEditor rows={credRows} onChange={(rows) => { setCredRows(rows); }} />
+              <div className="help">
+                此密钥<b>加密存储于平台</b>、仅网关转发你的上游 URL 时使用；不会出现在目录或公开 manifest 中。留空 = 不配置。
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* 端点 */}
       <div className="card form-group-card">
         <h3>端点</h3>
@@ -628,6 +695,46 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
         />
       </div>
 
+      {/* Schema 与探测 */}
+      <div className="card form-group-card">
+        <h3>Schema 与探测</h3>
+        {endpointType === "http_json" && endpointMethod === "GET" && schemaHasNestedObjects(inputSchema) && (
+          <div className="alert warn">
+            <b>GET 模式不支持嵌套对象参数</b>：input_schema 里有 type 为 object 的属性——发布会被 422 拒绝。请改用 POST，或把参数拍平为标量/标量数组。
+          </div>
+        )}
+        {endpointType === "http_json" && (
+          <details className="raw-detail" style={{ marginBottom: 12 }}>
+            <summary style={{ fontSize: 13 }}>示例请求区（探测 / 生成 input_schema 用）——点开编辑</summary>
+            <div style={{ marginTop: 8 }}>
+              <ExampleRequestEditor method={endpointMethod} params={exampleParams} onParamsChange={setExampleParams} json={exampleJson} onJsonChange={setExampleJson} />
+            </div>
+          </details>
+        )}
+        <JsonEditor
+          label="input_schema（消费端参数校验，决定调用表单）"
+          value={inputSchema}
+          onChange={(v) => {
+            setInputSchema(v);
+            setInputAutoNote(false);
+          }}
+          fieldError={fieldErr("input_schema")}
+          rows={8}
+          badge={inputAutoNote ? "自动识别，请核对" : undefined}
+        />
+        <JsonEditor
+          label="output_schema"
+          value={outputSchema}
+          onChange={(v) => {
+            setOutputSchema(v);
+            setOutputAutoNote(false);
+          }}
+          fieldError={fieldErr("output_schema")}
+          rows={5}
+          badge={outputAutoNote ? "自动识别，请核对" : undefined}
+        />
+      </div>
+
       {/* 上游认证头 */}
       {endpointType === "http_json" && (
         <div className="card form-group-card">
@@ -645,6 +752,11 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
             <>
               {" "}上游认证头已加密保存：{credState.names.join("、")}（值不回显）。
             </>
+          )}
+          {ok && useTeamCred && teamCredNames != null && teamCredNames.length > 0 && (
+            <div className="alert info" style={{ marginTop: 8, fontSize: 13 }}>
+              本服务未单独配置凭证——转发时将自动复用团队默认头（{teamCredNames.join("、")}），在团队详情统一管理。
+            </div>
           )}
         </SuccessBox>
       )}
@@ -1648,17 +1760,165 @@ export function CreateTeamButton({ onCreated, inline }: { onCreated?: (agentId: 
   );
 }
 
+/** 团队默认认证头弹窗：掩码 chips（值永不回显）+ 全量替换语义 + 清除二次确认。 */
+function TeamCredentialsModal({ agentId, onClose }: { agentId: number; onClose: () => void }) {
+  const [names, setNames] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState<CredentialRow[]>([]);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const info = await teamCredentialsApi.list(agentId);
+      setNames(info.header_names);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
+
+  const currentCount = names?.length ?? 0;
+
+  const doReplace = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await teamCredentialsApi.put(agentId, rowsToHeaders(rows));
+      setConfirmReplace(false);
+      setEditing(false);
+      setRows([]);
+      await load();
+    } catch (e) {
+      setError(e);
+      setConfirmReplace(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doClear = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await teamCredentialsApi.remove(agentId);
+      setConfirmClear(false);
+      await load();
+    } catch (e) {
+      setError(e);
+      setConfirmClear(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="团队默认认证头"
+      style={{ position: "fixed", inset: 0, background: "rgba(10,16,28,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, overflow: "auto" }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="card" style={{ maxWidth: 560, margin: 20, width: "94vw", maxHeight: "88vh", overflow: "auto" }}>
+        <h3 className="mt-0">团队默认认证头（team #{agentId}）</h3>
+        <div className="alert info" style={{ fontSize: 13 }}>
+          团队默认认证头在<b>服务自身未配置凭证时自动生效</b>（网关回退）——改这里 = 所有未单独配置的服务一起换 key。
+        </div>
+
+        {loading ? (
+          <Spinner label="读取已配置头名…" />
+        ) : names == null ? null : names.length === 0 ? (
+          <div className="dim">尚未配置团队默认认证头。配置后，团队内未单独配凭证的服务将自动复用。</div>
+        ) : (
+          <div className="flex" style={{ marginBottom: 12 }}>
+            {names.map((n) => (
+              <span key={n} className="badge ok">{n} ✓</span>
+            ))}
+            <span className="dim">（仅头名，值不回显）</span>
+          </div>
+        )}
+
+        {!editing ? (
+          <div className="btn-row">
+            <button className="btn small" onClick={() => { setEditing(true); setRows([]); }}>更新凭证</button>
+            <button className="btn small danger" disabled={currentCount === 0 || busy} onClick={() => setConfirmClear(true)}>清除凭证</button>
+            <button className="btn small secondary" onClick={() => void load()}>刷新</button>
+          </div>
+        ) : (
+          <div>
+            <div className="alert warn" style={{ fontSize: 13 }}>
+              <b>全量替换语义</b>：保存时以这里的内容<b>完全替换</b>现有凭证——留空保存 = 清空全部；要保留的头必须重新填写（出于安全，旧值不回显）。
+            </div>
+            <CredentialHeadersEditor rows={rows} onChange={setRows} />
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button className="btn small" disabled={busy} onClick={() => setConfirmReplace(true)}>替换全部 {currentCount} 个头</button>
+              <button className="btn small secondary" onClick={() => setEditing(false)}>取消</button>
+            </div>
+          </div>
+        )}
+        {error != null && <ErrorBox error={error} />}
+
+        <div className="btn-row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+          <button className="btn secondary" onClick={onClose}>关闭</button>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmReplace}
+        title={`替换团队全部 ${currentCount} 个认证头`}
+        body={
+          <div>
+            将用编辑器里的 <b>{Object.keys(rowsToHeaders(rows)).length}</b> 个头完全替换团队 #{agentId} 现有的 {currentCount} 个默认认证头（留空保存即清空）。所有未单独配置凭证的服务将立即使用新头（网关约 60s 生效）。
+          </div>
+        }
+        confirmText="确认替换"
+        onConfirm={() => void doReplace()}
+        onCancel={() => setConfirmReplace(false)}
+      />
+      <ConfirmDialog
+        open={confirmClear}
+        title={`清空团队 ${currentCount} 个默认认证头`}
+        body={<div>将删除团队 #{agentId} 的全部默认认证头（不可恢复）。清除后，未单独配置的服务将不再携带认证头调用上游。</div>}
+        confirmText="确认清除"
+        onConfirm={() => void doClear()}
+        onCancel={() => setConfirmClear(false)}
+      />
+    </div>
+  );
+}
+
 /** Team 主页：聚合战绩卡 + 服务管理。 */
 export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBack: () => void; onPublish: (team: MyTeam) => void }) {
   const team = useAsync(() => teamsApi.detail(agentId), [agentId]);
+  const [teamCredOpen, setTeamCredOpen] = useState(false);
 
   return (
     <div className="card">
+      {teamCredOpen && (
+        <TeamCredentialsModal agentId={agentId} onClose={() => setTeamCredOpen(false)} />
+      )}
       <div className="flex" style={{ justifyContent: "space-between" }}>
         <button className="btn small secondary" onClick={onBack}>← 我的 Teams</button>
-        <button className="btn small" onClick={() => team.data && onPublish({ agent_id: agentId, display_name: team.data.team.display_name, claim_wallet: team.data.team.claim_wallet, service_count: team.data.services.length, created_at: team.data.team.created_at })}>
-          发布新服务
-        </button>
+        <div className="btn-row">
+          <button className="btn small secondary" onClick={() => setTeamCredOpen(true)} title="服务自身未配凭证时自动生效的默认头（网关回退）">
+            团队默认认证头
+          </button>
+          <button className="btn small" onClick={() => team.data && onPublish({ agent_id: agentId, display_name: team.data.team.display_name, claim_wallet: team.data.team.claim_wallet, service_count: team.data.services.length, created_at: team.data.team.created_at })}>
+            发布新服务
+          </button>
+        </div>
       </div>
 
       <AsyncSection state={team} empty="团队不存在">
