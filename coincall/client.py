@@ -15,6 +15,7 @@ import json
 import secrets
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -72,6 +73,7 @@ class Client:
         budget_raw: int | None = None,
         *,
         policy: PolicyConfig | PolicyEngine | None = None,
+        policy_state_dir: str | None = None,  # 隔离用：预算状态/账本目录（缺省 ~/.coincall）
         http: httpx.Client | None = None,
         auth_window_s: int = AUTH_WINDOW_S,
     ) -> None:
@@ -86,7 +88,12 @@ class Client:
         elif policy is not None:
             self.policy = PolicyEngine(policy)
         elif budget_raw is not None:
-            self.policy = PolicyEngine(PolicyConfig(total_budget_raw=budget_raw))
+            cfg0 = PolicyConfig(total_budget_raw=budget_raw)
+            if policy_state_dir:
+                base = Path(policy_state_dir)
+                cfg0.state_path = base / "spend_state.json"
+                cfg0.ledger_path = base / "ledger.jsonl"
+            self.policy = PolicyEngine(cfg0)
         else:
             self.policy = None
         self.auth_window_s = auth_window_s

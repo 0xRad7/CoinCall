@@ -216,7 +216,11 @@ def test_call_aborted_never_charges_budget() -> None:
 @pytest.mark.unit
 def test_budget_rejects_before_any_network_call() -> None:
     env = Env(lambda: httpx.Response(200, json={"ok": 1}, headers=RECEIPT_HEADERS))
-    c = env.client(budget_raw=15000)
+    import tempfile
+    from pathlib import Path
+
+    iso = Path(tempfile.mkdtemp())
+    c = env.client(budget_raw=15000, policy_state_dir=str(iso))
     c.call("svc_e2e_demo", {"text": "one"})
     assert c.spent_raw == 10000
     gateway_calls_after_first = len(env.gateway_requests)
