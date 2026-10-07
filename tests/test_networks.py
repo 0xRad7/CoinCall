@@ -8,12 +8,13 @@ ChainConnection 期望链断言与 RPC 端点解析（web3 provider 惰性构造
 import pytest
 from fake_chain import FakeChain
 
+from coincall.chain import ENV_RPC_PROXY, ChainConnection
 from coincall.chain import TOKEN_ADDRESS as CHAIN_TOKEN_SNAPSHOT
-from coincall.chain import ChainConnection
 from coincall.errors import CoinCallError, WalletError
 from coincall.networks import (
     ENV_CHAIN_ID,
     ENV_NETWORK,
+    ENV_PAY_VAULT,
     ENV_RPC_URL,
     ENV_TOKEN_ADDRESS,
     MAINNET,
@@ -26,7 +27,7 @@ from coincall.wallet import LocalWallet
 # anvil 账户 #1（公开助记词派生，测试网无价值）
 ANVIL1_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 
-NETWORK_ENVS = (ENV_NETWORK, ENV_CHAIN_ID, ENV_RPC_URL, ENV_TOKEN_ADDRESS)
+NETWORK_ENVS = (ENV_NETWORK, ENV_CHAIN_ID, ENV_RPC_URL, ENV_TOKEN_ADDRESS, ENV_PAY_VAULT)
 
 
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,12 +66,16 @@ def test_default_resolves_testnet(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.unit
 def test_network_table_values() -> None:
-    """主网参数锚点：BOT Chain 677 / rpc.botchain.ai / USDT 0xaBabc7…87a3C。"""
+    """主网参数锚点：BOT Chain 677 / rpc.botchain.ai / USDT 0xaBabc7…87a3C / 金库 0x39f9…1818。"""
     assert TESTNET.chain_id == 968
     assert MAINNET.chain_id == 677
     assert MAINNET.rpc_url == "https://rpc.botchain.ai/"
     assert MAINNET.token_address == "0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C"
     assert MAINNET.token_address != TESTNET.token_address
+    assert MAINNET.pay_vault == "0x39f9c91992BAfd1528ef87aFDf8B17b7b6cc1818"
+    assert MAINNET.pay_vault != TESTNET.pay_vault
+    # 测试网金库与 signing 历史缺省一致（向后兼容锚）
+    assert TESTNET.pay_vault == PAY_VAULT_ADDRESS
     # 测试网 token 与 chain.py 历史快照一致（向后兼容锚）
     assert TESTNET.token_address == CHAIN_TOKEN_SNAPSHOT
 
@@ -105,10 +110,12 @@ def test_field_overrides_win_over_table(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv(ENV_CHAIN_ID, "42")
     monkeypatch.setenv(ENV_RPC_URL, "https://private-rpc.example/")
     monkeypatch.setenv(ENV_TOKEN_ADDRESS, "0x00000000000000000000000000000000000000ff")
+    monkeypatch.setenv(ENV_PAY_VAULT, "0x" + "33" * 20)
     net = resolve_network()
     assert net.chain_id == 42
     assert net.rpc_url == "https://private-rpc.example/"
     assert net.token_address == "0x00000000000000000000000000000000000000ff"
+    assert net.pay_vault == "0x" + "33" * 20
     assert net.name == "testnet"  # 未覆写字段保持网络表缺省
 
 
@@ -148,6 +155,9 @@ def test_wallet_env_switches_to_mainnet_defaults(monkeypatch: pytest.MonkeyPatch
     w = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain())
     assert w.chain_id == 677
     assert w.token_address == MAINNET.token_address
+    assert w.pay_vault == MAINNET.pay_vault  # 金库随网络表切主网 0x39f9…（EIP-712 域正确）
+    wv = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain(), pay_vault="0x" + "11" * 20)
+    assert wv.pay_vault.endswith("11" * 20)  # 显式参数永远优先于 env/网络表
     # 显式参数永远优先于 env
     w2 = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain(), chain_id=968)
     assert w2.chain_id == 968
@@ -159,9 +169,11 @@ def test_wallet_env_switches_to_mainnet_defaults(monkeypatch: pytest.MonkeyPatch
 def test_wallet_field_env_overrides_apply(monkeypatch: pytest.MonkeyPatch) -> None:
     _clean_env(monkeypatch)
     monkeypatch.setenv(ENV_TOKEN_ADDRESS, "0x00000000000000000000000000000000000000ff")
+    monkeypatch.setenv(ENV_PAY_VAULT, "0x" + "22" * 20)
     w = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain())
     assert w.chain_id == 968  # 未覆写字段不变
     assert w.token_address == "0x00000000000000000000000000000000000000ff"
+    assert w.pay_vault == "0x" + "22" * 20  # 金库字段级 env 覆写生效
 
 
 @pytest.mark.unit
@@ -181,22 +193,41 @@ def test_sign_payment_on_mainnet_domain(monkeypatch: pytest.MonkeyPatch) -> None
     _clean_env(monkeypatch)
     monkeypatch.setenv(ENV_NETWORK, "mainnet")
     w = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain())
+    assert w.pay_vault == MAINNET.pay_vault  # 主网 env 下金库随网络表（0x39f9…）
     auth = Authorization(
         from_=w.address,
-        to=PAY_VAULT_ADDRESS,
+        to=w.pay_vault,
         value=10_000,
         valid_after=1,
         valid_before=601,
         nonce=b"\x07" * 32,
     )
     sig = w.sign_payment(auth)  # chain_id 缺省=钱包 chain_id=677
-    digest677 = eip712_digest(auth, PAY_VAULT_ADDRESS, 677)
+    digest677 = eip712_digest(auth, MAINNET.pay_vault, 677)
     assert recover_signer(digest677, v=sig.v, r=sig.r, s=sig.s) == w.address
-    # 域绑定：主网签名在测试网域上不可恢复（链 ID 进 domainSeparator）
+    # 域绑定：主网签名在测试网域（链 ID 与金库都不同）上不可恢复
     assert eip712_digest(auth, PAY_VAULT_ADDRESS, 968) != digest677
+    assert eip712_digest(auth, MAINNET.pay_vault, 968) != digest677
 
 
 # -- ChainConnection：期望链断言 + RPC 端点解析（provider 惰性，零网络） --
+
+
+@pytest.mark.unit
+def test_connection_rpc_proxy_explicit_optin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """C-07 延续：系统代理不劫持链 RPC；COINCALL_RPC_PROXY 显式逐用途开启才生效。"""
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9999")  # 系统级代理在场也必须被忽略
+    conn = ChainConnection()
+    sess = conn._w3.provider._request_session_manager._explicit_session
+    assert sess.trust_env is False
+    assert dict(sess.proxies) == {}
+
+    monkeypatch.setenv(ENV_RPC_PROXY, "http://127.0.0.1:7890")
+    conn_p = ChainConnection()
+    sess_p = conn_p._w3.provider._request_session_manager._explicit_session
+    assert sess_p.trust_env is False  # 仍不吃系统代理
+    assert sess_p.proxies == {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
 
 @pytest.mark.unit
