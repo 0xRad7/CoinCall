@@ -89,9 +89,43 @@ Agent → service_quote（报价+平台建议+安全评估，免费）
 - 内容安全：16 条确定性规则（泄露/投毒）探测时扫描 + advice 安全评估如实披露边界
 - 对账监控：`GET /internal/keeper/reconcile`（Charged ↔ settle_queue 四元组比对）
 
-## 主网（BOT Chain 677）
+## 主网（BOT Chain 677）—— 已切换 · 2026-10-08
 
-调研与切换 runbook：`coincall-docs/research/mainnet-readiness.md`（含 §0 红线：**主网模式下 AI 助手不得自主发起任何链上写操作，一切上链由发起人手动执行**）。四仓已参数化（env/VITE/网络表），部署走 `mainnet-deploy-keystore.sh`（keystore 直署 + 零地址断言 + 双重确认门）。
+### 当前合约信息（唯一事实源：`coincall-contracts/deployments/mainnet-677.json`）
+
+| 项 | 值 |
+|---|---|
+| **PayVault** | [`0x39f9c91992BAfd1528ef87aFDf8B17b7b6cc1818`](https://scan.botchain.ai/address/0x39f9c91992BAfd1528ef87aFDf8B17b7b6cc1818) |
+| 计价 USDT | `0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C`（链上 `vault.token()` 核验一致） |
+| operator | `0xb1ea3EA94e2Fd7Cb9244cD460dA863FC4b61033A`（bot-chain-api keystore 托管，私钥未出库） |
+| IdentityRegistry | `0xB43Edfb9C7609cF645e932B2fF20f26F0d4488dE`（官方既有） |
+| 部署交易 | [`0xed7c…29f2`](https://scan.botchain.ai/tx/0xed7cf89878fcf94da650995ce22d2bb67c51a174b5c747900016b0b10e3929f2) · 块 25878130 · gas 805,318 @20gwei（0.0161 BOT） |
+| DOMAIN_SEPARATOR | `0xdb23b412a34364764336b28e1b07adae8195809fa94aaa19f881aef834b7231c`（链上实读） |
+| 冒烟 | `pending-manual`（红线见下；人工最小冒烟：无签名单笔 chargeWithSigBatch 应 bad_signature 拒绝 + providerWithdraw 权限） |
+
+### 部署方式（keystore 直署，已发生过的流程存档）
+
+```bash
+# 前置：bot-chain-api .env 切主网（BOT_CHAIN_NETWORK=mainnet + BOT_CHAIN_ALLOW_MAINNET=1 + PROXY=http://127.0.0.1:7890）并重启
+./mainnet-deploy-keystore.sh   # 根目录执行：只读核验→F-02非零断言→dry-run预览→yes确认→keystore签名部署
+# 产物：coincall-contracts/deployments/mainnet-677.json（构造参数/DOMAIN_SEPARATOR 链上核验后归档）
+```
+
+### 四服务切换（env 清单——已生效，回滚=改回测试网值重启）
+
+| 服务 | 关键 env（值见上表） |
+|---|---|
+| bot-chain-api :8010 | `BOT_CHAIN_NETWORK=mainnet` + `BOT_CHAIN_ALLOW_MAINNET=1` + `PROXY`（主网模式自动拒载裸私钥，签名走 keystore） |
+| gateway :8030 | `COINCALL_PAY_VAULT_ADDRESS` / `COINCALL_PAYMENT_TOKEN_ADDRESS` / `COINCALL_CHAIN_ID=677` / `COINCALL_CHAIN_RPC_URL` / `COINCALL_KEEPER_OPERATOR_ADDRESS` / `COINCALL_KEEPER_CHAIN_MODE=api`（结算经 8010 keystore 签名，规避 DNS 污染） / `COINCALL_IDENTITY_REGISTRY_ADDRESS` |
+| core :8020 | **前缀是 `COINCALL_CORE_`**（≠gateway 前缀，易踩坑）：`_PAY_VAULT_ADDRESS` / `_PAY_VAULT_DEPLOY_BLOCK=25878130`（Charged 索引起点） / `_PLATFORM_CUSTODIAN_ADDRESS`；出网探测需 `HTTPS_PROXY` + `NO_PROXY=127.0.0.1,localhost` |
+| console :5173 | `VITE_CHAIN_ID=677` / `VITE_CHAIN_NAME` / `VITE_RPC_URL` / `VITE_EXPLORER_URL=scan.botchain.ai` / `VITE_PAY_VAULT` / `VITE_USDT`（改后重启 dev + 浏览器硬刷新） |
+| SDK / Agent | `COINCALL_NETWORK=mainnet`（网络表自动取 677/主网 RPC/主网 USDT） + `LocalWallet(pay_vault=0x39f9…)` 显式传入新金库 |
+
+已知混合状态：core DuckDB 保留测试网历史行（GMV/charged_count 为两网合计，主网新事件从 25878130 起计）；EIP-712 域已变——测试网时代的收据/授权全部失效，消费者需对新金库重新 approve。
+
+### 红线（mainnet-readiness.md §0）
+
+**主网模式下 AI 助手不得自主发起任何链上写操作**（部署/转账/approve/charge/身份注册），一切上链由发起人手动执行并核验；AI 允许：只读链上查询、代码配置准备、事后对账（`GET /internal/keeper/reconcile`）。
 
 ## 根仓结构说明
 
