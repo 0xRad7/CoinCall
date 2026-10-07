@@ -238,7 +238,9 @@ async def _forward_and_finalize(  # noqa: PLR0917 —— 单请求上下文参�
     upstream_headers = None
     if manifest.manifest.endpoint.type == "http_json":
         creds: UpstreamCredentialsClient = request.app.state.upstream_credentials
-        upstream_headers = await creds.get(manifest.service_id)
+        upstream_headers = await creds.get_for(
+            manifest.service_id, agent_id=manifest.manifest.provider.agent_id
+        )
 
     started = time.monotonic()
     try:
