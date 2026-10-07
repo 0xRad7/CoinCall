@@ -56,7 +56,7 @@ const CAPABILITIES: Array<{ no: string; title: string; tag: string; desc: string
   { no: "01", title: "AI Agents 一把钥匙", tag: "Single API Key, Pay-per-Request", desc: "一个 API Key 接入平台全部服务，按次付费，无需为每个服务单独注册与议价。", size: "lg" },
   { no: "02", title: "综合决策建议", tag: "平台公共服务", desc: "为 Agent 提供服务方的履约历史、安全评估、投毒检测等综合决策建议，报价内嵌 advice，选型有据可依。" },
   { no: "03", title: "链上信任底座", tag: "BOT Chain 生态", desc: "服务方身份注册（ERC-8004）、PayVault 支付托管合约交互，身份与资金流全程链上可核验。" },
-  { no: "04", title: "失败不扣款", tag: "后付费结算", desc: "Provider 未履约不结算，链上 Charged 事件是唯一计费真相，收据 Ed25519 签名可离线验证。", size: "wide" },
+  { no: "04", title: "调用即结算", tag: "失败不扣款", desc: "Provider 履约即链上结算，未履约不扣款；Charged 事件是唯一计费真相，收据 Ed25519 签名可离线验证。", size: "wide" },
 ];
 
 /** 副标题打字机文案（注入 data-text，便于以后配置化） */
