@@ -13,6 +13,7 @@ import hashlib
 import json
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -185,6 +186,21 @@ async def _admit_payment(
     request.state.wallet_balance_raw = verify.wallet_balance_raw or 0
     if not verify.ok:
         raise await _challenge(request, verify.code or "payment_rejected", verify.detail)
+
+    # 服务端咽喉卡口：按钱包日累计（绕过 SDK 直打也绕不过；0=关闭）
+    settings = request.app.state.settings
+    if settings.wallet_daily_cap_raw > 0:
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
+        spent_today = request.app.state.store.daily_spent_by_wallet(key_info.consumer_wallet, day)
+        if spent_today + int(price_raw) > settings.wallet_daily_cap_raw:
+            raise await _challenge(
+                request,
+                "wallet_daily_cap_exceeded",
+                f"钱包 {key_info.consumer_wallet[:10]}… 今日已累计 {spent_today / 1e6:.2f} USDT，"
+                f"加本笔 {int(price_raw) / 1e6:.2f} 将超过平台侧日上限 "
+                f"{settings.wallet_daily_cap_raw / 1e6:.0f} USDT"
+                "（服务端硬顶，绕过客户端策略也生效；如需提升请联系平台或明日再来）",
+            )
 
     onchain_limit = min(verify.wallet_balance_raw or 0, verify.wallet_allowance_raw or 0)
     decision = gate.try_acquire(key_info.key_id, int(price_raw), limit=onchain_limit)

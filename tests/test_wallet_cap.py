@@ -17,10 +17,10 @@ from tests.conftest import (
 pytestmark = pytest.mark.unit
 
 
-async def _call(client, text, nonce_hex):
+async def _call(client, text, nonce_hex, **pkw):
     return await client.post(
         "/call/svc_demo",
-        headers=call_headers(payment=make_x_payment_header(nonce=nonce_hex)),
+        headers=call_headers(payment=make_x_payment_header(value="300000", nonce=nonce_hex, **pkw)),
         json={"text": text},
     )
 
@@ -29,7 +29,14 @@ async def test_wallet_daily_cap_second_call_rejected(tmp_path):
     m = make_manifest(service_id="svc_demo")
     m.manifest.pricing.amount_raw = "300000"
     m.manifest.pricing.amount = "0.30"
-    settings = Settings(duckdb_path=str(tmp_path / "g.duckdb"))
+    from tests.conftest import CHAIN_ID, VAULT
+
+    settings = Settings(
+        duckdb_path=str(tmp_path / "g.duckdb"),
+        pay_vault_address=VAULT,
+        chain_id=CHAIN_ID,
+        wallet_daily_cap_raw=300000,  # 卡口=一笔价：第二笔必触
+    )
     async with gateway_serve(settings, manifests=FakeManifests({"svc_demo": m})) as (client, _app):
         r1 = await _call(client, "one", "0x" + "11" * 32)
         assert r1.status_code == 200, r1.text
@@ -37,14 +44,17 @@ async def test_wallet_daily_cap_second_call_rejected(tmp_path):
         assert r2.status_code == 402
         body = r2.json()
         assert body["code"] == "wallet_daily_cap_exceeded"
-        assert "日累计" in body["detail"]
+        assert "今日已累计" in body["detail"]
 
 
 async def test_cap_independent_per_wallet(tmp_path):
     m = make_manifest(service_id="svc_demo")
     m.manifest.pricing.amount_raw = "300000"
     m.manifest.pricing.amount = "0.30"
-    other_wallet = "0x" + "ee" * 20
+    from eth_keys import keys as _keys
+
+    other_key = _keys.PrivateKey(bytes.fromhex("ee" * 32))
+    other_wallet = other_key.public_key.to_checksum_address()
     from app.modules.auth import ApiKeyInfo
 
     auth = FakeAuth(
@@ -57,7 +67,14 @@ async def test_cap_independent_per_wallet(tmp_path):
             ),
         }
     )
-    settings = Settings(duckdb_path=str(tmp_path / "g.duckdb"))
+    from tests.conftest import CHAIN_ID, VAULT
+
+    settings = Settings(
+        duckdb_path=str(tmp_path / "g.duckdb"),
+        pay_vault_address=VAULT,
+        chain_id=CHAIN_ID,
+        wallet_daily_cap_raw=300000,  # 卡口=一笔价：第二笔必触
+    )
     async with gateway_serve(settings, auth=auth, manifests=FakeManifests({"svc_demo": m})) as (
         client,
         _app,
@@ -69,7 +86,12 @@ async def test_cap_independent_per_wallet(tmp_path):
             "/call/svc_demo",
             headers=call_headers(
                 api_key="cck_other",
-                payment=make_x_payment_header(from_addr=other_wallet, nonce="0x" + "55" * 32),
+                payment=make_x_payment_header(
+                    from_addr=other_wallet,
+                    value="300000",
+                    nonce="0x" + "55" * 32,
+                    signer=other_key,
+                ),
             ),
             json={"text": "x"},
         )

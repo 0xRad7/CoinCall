@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     duckdb_path: str = "data/gateway.duckdb"
     core_base_url: str = "http://127.0.0.1:8020"
     shadow_k: int = 3  # 02 §5c：同 key 在途笔数上限
+    # 服务端咽喉卡口（agent-wallet-trust T4 缓解）：按消费者钱包的日累计扣款上限。
+    # 绕过 SDK 直打网关也绕不过——一切扣款必经网关验签进 settle_queue。
+    # 默认 50 USDT（50_000_000 raw）：演示量级宽松、灾难量级封顶；0=关闭。
+    wallet_daily_cap_raw: int = 50_000_000
     # 接线事实源：coincall-contracts/deployments/testnet-968.json（tag d0-contracts-r1）
     pay_vault_address: str = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"
     chain_rpc_url: str = "https://rpc.bohr.life/"

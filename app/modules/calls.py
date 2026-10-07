@@ -186,6 +186,20 @@ class CallStore:
             "created_at": str(row[12]),
         }
 
+    def daily_spent_by_wallet(self, wallet: str, day: str) -> int:
+        """当日（UTC，YYYY-MM-DD）该钱包 success/settled 调用的扣款额之和。
+
+        服务端咽喉卡口用：绕过客户端策略的攻击者也无法绕过（一切扣款经网关落此表）。
+        """
+        rows = self.conn.execute(
+            "SELECT COALESCE(SUM(try_cast(amount_raw AS BIGINT)), 0) FROM calls "
+            "WHERE lower(consumer_wallet) = lower(?) "
+            "AND CAST(created_at AS VARCHAR) LIKE ? "
+            "AND status IN ('success', 'settled')",
+            [wallet, day + "%"],
+        ).fetchone()
+        return int(rows[0] if rows else 0)
+
     def find_by_idempotency(self, idempotency_key: str, service_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT call_id FROM calls WHERE idempotency_key = ? AND service_id = ? LIMIT 1",
