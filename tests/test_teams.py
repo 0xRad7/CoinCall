@@ -74,7 +74,9 @@ def test_prepare_mints_identity(tmp_path):
             request.url.path.endswith("/api/v1/agent-identity/register")
             and request.method == "POST"
         ):
-            return httpx.Response(200, json={"dry_run": False, "tx_hash": "0xabc", "status": 1})
+            return httpx.Response(
+                200, json={"dry_run": False, "tx_hash": "0xabc", "status": 1}, request=request
+            )
         if request.url.path.endswith("/register-result/0xabc"):
             return httpx.Response(
                 200,
@@ -85,8 +87,9 @@ def test_prepare_mints_identity(tmp_path):
                     "owner": "0xc37ffe97b4d2c3d0187b1ddedf273e52a461b63a",
                     "agent_wallet": "0xc37ffe97b4d2c3d0187b1ddedf273e52a461b63a",
                 },
+                request=request,
             )
-        return httpx.Response(404)
+        return httpx.Response(404, request=request)
 
     class FakeMintHttp:
         def post(self, url, json=None):
