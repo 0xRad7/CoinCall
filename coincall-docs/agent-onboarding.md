@@ -75,16 +75,16 @@ print(w.approve_vault('10'))   # 授权 10 USDT 额度给 PayVault（后续可�
   "mcpServers": {
     "coincall": {
       "command": "uv",
-      "args": ["run", "--from", "coincall-sdk", "python", "tools/mcp_server.py"],
+      "args": ["run", "--from", "coincall-sdk", "coincall-mcp"],
       "env": {
-        "COINCALL_API_KEY": "cck_你的key",
+        "COINCALL_API_KEY": "cck_你的key（可省——省略时自动读 ~/.coincall/apikey 0600 缓存）",
         "COINCALL_WALLET_KEY": "/Users/你/.coincall/wallet.key",
         "COINCALL_GATEWAY_URL": "http://127.0.0.1:8030",
         "COINCALL_CORE_URL": "http://127.0.0.1:8020",
         "COINCALL_TOTAL_BUDGET_RAW": "1000000",
         "COINCALL_DAILY_BUDGET_RAW": "200000",
         "COINCALL_PER_CALL_BUDGET_RAW": "50000",
-        "COINCALL_ALLOWED_SERVICES": "svc_rad_ai",
+        "COINCALL_ALLOWED_SERVICES": "binance_future_ai_increase_top_n",
         "COINCALL_MIN_INTERVAL_S": "2"
       }
     }
@@ -93,6 +93,7 @@ print(w.approve_vault('10'))   # 授权 10 USDT 额度给 PayVault（后续可�
 ```
 
 > 后五个 `BUDGET/ALLOWED` 变量是 **L0 安全护栏**（本地策略引擎）：总额/日额/单笔上限 + 服务白名单 + 最小调用间隔。私钥用**文件路径**（SDK 自己读 0600 文件），明文不进配置文件。
+> `COINCALL_API_KEY` 同理可省：机器上跑过一次接入引导（`ensure_api_key` / consumer_agent_v2）后，`~/.coincall/apikey`（0600）已缓存明文，MCP 自动回读——**宿主 json 里可以完全不放明文 key**。
 
 配好后重启宿主，Agent 的工具列表会出现 CoinCall 的 5 个工具（见下节）。
 
@@ -114,11 +115,11 @@ client = Client(
         total_budget_raw=1_000_000,     # 总额 1 USDT（10000 raw = 0.01 USDT）
         daily_budget_raw=200_000,
         max_per_call_raw=50_000,
-        allowed_service_ids=["svc_rad_ai"],
+        allowed_service_ids=["binance_future_ai_increase_top_n"],
     ),
 )
 
-result = client.call("svc_rad_ai", {"query": "BTC 走势"})
+result = client.call("binance_future_ai_increase_top_n", {"query": "BTC 走势"})
 print(result.body, result.receipt_id, result.charged_raw)
 ```
 
@@ -170,9 +171,9 @@ uvx --from coincall-sdk python skills/coincall-consumer/scripts/call.py status
 
 ```
 Agent: wallet_status → 余额 4.9 USDT / 授权 10 / 日额余 0.19
-Agent: catalog → [{svc_rad_ai, 0.01 USDT/次}]
-Agent: service_quote(svc_rad_ai) → 价格 0.01 + advice:{verb:"keep"} + 预算够
-Agent: paid_service_call(svc_rad_ai, {query:"BTC 走势"})
+Agent: catalog → [{binance_future_ai_increase_top_n, 0.01 USDT/次}]
+Agent: service_quote(binance_future_ai_increase_top_n) → 价格 0.01 + advice:{verb:"keep"} + 预算够
+Agent: paid_service_call(binance_future_ai_increase_top_n, {query:"BTC 走势"})
   └─ SDK 本地: L0 检查 ✓ → EIP-712 签名（钥不出进程）→ 网关验签→转发 Provider
   ← 结果 JSON + X-Receipt-Id + X-Charged-Raw=10000（此刻钱还没动）
 Agent: 汇报 "调用 RadAI 成功，花费 0.01 USDT，收据 rcp_xxx"
