@@ -24,23 +24,23 @@ import { humanizeError, labelField } from "../lib/errors";
 import { useAsync } from "../lib/useAsync";
 
 const STEPS = [
-  { key: "claim", label: "① 认领身份（绑定+登记）" },
+  { key: "teams", label: "① 我的 Teams" },
   { key: "publish", label: "② 发布服务" },
-  { key: "manage", label: "③ 我的服务" },
-  { key: "withdraw", label: "④ 提现" },
+  { key: "withdraw", label: "③ 提现" },
 ] as const;
 type StepKey = (typeof STEPS)[number]["key"];
 
 export default function ProviderWorkbench() {
-  const [step, setStep] = useState<StepKey>("claim");
+  const [step, setStep] = useState<StepKey>("teams");
   const [done, setDone] = useState<Record<string, boolean>>({});
   const goto = (k: StepKey, ok?: boolean) => {
     setStep(k);
     if (ok !== undefined) setDone((d) => ({ ...d, [step]: ok }));
   };
 
-  // 步骤间共享状态：认领结果（认证先行的锚点）
+  // 步骤间共享状态：当前团队（Teams 形态锚点）
   const [claimed, setClaimed] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(null);
+  const [teamPage, setTeamPage] = useState<number | null>(null); // Team 主页（第②层视图，非步骤）
 
   return (
     <div>
@@ -60,21 +60,29 @@ export default function ProviderWorkbench() {
         ))}
       </div>
 
-      {step === "claim" && (
-        <ClaimStep
-          initial={claimed}
-          onNext={(r) => {
-            setClaimed(r);
-            goto("publish", true);
+      {step === "teams" && (teamPage == null ? (
+        <MyTeamsStep
+          onOpenTeam={(id) => setTeamPage(id)}
+          onPublish={(t) => {
+            setClaimed({ agent_id: t.agent_id, display_name: t.display_name, wallet: t.claim_wallet ?? "" });
+            goto("publish");
           }}
         />
-      )}
-      {step === "publish" && <PublishStep claimed={claimed} onNext={() => goto("manage", true)} onBack={() => setStep("claim")} />}
-      {step === "manage" && (
-        <ManageStep
-          claimedAgentId={claimed?.agent_id ?? null}
+      ) : (
+        <TeamHome
+          agentId={teamPage}
+          onBack={() => setTeamPage(null)}
+          onPublish={(t) => {
+            setClaimed({ agent_id: t.agent_id, display_name: t.display_name, wallet: t.claim_wallet ?? "" });
+            goto("publish");
+          }}
+        />
+      ))}
+      {step === "publish" && (
+        <PublishStep
+          claimed={claimed}
           onNext={() => goto("withdraw", true)}
-          onBack={() => setStep("publish")}
+          onBack={() => setStep("teams")}
         />
       )}
       {step === "withdraw" && <WithdrawStep />}
@@ -436,7 +444,7 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
   if (!claimed) {
     return (
       <div className="card">
-        <WarnBox>请先完成第 ① 步认领（连接钱包 → 绑定+登记），发布表单会自动带上 Provider 信息与认领钱包。</WarnBox>
+        <WarnBox>请先从「我的 Teams」选择或创建一个团队——发布表单会自动带上团队信息与认领钱包。</WarnBox>
         <button className="btn secondary" onClick={onBack}>
           ← 回到登记
         </button>
@@ -450,7 +458,7 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
     <div className="card">
       <h3>发布服务（ServiceManifest 表单）</h3>
       <p className="card-desc">
-        Provider：agent_id={claimed.agent_id}「{claimed.display_name}」（认领钱包 {claimed.wallet.slice(0, 10)}…）
+        团队：{claimed.display_name}（team #{claimed.agent_id}，认领钱包 {claimed.wallet.slice(0, 10)}…）
         {identityWallet ? ` · 链上身份钱包 ${identityWallet.slice(0, 10)}…` : " · 正在读取链上身份钱包…"}
       </p>
 
@@ -493,6 +501,11 @@ export function PublishStep({ claimed, onNext, onBack }: { claimed: { agent_id: 
         )}
       </div>
 
+      <div className="field">
+        <label>所属团队</label>
+        <input type="text" value={`${claimed.display_name} · team #${claimed.agent_id}`} disabled readOnly aria-label="所属团队" />
+        <div className="help">团队由「我的 Teams」选择；发布后 provider.agent_id 自动指向该团队。</div>
+      </div>
       <div className="field">
         <label>服务 ID（全局唯一 slug）</label>
         <input type="text" className={fieldErr("service_id") ? "invalid" : ""} value={serviceId} placeholder="例如 svc_my_translate" onChange={(e) => setServiceId(e.target.value)} />
