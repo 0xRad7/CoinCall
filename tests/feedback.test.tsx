@@ -148,50 +148,26 @@ beforeEach(() => {
   localStorage.setItem("coincall.mode", "consumer"); // 守卫：已连接未选身份会被送回 /welcome
 });
 
-describe("调用后反馈", () => {
-  it("付费调用历史存新收据头（Sig-Ed25519/Ts）→ 点评价弹层 → 提交五元组+签名 → 已评价徽章", async () => {
+describe("评价入口已下线", () => {
+  it("调用历史无「评价」按钮、无「已评价」徽章、无评价弹层（决策层已移除反馈分量）", async () => {
     await payCall();
+    expect(screen.queryByRole("button", { name: "评价" })).toBeNull();
+    expect(screen.queryByText("已评价")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "评价服务" })).toBeNull();
+  });
 
-    // 历史条目落盘断言
+  it("收据签名头仍落历史（SDK 导出卡可能消费，不因入口下线丢失）", async () => {
+    await payCall();
     const hist = JSON.parse(localStorage.getItem("coincall.callHistory") ?? "[]") as Array<{ receiptSigEd?: string; receiptTs?: number }>;
     expect(hist[0]!.receiptSigEd).toBe("ed25519abcdef");
     expect(hist[0]!.receiptTs).toBe(1_791_300_000);
-
-    // 评价弹层
-    fireEvent.click(screen.getByRole("button", { name: "评价" }));
-    expect(await screen.findByRole("dialog", { name: "评价服务" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "5 星" }));
-    fireEvent.change(screen.getByLabelText("评价内容"), { target: { value: "翻译不错" } });
-    fireEvent.click(screen.getByRole("button", { name: "提交评价" }));
-
-    await waitFor(() => expect(screen.getByText("已评价")).toBeTruthy());
-    // 提交体断言：五元组（含 status=success 与 ts）+ 签名 + 星级 + 评论
-    const fb = calls.find((c) => c.url === "/api/core/feedback")!;
-    expect(JSON.parse(fb.body!)).toEqual({
-      service_id: "svc_t",
-      receipt: { receipt_id: "rcp_test123", service_id: "svc_t", amount_raw: "10000", status: "success", ts: 1_791_300_000, receipt_sig_hex: "ed25519abcdef" },
-      rating: 5,
-      comment: "翻译不错",
-    });
   });
 
-  it("409：该次调用已评价过（人话文案）", async () => {
-    feedbackStatus = 409;
-    await payCall();
-    fireEvent.click(screen.getByRole("button", { name: "评价" }));
-    fireEvent.click(await screen.findByRole("button", { name: "3 星" }));
-    fireEvent.click(screen.getByRole("button", { name: "提交评价" }));
-    expect(await screen.findByText(/该次调用已评价过/)).toBeTruthy();
-    expect(screen.queryByText("已评价")).toBeNull(); // 未标记
-  });
-
-  it("401：收据签名无效（人话文案）", async () => {
-    feedbackStatus = 401;
-    await payCall();
-    fireEvent.click(screen.getByRole("button", { name: "评价" }));
-    fireEvent.click(await screen.findByRole("button", { name: "1 星" }));
-    fireEvent.click(screen.getByRole("button", { name: "提交评价" }));
-    expect(await screen.findByText(/收据签名验证未通过/)).toBeTruthy();
+  it("源码级：RatingDialog 组件与 feedbackApi 引用已清除", () => {
+    const src = readFileSync(join(__dirname, "..", "src", "pages", "ConsumerWorkbench.tsx"), "utf-8");
+    expect(src).not.toContain("RatingDialog");
+    expect(src).not.toContain("feedbackApi");
+    expect(src).not.toContain('name: "评价"');
   });
 });
 
