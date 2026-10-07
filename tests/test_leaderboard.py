@@ -27,7 +27,14 @@ from tests.conftest import (
 #: 链上已知事实（2026-10-01 实测）：PayVault 部署块 25795948；
 #: 历史 Charged 8 笔共 10_070_000（provider 0xc37f…1 笔 10_000_000 + 0x3c44…7 笔）
 PAYVAULT_DEPLOY_BLOCK = 25_795_948
+#: fake 链历史总额（_chain_with_history 复刻测试网实测形态：大额 1 笔 + 小额 7 笔 ×10000）
 KNOWN_ONCHAIN_GMV = 10_070_000
+#: 已知链上 GMV 下限按金库地址登记（链上历史不可变只增不减；切网须同步维护本表）。
+#: 测试网 epoch2 = 8 笔 10_070_000；主网 677 = 1 笔 10_000（tx 0x322b…，2026-10-08 实测）
+KNOWN_ONCHAIN_GMV_BY_VAULT = {
+    "0xa6e82fd6648f9ea8f695c37edf89f2e5fdb89ff0": 10_070_000,
+    "0x39f9c91992bafd1528ef87afdf8b17b7b6cc1818": 10_000,
+}
 
 PROVIDER_BIG = "0xc37ffe97b4d2c3d0187b1ddedf273e52a461b63a"  # 单笔大额
 PROVIDER_3C44 = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"  # 多笔小额
@@ -65,6 +72,7 @@ def _client(
     min_interval: float = 0.0,
 ) -> TestClient:
     settings = Settings(
+        _env_file=None,  # 单元全隔离：不读开发机 .env（主网覆盖值会渗入断言）
         duckdb_path=str(tmp_path / "core.duckdb"),
         pay_vault_deploy_block=PAYVAULT_DEPLOY_BLOCK,
         leaderboard_min_sync_interval=min_interval,
@@ -318,5 +326,10 @@ class TestGmvMatchesOnchainLive:
             direct_http.close()
             assert ov["gmv_raw"] == total, f"GMV {ov['gmv_raw']} != 链上 Charged 总和 {total}"
             assert ov["charged_count"] == count
-            # 链上历史下限（2026-10-01 实测 8 笔 10_070_000，历史不可变只增不减）
-            assert ov["gmv_raw"] >= KNOWN_ONCHAIN_GMV
+            # 链上历史下限（历史不可变只增不减；按金库分网登记，未知金库=切网未维护本表）
+            floor = KNOWN_ONCHAIN_GMV_BY_VAULT.get(settings.pay_vault_address.lower())
+            assert floor is not None, (
+                f"金库 {settings.pay_vault_address} 未登记 KNOWN_ONCHAIN_GMV_BY_VAULT——"
+                "切网时须同步实测登记"
+            )
+            assert ov["gmv_raw"] >= floor

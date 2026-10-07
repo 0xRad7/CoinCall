@@ -17,7 +17,7 @@ OTHER = "0x2222222222222222222222222222222222222222"
 def _client(tmp_path, known=None):
     with TestClient(
         create_app(
-            Settings(duckdb_path=str(tmp_path / "core.duckdb")),
+            Settings(_env_file=None, duckdb_path=str(tmp_path / "core.duckdb")),  # 单元隔离
             identity_client=FakeIdentityClient(known={137: CUSTODIAN} if known is None else known),
         )
     ) as c:
@@ -91,7 +91,7 @@ def test_register_bypasses_identity_cache(tmp_path):
     fake.calls.clear()
     with TestClient(
         create_app(
-            Settings(duckdb_path=str(tmp_path / "core.duckdb")),
+            Settings(_env_file=None, duckdb_path=str(tmp_path / "core.duckdb")),  # 单元隔离
             identity_client=fake,
         )
     ) as c:
