@@ -460,7 +460,7 @@ def stats_overview(request: Request) -> OverviewResponse:
 
 @router.get("/leaderboard/providers/{wallet}/proof", response_model=ProofResponse)
 def provider_proof(wallet: str, request: Request) -> ProofResponse:
-    """链上 proof（06 §4）：该 provider 全部 Charged 交易哈希清单（scan.bohr.life 可核）。"""
+    """链上 proof（06 §4）：该 provider 全部 Charged 交易哈希清单（基址=当前网络浏览器）。"""
     normalized = wallet.lower()
     if not normalized.startswith("0x") or len(normalized) != WALLET_HEX_LEN:
         raise ApiError(
