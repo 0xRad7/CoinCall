@@ -1273,12 +1273,12 @@ async function fetchRevenueSummary(wallet: string): Promise<RevenueSummary> {
   let totalRaw = 0n;
   let creditsRaw = 0n;
   let chargedCount = 0;
-  const walletSet = new Set<string>();
+  const walletSet = new Set<string>(); // 小写归一去重（revenue.wallets 与 manifest.wallet 大小写不一）
   for (const d of details) {
     if (!d) continue;
     totalRaw += BigInt(d.revenue.total_raw);
     chargedCount += d.revenue.charged_count;
-    for (const w of d.revenue.wallets) walletSet.add(w);
+    for (const w of d.revenue.wallets) walletSet.add(w.toLowerCase());
     for (const s of d.services) if (s.manifest.provider.wallet) walletSet.add(s.manifest.provider.wallet.toLowerCase());
   }
   const wallets = [...walletSet];

@@ -211,7 +211,11 @@ describe("Team 主页", () => {
     expect(await screen.findByText("RadAI")).toBeTruthy();
     expect(screen.getByText("0.02")).toBeTruthy(); // 收入
     expect(screen.getByText(/2 笔 Charged/)).toBeTruthy();
-    expect(screen.getByText("3✓/0✗ · p95 4961ms · 1 支付者")).toBeTruthy();
+    // 服务表逐格断言（新列布局）
+    const row = document.querySelector('table[aria-label="团队服务表"] tbody tr')!;
+    expect(row.textContent).toContain("RadAI Report");
+    expect(row.textContent).toContain("757ms"); // p50
+    expect(screen.getAllByText("4961ms").length).toBeGreaterThanOrEqual(1); // p95（表+汇总卡）
     expect(screen.getByText("★4.5")).toBeTruthy();
     expect(screen.getByRole("button", { name: "发布新服务" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "← 我的 Teams" })).toBeTruthy();
