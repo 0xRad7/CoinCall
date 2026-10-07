@@ -30,6 +30,10 @@ class TeamPrepareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str = Field(min_length=1, max_length=128)
+    origin: str | None = Field(
+        default=None,
+        description="控制台访问源（http/https）；构造内网可达的链上 agentURI，缺省回退占位域",
+    )
 
 
 def _store(request: Request) -> CoreStore:
@@ -60,11 +64,20 @@ def team_prepare(body: TeamPrepareRequest, request: Request) -> dict[str, Any]:
     """
     http: httpx.Client = request.app.state.mint_http
     base = request.app.state.app_settings.bot_chain_api_base_url.rstrip("/")
+    origin = (body.origin or "").rstrip("/")
+    if origin and not origin.startswith(("http://", "https://")):
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail="origin 必须 http/https",
+            code="invalid_origin",
+        )
+    agent_uri = f"{origin}/#/provider" if origin else "https://coincall.local/#/provider"
     try:
         resp = http.post(
             f"{base}/api/v1/agent-identity/register",
             json={
-                "agent_uri": f"https://coincall.local/teams/{body.display_name}",
+                "agent_uri": agent_uri,
                 "dry_run": False,
             },
         )
