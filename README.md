@@ -116,3 +116,31 @@ uv run pytest -q -m needs_funds                                # 真实付费端
 
 见 `CONSTRAINTS.md`（私钥不出机器 / 签名独立实现 / 零网络单测 / trust_env=False /
 静态三连门禁 / 分型提交）；子智能体入口见 `AGENTS.md`。
+
+
+## Agent 资金安全（L0 策略引擎）
+
+Agent 持钥的五条资金风险中，SDK 内置本地策略引擎拦截失控循环/金额滥用/目标限面/不可追溯（完整威胁模型见 coincall-docs/design/agent-wallet-trust.md）：
+
+```python
+from coincall.policy import PolicyConfig
+
+c = Client(
+    api_key="cck_…",
+    wallet=wallet,
+    policy=PolicyConfig(
+        total_budget_raw=1_000_000,  # 总额硬顶（0.01 USDT=10000 raw）
+        daily_budget_raw=200_000,  # 日额（UTC 日界自动重置）
+        max_per_call_raw=50_000,  # 单笔上限
+        allowed_service_ids=["svc_rad_ai"],  # 服务白名单（默认拒绝）
+        min_interval_s=2.0,  # 最小调用间隔
+        max_calls_per_hour=60,  # 小时速率
+    ),
+)
+```
+
+- **预算状态落盘** `~/.coincall/spend_state.json`（0600 原子写）——重启不清零；
+- **审计账本** `~/.coincall/ledger.jsonl` 只追加三段（intent→receipt→onchain），与平台流水、链上 Charged 三方可对账；
+- **触底自动只读**（catalog 可看、付费拒绝）；`policy_state_dir` 参数可隔离多实例；
+- MCP 环境变量：`COINCALL_{TOTAL,DAILY,PER_CALL}_BUDGET_RAW`、`COINCALL_ALLOWED_SERVICES`、`COINCALL_MIN_INTERVAL_S`、`COINCALL_MAX_CALLS_PER_HOUR`（旧 `COINCALL_BUDGET_RAW` 兼容映射总额）；
+- 诚实边界：密钥被进程级窃取属本地持钥范式上限——**专用小额钱包**控制爆炸半径（像零钱包一样对待它）。
