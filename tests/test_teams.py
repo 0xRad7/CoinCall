@@ -93,7 +93,7 @@ def test_prepare_mints_identity(tmp_path):
 
     class FakeMintHttp:
         def post(self, url, json=None):
-            calls.append(("POST", {"url": url}))
+            calls.append(("POST", {"url": url, "json": json}))
             return handler(httpx.Request("POST", url))
 
         def get(self, url):
