@@ -387,7 +387,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .wl-fade.d6 { animation-delay: 0.7s; }
 
 /* Hero：大标题（字体内部「双向流光」渐变）+ 正下方 mono 打字机副标题（JS 驱动，▌光标常驻）+ 锚点 CTA；底部微弱径向光晕 */
-.wl-hero { position: relative; isolation: isolate; text-align: left; padding: clamp(14px, 3vh, 44px) 0 clamp(12px, 2.5vh, 34px); }
+.wl-hero { position: relative; isolation: isolate; text-align: left; padding: clamp(12px, 2.5vh, 38px) 0 clamp(10px, 2vh, 28px); }
 .wl-hero::after { content: ""; position: absolute; left: -10%; bottom: -30%; width: 90%; max-width: 780px; height: 75%; background: radial-gradient(ellipse at center, rgba(45, 212, 191, 0.12) 0%, rgba(59, 130, 246, 0.05) 45%, transparent 70%); pointer-events: none; z-index: -1; }
 .wl-hero h1 { margin: 0; font-size: clamp(38px, 6.2vw, 58px); font-weight: 700; line-height: 1.08; letter-spacing: -0.02em; color: #f2f5fb; }
 /* 一级标题流光：background-position 110% ↔ -110% 往返（6s alternate）；
@@ -415,7 +415,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .wl-caps { margin-top: 2px; padding-top: clamp(12px, 2.5vh, 34px); scroll-margin-top: 72px; }
 
 /* 品牌页脚 */
-.wl-footer { display: flex; align-items: center; justify-content: center; gap: 8px; padding: clamp(6px, 1.2vh, 14px) 0 0; font-size: 12px; color: #6b7488; letter-spacing: 0.02em; }
+.wl-footer { display: flex; align-items: center; justify-content: center; gap: 8px; padding: clamp(4px, 1vh, 10px) 0 0; font-size: 12px; color: #6b7488; letter-spacing: 0.02em; }
 .wl-footer-brand { font-weight: 600; color: #8b93a3; }
 .wl-footer-sep { color: #3d4557; }
 .wl-sec-title { display: flex; align-items: center; gap: 10px; margin: 0 0 clamp(10px, 1.6vh, 18px); font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: #e6e9ef; }
