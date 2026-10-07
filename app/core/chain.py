@@ -5,8 +5,10 @@ web3 实例装配 POA 中间件（bot-chain-api C-04 教训：本链 extraData 2
 单测经 _raw_call 注入 mock，零网络；live 冒烟见 tests/test_chain.py::test_live_balanceof_once。
 """
 
+import os
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from web3 import AsyncHTTPProvider, AsyncWeb3
 from web3.middleware import ExtraDataToPOAMiddleware
@@ -27,7 +29,22 @@ class BotChainAdapter:
 
     def _ensure_w3(self) -> AsyncWeb3:
         if self._w3 is None:
-            w3 = AsyncWeb3(AsyncHTTPProvider(self._rpc_url))
+            # aiohttp 不读系统代理（与 requests 不同）——DNS 污染环境（本机）访问
+            # rpc.botchain.ai 必须显式传 proxy。从 HTTPS_PROXY 取；NO_PROXY 内的地址（测试网
+            # rpc.bohr.life 本身可直连）由调用侧不设代理即可——此处按 URL 域判断是否适用。
+            proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+            no_proxy = (os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "").lower()
+            host = (urlsplit(self._rpc_url).hostname or "").lower()
+            needs_proxy = bool(proxy_url) and not any(
+                host == np.strip() or host.endswith("." + np.strip())
+                for np in no_proxy.split(",")
+                if np.strip()
+            )
+            provider = AsyncHTTPProvider(
+                self._rpc_url,
+                request_kwargs={"proxy": proxy_url} if needs_proxy else {},
+            )
+            w3 = AsyncWeb3(provider)
             w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)  # C-04：POA 装配
             self._w3 = w3
         return self._w3
