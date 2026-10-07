@@ -1,5 +1,6 @@
 /** 帮助页：三服务与本页面的关系图（纯 CSS）、常见错误码人话表、私钥安全声明。 */
 import { InfoBox, WarnBox } from "../components/ui";
+import { PageHeader } from "../components/shell";
 
 const ERRORS: Array<{ code: string; http: string; who: string; human: string; next: string }> = [
   { code: "missing_api_key", http: "402", who: "网关", human: "调用没带 X-Api-Key", next: "到「消费端工作台 → API key」签发并保存，再调用。" },
@@ -17,8 +18,15 @@ const ERRORS: Array<{ code: string; http: string; who: string; human: string; ne
 export default function Help() {
   return (
     <div>
-      <h1 className="page-title">帮助</h1>
-      <p className="page-sub">这套系统怎么串起来、报错了怎么办、私钥安全边界在哪里。</p>
+      <PageHeader
+        title="帮助"
+        sub="这套系统怎么串起来、报错了怎么办、私钥安全边界在哪里。"
+        actions={
+          <a className="btn small secondary" href="https://scan.bohr.life" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+            区块浏览器 ↗
+          </a>
+        }
+      />
 
       <div className="card">
         <h3>三个服务与控制台的关系</h3>
