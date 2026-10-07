@@ -5,10 +5,12 @@ V1 内置两种：
 - HttpJsonProvider：httpx POST manifest.endpoint.url（真实外联属 W4 接线）。
 """
 
+import ipaddress
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -75,14 +77,45 @@ def _query_params(body: Any) -> dict[str, Any]:
 
 PROVIDER_2XX_BASE = 2  # 2xx 判定基数
 
+# ---- SSRF 护栏（api-security-probe.md L0-1/L0-2；与 core probe 端点同源规则）----
+
+
+def _guard_forward_url(url: str, *, allow_loopback: bool) -> str:
+    """转发目标守卫：仅 https（公网）+ 拒私网/回环/链路本地/保留地址。
+
+    - httpx 默认 certifi CA + hostname 校验 → 自签/过期/域不匹配在 https 下天然被拒；
+    - http:// 仅允许回环（本机 demo 服务），且需显式 allow_loopback（env 开关）；
+    - 私网/保留地址无条件拒绝（防 Provider 借网关 SSRF 打内网服务）。
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    try:
+        ip = ipaddress.ip_address(host)
+        is_ip_literal = True
+    except ValueError:
+        is_ip_literal = False
+
+    if is_ip_literal and (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved):
+        if allow_loopback and ip.is_loopback:
+            return url
+        raise ProviderError(f"SSRF 护栏：私网/回环地址禁止转发（{host}）")
+    if host in ("localhost",) or host.endswith(".local"):
+        if allow_loopback:
+            return url
+        raise ProviderError(f"SSRF 护栏：回环域名禁止转发（{host}）")
+    if parsed.scheme != "https" and not (allow_loopback and parsed.scheme == "http"):
+        raise ProviderError("SSRF 护栏：仅允许 https:// 端点（明文 http 需回环+显式开关）")
+    return url
+
 
 class HttpJsonProvider:
     """http_json 型端点：POST JSON → JSON，超时按 manifest（硬顶 60s 在 core 校验）。"""
 
     name = "http-json"
 
-    def __init__(self, http: httpx.AsyncClient) -> None:
+    def __init__(self, http: httpx.AsyncClient, *, allow_loopback: bool = False) -> None:
         self.http = http
+        self.allow_loopback = allow_loopback
 
     async def forward(
         self,
@@ -92,6 +125,7 @@ class HttpJsonProvider:
     ) -> ProviderResult:
         if not manifest.manifest.endpoint.url:
             raise ProviderError("manifest.endpoint.url 缺失")
+        _guard_forward_url(manifest.manifest.endpoint.url, allow_loopback=self.allow_loopback)
         timeout_s = manifest.manifest.endpoint.timeout_ms / 1000
         started = time.monotonic()
         try:

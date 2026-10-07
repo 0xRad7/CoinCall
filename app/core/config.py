@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # 绕过 SDK 直打网关也绕不过——一切扣款必经网关验签进 settle_queue。
     # 默认 50 USDT（50_000_000 raw）：演示量级宽松、灾难量级封顶；0=关闭。
     wallet_daily_cap_raw: int = 50_000_000
+    # SSRF 护栏回环例外（api-security-probe L0-2）：默认关；本机 demo http 服务时置 1
+    allow_loopback_providers: bool = False
     # 接线事实源：coincall-contracts/deployments/testnet-968.json（tag d0-contracts-r1）
     pay_vault_address: str = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"
     chain_rpc_url: str = "https://rpc.bohr.life/"

@@ -155,7 +155,9 @@ def create_app(
                 core_base_url=app_settings.core_base_url,
                 pay_vault=app_settings.pay_vault_address,
             ),
-            "http_json": HttpJsonProvider(app.state.http),
+            "http_json": HttpJsonProvider(
+                app.state.http, allow_loopback=app_settings.allow_loopback_providers
+            ),
         }
         app.state.providers = dict(providers) if providers else default_providers
         idempotency: dict[tuple[str, str], dict[str, object]] = {}
