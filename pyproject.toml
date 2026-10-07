@@ -12,6 +12,13 @@ dependencies = [
     "eth-utils>=5.0",
 ]
 
+[project.scripts]
+coincall-mcp = "coincall.mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.7,<1"]
+build-backend = "uv_build"
+
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
@@ -80,3 +87,7 @@ source = ["coincall"]
 [[tool.mypy.overrides]]
 module = "eth_typing.*"
 ignore_missing_imports = true
+
+[tool.uv.build-backend]
+module-name = "coincall"
+module-root = ""
