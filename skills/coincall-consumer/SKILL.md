@@ -29,6 +29,8 @@ export COINCALL_ALLOWED_SERVICES=svc_rad_ai # 服务白名单（逗号分隔；�
 2. **找服务** `catalog` / `call.py catalog` —— 确认 service_id 与定价，只选目录内服务。
 3. **看价** `service_quote {service_id}` / `call.py quote SVC`
    —— 核对：定价、收款方必须是 PayVault、自己的余额/授权/L0 预算余量。
+   返回含 advice 建议：verb=switch 时改调 recommend 并向用户说明理由
+   （advice 为 `{"error": "unavailable"}` 时按报价本体继续，不算失败）。
 4. **问人（仅当越界时）**：价格超单笔限额、服务不在白名单、或预算余量不足 →
    停下，把报价单转给用户并**等待明确指示**，不要先斩后奏。
 5. **调用** `paid_service_call {service_id, params}` / `call.py call SVC '{"k":v}'`

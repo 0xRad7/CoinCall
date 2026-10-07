@@ -13,7 +13,6 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 
@@ -47,14 +46,31 @@ ADVICE_INSUFFICIENT = {
 
 
 class _AdviceServer:
-    """回环 /advice 假件：类属性 advice_json 控制响应。"""
+    """回环 /advice 假件：每个实例独立 advice_json/requests（handler 闭包持有实例）。"""
 
-    advice_json: ClassVar[dict] = ADVICE_SWITCH
-    requests: ClassVar[list[str]] = []
+    def __init__(self, advice_json: dict) -> None:
+        self.advice_json = advice_json
+        self.requests: list[str] = []
+        owner = self
 
-    def __init__(self) -> None:
-        handler = _make_handler(type(self))
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                owner.requests.append(self.path)
+                if self.path.startswith("/advice"):
+                    body = json.dumps(owner.advice_json).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, *args: object) -> None:  # 静音（测试输出清洁）
+                return
+
+        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self._httpd.server_address[1]
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._thread.start()
@@ -66,27 +82,6 @@ class _AdviceServer:
     def stop(self) -> None:
         self._httpd.shutdown()
         self._httpd.server_close()
-
-
-def _make_handler(owner: type) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            owner.requests.append(self.path)
-            if self.path.startswith("/advice"):
-                body = json.dumps(owner.advice_json).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-        def log_message(self, *args: object) -> None:  # 静音（测试输出清洁）
-            return
-
-    return Handler
 
 
 def _run_hook(
@@ -120,9 +115,8 @@ def _hook_output(proc: subprocess.CompletedProcess[str]) -> dict:
 
 def test_hook_enforce_switch_denies_and_names_recommend() -> None:
     """ENFORCE=1 + verb=switch → deny，理由点名 recommend 服务（强制听劝演示）。"""
-    server = _AdviceServer()
+    server = _AdviceServer(ADVICE_SWITCH)
     try:
-        server.advice_json = ADVICE_SWITCH
         proc = _run_hook(PAID_CALL_PAYLOAD, server, enforce="1")
         out = _hook_output(proc)
         spec = out["hookSpecificOutput"]
@@ -137,9 +131,8 @@ def test_hook_enforce_switch_denies_and_names_recommend() -> None:
 
 def test_hook_enforce_insufficient_denies() -> None:
     """ENFORCE=1 + verb=insufficient_data（风险场景）→ deny，防数据不足时盲付。"""
-    server = _AdviceServer()
+    server = _AdviceServer(ADVICE_INSUFFICIENT)
     try:
-        server.advice_json = ADVICE_INSUFFICIENT
         proc = _run_hook(PAID_CALL_PAYLOAD, server, enforce="1")
         spec = _hook_output(proc)["hookSpecificOutput"]
         assert spec["permissionDecision"] == "deny"
@@ -151,9 +144,8 @@ def test_hook_enforce_insufficient_denies() -> None:
 
 def test_hook_default_mode_injects_context_but_never_denies_or_allows() -> None:
     """默认（无 ENFORCE）：只注入 additionalContext——绝不 deny、也绝不 auto-allow 付费调用。"""
-    server = _AdviceServer()
+    server = _AdviceServer(ADVICE_SWITCH)
     try:
-        server.advice_json = ADVICE_SWITCH
         proc = _run_hook(PAID_CALL_PAYLOAD, server)  # 不设 ENFORCE
         spec = _hook_output(proc)["hookSpecificOutput"]
         assert "permissionDecision" not in spec  # 不越权改判（allow 会绕过人审）
@@ -165,7 +157,7 @@ def test_hook_default_mode_injects_context_but_never_denies_or_allows() -> None:
 
 def test_hook_non_paid_tool_passes_through_silently() -> None:
     """非 paid_service_call 工具：静默放行（空 stdout、exit 0、不打 /advice）。"""
-    server = _AdviceServer()
+    server = _AdviceServer(ADVICE_SWITCH)
     try:
         proc = _run_hook({"tool_name": "catalog", "tool_input": {}}, server, enforce="1")
         assert proc.returncode == 0
