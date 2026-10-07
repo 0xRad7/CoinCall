@@ -4,7 +4,9 @@ import base64
 import json
 
 import pytest
+from eth_keys import keys
 
+from app.modules.auth import ApiKeyInfo
 from app.modules.providers import ProviderError
 from tests.conftest import (
     API_KEY,
@@ -298,9 +300,57 @@ async def test_idempotency_replay_same_body(settings: object) -> None:
         assert first.status_code == second.status_code == 200
         assert first.json() == second.json()
         assert first.headers["X-Receipt-Id"] == second.headers["X-Receipt-Id"]
+        assert second.headers["X-Idempotency-Replay"] == "1"
+        assert "X-Idempotency-Replay" not in first.headers
         # 幂等重放不双计：一条流水一条 settle
         assert app.state.store.conn.execute("SELECT count(*) FROM calls").fetchone()[0] == 1
         assert len(app.state.store.pending_settles(limit=10)) == 1
+
+
+async def test_idempotency_key_scoped_by_wallet(settings: object) -> None:
+    """跨钱包同幂等键同参数 = 两笔独立购买，不得回放他人旧收据。
+
+    2026-10-07 线上事故：SDK 默认幂等键=hash(service_id+params) 跨钱包相同，
+    第二个钱包的调用被网关回放第一个钱包的旧响应——新签名未消费、链上不扣款、
+    消费端却收到「200+收据」。缓存键必须含消费钱包。
+    """
+    other_key = keys.PrivateKey(bytes.fromhex("ee" * 32))
+    other_wallet = other_key.public_key.to_checksum_address()
+    auth = FakeAuth(
+        keys_by_key={
+            API_KEY: ApiKeyInfo(
+                key_id="key_unit1", consumer_wallet=CONSUMER_WALLET, quota_raw=None, status="active"
+            ),
+            "sk_other": ApiKeyInfo(
+                key_id="key_unit2", consumer_wallet=other_wallet, quota_raw=None, status="active"
+            ),
+        }
+    )
+    async with gateway_serve(settings, auth=auth) as (client, app):  # type: ignore[arg-type]
+        first = await client.post(
+            "/call/svc_translate_v1",
+            headers=call_headers(
+                payment=make_x_payment_header(nonce="0x" + "2a" * 32), idempotency="same-key"
+            ),
+            json={"text": "same"},
+        )
+        second = await client.post(
+            "/call/svc_translate_v1",
+            headers=call_headers(
+                api_key="sk_other",
+                payment=make_x_payment_header(
+                    nonce="0x" + "2b" * 32, signer=other_key, from_addr=other_wallet
+                ),
+                idempotency="same-key",
+            ),
+            json={"text": "same"},
+        )
+        assert first.status_code == second.status_code == 200
+        assert "X-Idempotency-Replay" not in second.headers
+        assert first.headers["X-Receipt-Id"] != second.headers["X-Receipt-Id"]
+        # 两笔真实调用：两条流水两条 settle（各自签名各自上链扣款）
+        assert app.state.store.conn.execute("SELECT count(*) FROM calls").fetchone()[0] == 2
+        assert len(app.state.store.pending_settles(limit=10)) == 2
 
 
 async def test_idempotency_conflict_different_body(settings: object) -> None:

@@ -134,11 +134,16 @@ def _validate_schema(manifest: ManifestInfo, body: Any) -> None:
 
 
 def _idempotency_replay(
-    request: Request, service_id: str, key: str, body: Any
+    request: Request, service_id: str, consumer_wallet: str, key: str, body: Any
 ) -> JSONResponse | None:
-    """步骤④：同 body → 上次结果；不同 body → 409。"""
-    idempotency: dict[tuple[str, str], dict[str, Any]] = request.app.state.idempotency
-    hit = idempotency.get((service_id, key))
+    """步骤④：同钱包同 body → 上次结果（防重试双扣）；不同 body → 409。
+
+    缓存键含消费钱包：幂等只对「同一钱包的重试」生效——换钱包带同键是新一笔购买，
+    不得回放他人的旧收据（否则签名未被消费、链上永不扣款，消费端却显示已付费）。
+    回放响应带 X-Idempotency-Replay: 1，客户端与日志可分辨。
+    """
+    idempotency: dict[tuple[str, str, str], dict[str, Any]] = request.app.state.idempotency
+    hit = idempotency.get((service_id, consumer_wallet.lower(), key))
     if hit is None:
         return None
     if hit["body_hash"] != _body_hash(body):
@@ -148,11 +153,13 @@ def _idempotency_replay(
             detail="同 Idempotency-Key 但请求体不同",
             code="idempotency_conflict",
         )
-    replay: dict[str, Any] = hit
+    replay: dict[str, Any] = dict(hit)
+    replay_headers = dict(replay["headers"])
+    replay_headers["X-Idempotency-Replay"] = "1"
     return JSONResponse(
         status_code=replay["status_code"],
         content=replay["body"],
-        headers=replay["headers"],
+        headers=replay_headers,
     )
 
 
@@ -307,8 +314,8 @@ async def _forward_and_finalize(  # noqa: PLR0917 —— 单请求上下文参�
         "X-Receipt-Sig-Ed25519": signer.sign_receipt(receipt),
     }
     if idempotency_key:
-        idempotency: dict[tuple[str, str], dict[str, Any]] = request.app.state.idempotency
-        idempotency[(manifest.service_id, idempotency_key)] = {
+        idempotency: dict[tuple[str, str, str], dict[str, Any]] = request.app.state.idempotency
+        idempotency[(manifest.service_id, key_info.consumer_wallet.lower(), idempotency_key)] = {
             "body_hash": _body_hash(body),
             "status_code": result.status_code,
             "body": result.body,
@@ -329,9 +336,11 @@ async def call_service(service_id: str, request: Request) -> JSONResponse:
     request.state.manifest = manifest
     # ③ schema 校验（不合规不计费）
     _validate_schema(manifest, body)
-    # ④ 幂等（24h 保留，02 §6）
+    # ④ 幂等（24h 保留，02 §6）——键含消费钱包：仅同钱包重试可重放
     if idempotency_key:
-        replayed = _idempotency_replay(request, service_id, idempotency_key, body)
+        replayed = _idempotency_replay(
+            request, service_id, key_info.consumer_wallet, idempotency_key, body
+        )
         if replayed is not None:
             return replayed
     # ⑤ 支付验证 + 影子闸门 + inflight 流水
