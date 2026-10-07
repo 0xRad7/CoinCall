@@ -23,6 +23,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TextIO
 
+from coincall.policy import PolicyConfig
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coincall.client import DEFAULT_CORE_URL, DEFAULT_GATEWAY_URL, CallResult, Client
@@ -37,7 +39,21 @@ ENV_API_KEY = "COINCALL_API_KEY"
 ENV_GATEWAY_URL = "COINCALL_GATEWAY_URL"
 ENV_CORE_URL = "COINCALL_CORE_URL"
 ENV_WALLET_KEY = "COINCALL_WALLET_KEY"
+
+
+def _policy_from_env() -> PolicyConfig:
+    """L0 策略 env 装配（agent-wallet-trust §3）：三重预算/白名单/速率。"""
+    return PolicyConfig.from_env()
+
+
 ENV_BUDGET_RAW = "COINCALL_BUDGET_RAW"
+
+# L0 策略引擎（agent-wallet-trust.md §3）：三重预算/白名单/速率，经 Client 生效
+ENV_POLICY_DAILY = "COINCALL_DAILY_BUDGET_RAW"
+ENV_POLICY_PER_CALL = "COINCALL_PER_CALL_BUDGET_RAW"
+ENV_POLICY_ALLOWED = "COINCALL_ALLOWED_SERVICES"
+ENV_POLICY_MIN_INTERVAL = "COINCALL_MIN_INTERVAL_S"
+ENV_POLICY_MAX_HOURLY = "COINCALL_MAX_CALLS_PER_HOUR"
 
 TOOLS_SPEC: list[dict[str, Any]] = [
     {
@@ -78,12 +94,15 @@ def build_client_from_env() -> Client:
     budget_raw: int | None = None
     if os.environ.get(ENV_BUDGET_RAW, ""):
         budget_raw = int(os.environ[ENV_BUDGET_RAW])
+    policy = _policy_from_env()
+    policy.total_budget_raw = policy.total_budget_raw or budget_raw  # BUDGET_RAW 兼容映射总额
     return Client(
         api_key=os.environ.get(ENV_API_KEY, ""),
         wallet=wallet,
         gateway_url=os.environ.get(ENV_GATEWAY_URL, DEFAULT_GATEWAY_URL),
         core_url=os.environ.get(ENV_CORE_URL, DEFAULT_CORE_URL),
         budget_raw=budget_raw,
+        policy=policy,
     )
 
 
