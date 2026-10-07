@@ -19,27 +19,13 @@ import { AmountInput } from "../components/AmountInput";
 import { IdentityRegister } from "../components/IdentityRegister";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { JsonEditor } from "../components/JsonEditor";
-import { AsyncSection, Badge, ConfirmDialog, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
+import { AsyncSection, Badge, ConfirmDialog, Empty, ErrorBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { EvidencePair, PageHeader, StatCard } from "../components/shell";
 import { humanizeError, labelField } from "../lib/errors";
 import { useAsync } from "../lib/useAsync";
 import { useMode } from "../state/ModeContext";
 
-const STEPS = [
-  { key: "teams", label: "① 我的 Teams" },
-  { key: "publish", label: "② 发布服务" },
-  { key: "withdraw", label: "③ 提现" },
-] as const;
-type StepKey = (typeof STEPS)[number]["key"];
-
 export default function ProviderWorkbench() {
-  const [step, setStep] = useState<StepKey>("teams");
-  const [done, setDone] = useState<Record<string, boolean>>({});
-  const goto = (k: StepKey, ok?: boolean) => {
-    setStep(k);
-    if (ok !== undefined) setDone((d) => ({ ...d, [step]: ok }));
-  };
-
   // 身份只能由 /welcome 选择卡设定：已连接但未选身份 → 送回选择页（禁止直达替用户选择）
   const { mode } = useMode();
   const pw = useWallet();
@@ -53,62 +39,62 @@ export default function ProviderWorkbench() {
   }, [needsChoice]);
   if (needsChoice) return null;
 
-  // 步骤间共享状态：当前团队（Teams 形态锚点）
-  const [claimed, setClaimed] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(null);
-  const [teamPage, setTeamPage] = useState<number | null>(null); // team 主页（第②层视图，非步骤）
+  // 仪表盘三层：收入 Grid → 我的 Teams → Team 下钻；发布为覆盖层
+  const [publishing, setPublishing] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(null);
+  const [teamPage, setTeamPage] = useState<number | null>(null);
+
+  const startPublish = (t: { agent_id: number; display_name: string; claim_wallet?: string | null }) => {
+    setPublishing({ agent_id: t.agent_id, display_name: t.display_name, wallet: t.claim_wallet ?? "" });
+  };
+
+  if (publishing) {
+    return (
+      <div>
+        <PageHeader
+          mode="provider"
+          title="发布新服务"
+          sub={
+            <span>
+              团队 <b>{publishing.display_name}</b>（team #{publishing.agent_id}）· 收款钱包默认 = 认领钱包
+            </span>
+          }
+          actions={
+            <button className="btn secondary" onClick={() => setPublishing(null)}>
+              ← 返回仪表盘
+            </button>
+          }
+        />
+        <PublishStep
+          claimed={publishing}
+          onNext={() => setPublishing(null)}
+          onBack={() => setPublishing(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div>
       <PageHeader
         mode="provider"
-        title="Provider 工作台"
-        sub="把「登记身份 → 发布服务 → 收款」的五步接入流程变成点击流。所有上链动作都有二次确认与交易外链。"
+        title="Provider 仪表盘"
+        sub="收入总览 → 我的 Teams → 团队下钻。所有上链动作都有二次确认与交易外链。"
       />
 
-      <div className="wizard-steps">
-        {STEPS.map((s) => (
-          <button
-            key={s.key}
-            className={`wizard-step${step === s.key ? " active" : ""}${done[s.key] ? " done" : ""}`}
-            onClick={() => setStep(s.key)}
-          >
-            <span className="n">{done[s.key] ? "✓" : STEPS.findIndex((x) => x.key === s.key) + 1}</span>
-            {s.label}
-          </button>
-        ))}
-      </div>
+      <RevenueGrid onWithdrawn={undefined} />
 
-      {step === "teams" && (teamPage == null ? (
+      {teamPage == null ? (
         <MyTeamsStep
           onOpenTeam={(id) => setTeamPage(id)}
-          onPublish={(t) => {
-            setClaimed({ agent_id: t.agent_id, display_name: t.display_name, wallet: t.claim_wallet ?? "" });
-            goto("publish");
-          }}
+          onPublish={startPublish}
         />
       ) : (
         <TeamHome
           agentId={teamPage}
           onBack={() => setTeamPage(null)}
-          onPublish={(t) => {
-            setClaimed({ agent_id: t.agent_id, display_name: t.display_name, wallet: t.claim_wallet ?? "" });
-            goto("publish");
-          }}
-        />
-      ))}
-      {step === "publish" && (
-        <PublishStep
-          claimed={claimed}
-          onNext={() => goto("withdraw", true)}
-          onBack={() => setStep("teams")}
+          onPublish={startPublish}
         />
       )}
-      {step === "withdraw" && <WithdrawStep />}
-
-      <InfoBox>
-        步骤说明：①②③ 为主流程（登记 → 发布 → 运营）；④⑤ 为进阶（链上身份钱包绑定与提现），绑定身份钱包是发布 http_json
-        服务前的收款前提。顶部步骤条可随时回跳，已填内容在同页会话内保留。
-      </InfoBox>
     </div>
   );
 }
