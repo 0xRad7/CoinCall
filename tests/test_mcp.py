@@ -1,8 +1,8 @@
-"""T19：MCP server 暴露 catalog / paid_service_call 两工具（03 §6）。
+"""T19：MCP server 暴露五工具 catalog/service_quote/paid_service_call/spend_report/wallet_status。
 
-标准 client 语义覆盖：initialize 握手 → tools/list → tools/call（成功/402 指引）；
-HTTP 侧复用 test_client 的 MockTransport 装配（A2 零网络）；
-另含真实 stdio 子进程冒烟（仅握手+列工具，不触网）。
+标准 client 语义覆盖：initialize 握手 → tools/list → tools/call（成功/402 指引/
+新三只读工具）；HTTP 侧复用 test_client 的 MockTransport 装配（A2 零网络），
+链侧经 FakeChain 注入；另含真实 stdio 子进程冒烟（仅握手+列工具，不触网）。
 """
 
 import io
@@ -14,14 +14,18 @@ from pathlib import Path
 
 import httpx
 import pytest
-from test_client import ANVIL1_KEY, CATALOG, RECEIPT_HEADERS
+from fake_chain import FakeChain
+from test_client import ANVIL1_ADDR, ANVIL1_KEY, CATALOG, RECEIPT_HEADERS
 
 from coincall.client import DEFAULT_CORE_URL, DEFAULT_GATEWAY_URL, Client
 from coincall.errors import CoinCallError
+from coincall.policy import PolicyConfig
 from coincall.wallet import LocalWallet
 from tools.mcp_server import PROTOCOL_VERSION, CoinCallMcpServer, build_client_from_env
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+FIVE_TOOLS = ["catalog", "service_quote", "paid_service_call", "spend_report", "wallet_status"]
 
 
 def _mock_http() -> httpx.Client:
@@ -33,16 +37,21 @@ def _mock_http() -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler), trust_env=False)
 
 
-def _server() -> CoinCallMcpServer:
-    """工厂注入 mock 客户端的 server。"""
+def _server(
+    wallet: LocalWallet | None = None,
+    policy: PolicyConfig | None = None,
+    http: httpx.Client | None = None,
+) -> CoinCallMcpServer:
+    """工厂注入 mock 客户端的 server（wallet/policy 可注入新三工具的用例）。"""
 
     def factory() -> Client:
         return Client(
             api_key="cck_test",
-            wallet=LocalWallet.from_key(ANVIL1_KEY),
+            wallet=wallet if wallet is not None else LocalWallet.from_key(ANVIL1_KEY),
             gateway_url="http://gw.test",
             core_url="http://core.test",
-            http=_mock_http(),
+            http=http or _mock_http(),
+            policy=policy,
         )
 
     return CoinCallMcpServer(factory)
@@ -72,14 +81,19 @@ def test_initialize_handshake() -> None:
 
 
 @pytest.mark.unit
-def test_list_tools_exposes_exactly_two_tools() -> None:
+def test_list_tools_exposes_exactly_five_tools() -> None:
     server = _server()
     result = _result(server.handle_request(_request("tools/list")) or {})
     names = [tool["name"] for tool in result["tools"]]
-    assert names == ["catalog", "paid_service_call"]
-    paid = result["tools"][1]
+    assert names == FIVE_TOOLS
+    paid = result["tools"][2]
     assert paid["inputSchema"]["required"] == ["service_id", "params"]
     assert paid["inputSchema"]["properties"]["params"]["type"] == "object"
+    # 使用纪律写死在 description 里（consumer-agent-interface §2：Agent 读描述学规矩）
+    assert "付费动作" in paid["description"] and "不要自动重试" in paid["description"]
+    assert "service_quote" in paid["description"]
+    quote = result["tools"][1]
+    assert quote["inputSchema"]["required"] == ["service_id"]
 
 
 @pytest.mark.unit
@@ -166,6 +180,139 @@ def test_unknown_tool_and_method_error_codes() -> None:
     assert resp["error"]["code"] == -32601
 
 
+# -- 新三只读工具：service_quote / wallet_status / spend_report（决策闭环） --
+
+
+def _policy(tmp_path: Path) -> PolicyConfig:
+    return PolicyConfig(
+        total_budget_raw=50000,
+        daily_budget_raw=20000,
+        max_per_call_raw=10000,
+        state_path=tmp_path / "s.json",
+        ledger_path=tmp_path / "l.jsonl",
+    )
+
+
+@pytest.mark.unit
+def test_tool_service_quote_price_balance_budget(tmp_path: Path) -> None:
+    wallet = LocalWallet.from_key(
+        ANVIL1_KEY, chain=FakeChain(balance_raw=20000, allowance_raw=15000)
+    )
+    server = _server(wallet=wallet, policy=_policy(tmp_path))
+    result = _result(
+        server.handle_request(
+            _request("tools/call", name="service_quote", arguments={"service_id": "svc_e2e_demo"})
+        )
+        or {}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["service_id"] == "svc_e2e_demo"
+    assert payload["pricing"]["amount_raw"] == "10000" and payload["price_raw"] == 10000
+    assert payload["payee"] == wallet.pay_vault  # 收款方锁死 PayVault
+    assert payload["wallet"]["usdt_balance_raw"] == 20000
+    assert payload["wallet"]["vault_allowance_raw"] == 15000
+    assert payload["wallet"]["available_raw"] == 15000
+    assert payload["affordable_by_wallet"] is True
+    assert payload["budget"]["total_left_raw"] == 50000
+    assert payload["affordable_by_budget"] is True
+    assert payload["hints"] == []
+
+
+@pytest.mark.unit
+def test_tool_service_quote_unknown_service_iserror() -> None:
+    server = _server()
+    result = _result(
+        server.handle_request(
+            _request("tools/call", name="service_quote", arguments={"service_id": "svc_missing"})
+        )
+        or {}
+    )
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "svc_missing" in text and "catalog" in text  # 人话指引而非裸 JSON
+
+
+@pytest.mark.unit
+def test_tool_service_quote_low_balance_hints(tmp_path: Path) -> None:
+    wallet = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain(balance_raw=0, allowance_raw=0))
+    server = _server(wallet=wallet, policy=_policy(tmp_path))
+    result = _result(
+        server.handle_request(
+            _request("tools/call", name="service_quote", arguments={"service_id": "svc_e2e_demo"})
+        )
+        or {}
+    )
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["affordable_by_wallet"] is False
+    assert any("mint" in h for h in payload["hints"])  # 余额 0 → 水龙头指引
+    assert any("approve" in h for h in payload["hints"])  # 授权 0 → approve 指引
+
+
+@pytest.mark.unit
+def test_tool_wallet_status_zero_balance_hints(tmp_path: Path) -> None:
+    wallet = LocalWallet.from_key(ANVIL1_KEY, chain=FakeChain(balance_raw=0, allowance_raw=0))
+    server = _server(wallet=wallet, policy=_policy(tmp_path))
+    result = _result(
+        server.handle_request(_request("tools/call", name="wallet_status", arguments={})) or {}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["address"] == ANVIL1_ADDR
+    assert payload["chain_id"] == wallet.chain_id
+    assert payload["usdt_balance_raw"] == 0 and payload["vault_allowance_raw"] == 0
+    assert "mint" in payload["hint_fund_wallet"]  # 水龙头人话
+    assert "approve_vault" in payload["hint_approve_vault"]
+    assert payload["policy"]["daily_budget_raw"] == 20000
+    assert "hint_no_wallet" not in payload
+
+
+@pytest.mark.unit
+def test_tool_wallet_status_no_wallet_hint() -> None:
+    server = _server(wallet=None)
+    result = _result(
+        server.handle_request(_request("tools/call", name="wallet_status", arguments={})) or {}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["address"] is None
+    assert "COINCALL_WALLET_KEY" in payload["hint_no_wallet"]
+    assert payload["policy"] is None  # 未装配 L0 时如实报告
+
+
+@pytest.mark.unit
+def test_tool_spend_report_summary_and_recent(tmp_path: Path) -> None:
+    server = _server(policy=_policy(tmp_path))
+    client = server.client()
+    assert client.policy is not None
+    client.policy.check("svc_e2e_demo", 10000)  # 记一笔预算
+    rid = client.policy.record_intent("svc_e2e_demo", 10000, auth_nonce="0x" + "ab" * 32)
+    client.policy.record_receipt(rid, "rcp_x", charged_raw=10000)
+
+    result = _result(
+        server.handle_request(_request("tools/call", name="spend_report", arguments={})) or {}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["policy"]["total_spent_raw"] == 10000
+    assert payload["policy"]["total_left_raw"] == 40000
+    assert payload["recent"][0]["stage"] == "receipt"  # 最新在前
+    assert payload["recent"][0]["gateway_receipt"] == "rcp_x"
+    assert payload["spent_in_session_raw"] == 0  # 本次进程未成功调用
+
+
+@pytest.mark.unit
+def test_tool_spend_report_without_policy_hint() -> None:
+    server = _server()
+    result = _result(
+        server.handle_request(_request("tools/call", name="spend_report", arguments={})) or {}
+    )
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["policy"] is None
+    assert "COINCALL_" in payload["hint_no_policy"]  # 告诉用户怎么开 L0
+    assert payload["recent"] == []
+
+
 @pytest.mark.unit
 def test_notification_and_ping() -> None:
     server = _server()
@@ -192,7 +339,7 @@ def test_stdio_serve_round_trip() -> None:
     assert len(lines) == 3  # notification 不回帧；坏行回 -32700
     assert lines[0]["id"] == 7 and lines[0]["result"]["serverInfo"]["name"] == "coincall-mcp"
     assert lines[1]["error"]["code"] == -32700
-    assert lines[2]["id"] == 8 and len(lines[2]["result"]["tools"]) == 2
+    assert lines[2]["id"] == 8 and len(lines[2]["result"]["tools"]) == 5
 
 
 @pytest.mark.unit
@@ -253,4 +400,4 @@ def test_subprocess_stdio_list_tools() -> None:
     lines = [json.loads(line) for line in proc.stdout.splitlines()]
     tools_frame = next(line for line in lines if line.get("id") == 2)
     names = [tool["name"] for tool in tools_frame["result"]["tools"]]
-    assert names == ["catalog", "paid_service_call"]
+    assert names == FIVE_TOOLS
