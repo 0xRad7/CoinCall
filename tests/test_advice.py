@@ -200,6 +200,16 @@ class TestAdviceVerbs:
             assert body["recommend"] == "svc_hi"
             assert body["margin"] == pytest.approx(0.8709, abs=1e-3)
             assert "较你选的" not in body["reason"]
+            # 信息面锚（2026-10-07 需求）：advice 自带量化依据与安全评估，Agent 无需二跳
+            assert body["signals"]["service_id"] == "svc_hi"
+            assert body["signals"]["fulfillment"]["success_rate"] is not None
+            assert "p95_ms" in body["signals"]["fulfillment"]
+            assert body["signals"]["revenue"]["charged_count"] >= 0
+            sec = body["security"]
+            assert "ERC-8004" in sec["provider_identity"]
+            assert "Charged" in sec["billing_truth"]
+            assert sec["service_status"] == "active"
+            assert sec["notes"] and "暂未覆盖" in sec["notes"][-1]
 
     def test_keep_single_service_partition(self, tmp_path: Path) -> None:
         """同分区唯一服务且 current 即它 → keep、margin 无次名可比 = null。"""

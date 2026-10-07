@@ -700,6 +700,31 @@ class AdviceAlternative(BaseModel):
     why: str = Field(description="同模板取一条最显著差异；无命中→综合分差")
 
 
+class AdviceSignals(BaseModel):
+    """建议对象的量化依据（同一引擎 components 的直接投影；Agent 可向用户转述）。"""
+
+    service_id: str
+    score: float
+    revenue: dict[str, object] = Field(description="链上收入：charged_count/distinct_payers/total")
+    fulfillment: dict[str, object] = Field(
+        description="履约历史：success_rate/p95_ms/calls_success/calls_aborted/window_hours"
+    )
+    freshness: dict[str, object] = Field(description="新鲜度：age_h/last_activity_at")
+
+
+class AdviceSecurity(BaseModel):
+    """平台安全评估（只陈述已核验事实；未覆盖维度在 notes 明确披露，不伪造结论）。"""
+
+    provider_identity: str = Field(description="链上身份（ERC-8004 agent_id）状态人话")
+    payee_binding: str = Field(description="收款地址与身份绑定状态人话")
+    billing_truth: str = Field(description="计费真相：链上 Charged 可核验")
+    fulfillment_anchor: str = Field(
+        description="履约数据摘要的链上锚定状态（无锚定=窗口未到，非异常）"
+    )
+    service_status: str = Field(description="服务当前状态（active/paused）")
+    notes: list[str] = Field(default_factory=list, description="已核验项与未覆盖维度")
+
+
 class AdviceResponse(BaseModel):
     """极简判定式（Agent 只需读 verb + reason 即可行动；证据退为二级指针）。"""
 
@@ -724,6 +749,14 @@ class AdviceResponse(BaseModel):
     )
     as_of: str
     category: str | None = None
+    signals: AdviceSignals | None = Field(
+        default=None,
+        description="recommend 的量化依据（三信号具体值；insufficient_data 时 None）",
+    )
+    security: AdviceSecurity | None = Field(
+        default=None,
+        description="平台安全评估（链上身份/收款绑定/计费真相/履约锚定/服务状态 + 披露）",
+    )
 
 
 def _advice_signal_segments(rec: DecisionRow, cmp: DecisionRow | None) -> list[str]:
@@ -800,6 +833,61 @@ def _fmt_ratio(value: float) -> str:
     """占比 → 定点串（4 位小数去尾零）：0.05→"0.05"、0.2→"0.2"。"""
     text = f"{value:.4f}".rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _advice_signals(rec: DecisionRow) -> AdviceSignals:
+    """三信号量化投影：Agent 无需二跳 /decision/explain 即可转述依据。"""
+    f = rec.components.fulfillment
+    r = rec.components.revenue
+    return AdviceSignals(
+        service_id=rec.service_id,
+        score=rec.score,
+        revenue={
+            "charged_count": r.charged_count,
+            "distinct_payers": r.distinct_payers,
+            "total": r.total,
+        },
+        fulfillment={
+            "success_rate": f.success_rate,
+            "p95_ms": f.p95_ms,
+            "calls_success": f.calls_success,
+            "calls_aborted": f.calls_aborted,
+            "window_hours": f.window_hours,
+        },
+        freshness={
+            "age_h": rec.components.freshness.age_h,
+            "last_activity_at": rec.components.freshness.last_activity_at,
+        },
+    )
+
+
+def _advice_security(rec: DecisionRow) -> AdviceSecurity:
+    """安全评估投影：只陈述已核验事实；未覆盖维度显式披露（不伪造扫描结论）。"""
+    f = rec.components.fulfillment
+    anchor_tx = (f.proof or {}).get("anchor_tx")
+    return AdviceSecurity(
+        provider_identity=(
+            f"链上身份 #{rec.provider_agent_id}（ERC-8004）已注册"
+            if rec.provider_agent_id
+            else "无链上身份 tokenId（发布时未绑定）"
+        ),
+        payee_binding=(
+            f"收款地址 {rec.provider_wallet[:10]}… 与身份绑定（收入直进 provider 钱包）"
+            if rec.provider_agent_id
+            else f"收款地址 {rec.provider_wallet[:10]}…（未绑定链上身份，请核实）"
+        ),
+        billing_truth="计费以链上 Charged 事件为唯一真相（收入证明端点可核）",
+        fulfillment_anchor=(
+            f"履约数据摘要已锚定上链（tx {str(anchor_tx)[:18]}…）"
+            if anchor_tx
+            else "履约数据摘要尚未锚定（锚定窗口未到，非异常）"
+        ),
+        service_status=rec.status,
+        notes=[
+            "已核验：链上身份注册 / 收款绑定 / 链上计费 / 履约锚定 / 服务状态",
+            "暂未覆盖：上游内容投毒扫描、响应数据泄露检测（probe 层设计项，未接入决策）",
+        ],
+    )
 
 
 @router.get("/advice", response_model=AdviceResponse)
@@ -881,4 +969,6 @@ def advice(
         evidence=f"/decision/explain/{top.service_id}",
         as_of=as_of_dt.isoformat(),
         category=partition,
+        signals=_advice_signals(top),
+        security=_advice_security(top),
     )
