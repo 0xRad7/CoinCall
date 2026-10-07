@@ -39,11 +39,15 @@ code, .mono { font-family: var(--font-mono); font-size: var(--fs-13); }
 .app-shell { display: flex; min-height: 100vh; }
 .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
-/* 顶栏钱包 chip */
-.wallet-bar { display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-5); background: var(--surface); border-bottom: 1px solid var(--border); min-height: 46px; }
+/* 顶栏钱包 chip（标准 header：钱包簇右对齐贴右上角） */
+.wallet-bar { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); padding: 10px var(--space-5); background: var(--surface); border-bottom: 1px solid var(--border); min-height: 46px; }
+.wallet-cluster { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); flex-wrap: wrap; }
 .wallet-addr { font-size: var(--fs-13); color: var(--success); font-weight: 600; }
 .wallet-bar .badge { cursor: default; }
 .wallet-bar button.badge { cursor: pointer; }
+@media (max-width: 900px) {
+  .wallet-bar { flex-wrap: wrap; }
+}
 
 /* 一次性演示钱包（兜底，强隔离） */
 .demo-box { border: 2px dashed var(--danger); border-radius: var(--radius); padding: var(--space-4); background: var(--danger-soft); }
