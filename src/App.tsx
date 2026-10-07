@@ -11,7 +11,7 @@ import { useWallet } from "./state/WalletContext";
  * 动线：/welcome（登录+选身份单页）→ /provider | /consumer（双工作台）；
  * / 总览为公共目录+决策视图（两端共用）——未连接默认落 /welcome，「先逛逛」(?browse=1) 可免连进入。
  */
-function RootIndex() {
+export function RootIndex() {
   const w = useWallet();
   const [params] = useSearchParams();
   const browse = params.get("browse") === "1";
