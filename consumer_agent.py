@@ -52,6 +52,21 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("'").strip('"'))
 
 
+def wallet_source_label() -> str:
+    """钱包来源标注：路径原样 / 内联私钥只说"内联"（不回显任何私钥片段）+ 派生公开地址（完整）。"""
+    src = os.environ.get("COINCALL_WALLET_KEY", "").strip()
+    if not src:
+        return "未配置——只能浏览，无法付费（设置 COINCALL_WALLET_KEY=0x私钥 或 0600 文件路径）"
+    kind = src if os.path.isfile(src) else "内联 0x 私钥（不回显）"
+    try:
+        sys.path.insert(0, str(SDK_DIR))
+        from coincall.wallet import LocalWallet
+
+        return f"{kind} → 地址 {LocalWallet.from_key(src).address}"
+    except Exception as exc:  # noqa: BLE001 —— 标注失败要给出人话而非崩溃
+        return f"{kind}（⚠ 地址解析失败：{exc}——检查是否合法 0x+64hex 私钥 / 0600 文件）"
+
+
 def bootstrap_api_key() -> str:
     """平台 api key：env → 0600 文件 → 向 core 签发（请求只带公开地址，不带任何秘密）。
 
@@ -232,10 +247,10 @@ def digest(name: str, text: str, is_error: bool) -> str:
     if name == "paid_service_call":
         receipt = str(d.get("receipt_id") or "-")
         return (f"✅ status={d.get('status_code')} ｜ 扣款 {_usdt(d.get('charged_raw'))} USDT"
-                f" ｜ 收据 {receipt[:18]}{'…' if len(receipt) > 18 else ''}"
+                f" ｜ 收据 {receipt}"
                 f"（Ed25519 回执签名已验）")
     if name == "wallet_status":
-        return (f"地址 {str(d.get('address'))[:12]}… ｜ USDT 余额 {_usdt(d.get('usdt_balance_raw'))}"
+        return (f"地址 {d.get('address')} ｜ USDT 余额 {_usdt(d.get('usdt_balance_raw'))}"
                 f" ｜ PayVault 授权 {_usdt(d.get('vault_allowance_raw'))}")
     if name == "spend_report":
         policy = d.get("policy") or {}
@@ -369,7 +384,7 @@ def main() -> None:
     print("琢信 CoinCall · Consumer Agent CLI（全真实流程：LLM + MCP + 链上付费）")
     print(LINE)
     host = llm.base_url.split("//")[-1].split("/")[0]
-    print(f"[0] 装配：LLM={llm.model} @ {host} ｜ 钱包={'已配置（COINCALL_WALLET_KEY）' if os.environ.get('COINCALL_WALLET_KEY') else '未配置——只能浏览，无法付费'}")
+    print(f"[0] 装配：LLM={llm.model} @ {host} ｜ 钱包={wallet_source_label()}")
 
     mcp = McpClient()
     agent = Agent(mcp, llm)
@@ -391,7 +406,7 @@ def main() -> None:
               f"支出 {_usdt(agent.spend_raw)} USDT ｜ 收据 {len(agent.receipts)} 张 ｜ "
               f"失败 {agent.n_failed_paid} 次（失败不扣款）")
         if agent.receipts:
-            print(f"  收据号：{', '.join(r[:16] + '…' for r in agent.receipts)}")
+            print(f"  收据号：{', '.join(agent.receipts)}")
         print(LINE)
     finally:
         mcp.close()
