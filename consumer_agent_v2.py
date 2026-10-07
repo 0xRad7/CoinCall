@@ -88,7 +88,7 @@ def system_prompt() -> str:
     if SKILL_FILE.exists():
         skill = SKILL_FILE.read_text()
         return (
-            "你是接入「琢信 CoinCall」平台的 Consumer Agent。以下是平台消费纪律"
+            "你是接入「CoinCall」平台的 Consumer Agent。以下是平台消费纪律"
             "（coincall-consumer skill，唯一事实源），严格遵守：\n\n"
             f"{skill}\n\n"
             "补充（宿主运行时约定）：回答用中文；基于工具返回的真实数据并引用关键数字；"
@@ -154,7 +154,7 @@ def main() -> None:
     ensure_api_key(wallet)  # 平台层引导：env → 0600 文件 → core 签发（明文只落盘一次）
 
     print(LINE)
-    print("琢信 CoinCall · Consumer Agent v2（分层宿主：挂 MCP + 编排 + skill 纪律）")
+    print("CoinCall · Consumer Agent v2（分层宿主：挂 MCP + 编排 + skill 纪律）")
     print(LINE)
     print(f"[0] 装配：LLM={llm.model} ｜ 钱包 {wallet.address} ｜ 纪律源 SKILL.md={'✓' if SKILL_FILE.exists() else '✗'}")
 

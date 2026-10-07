@@ -240,10 +240,48 @@ def digest(name: str, text: str, is_error: bool) -> str:
         advice = d.get("advice") or {}
         verb = advice.get("verb") or advice.get("error") or "-"
         hints = d.get("hints") or []
-        return (f"{d.get('name')} · {d['pricing']['amount']} USDT/次 ｜ 余额可付={d.get('affordable_by_wallet')}"
-                f" 预算可付={d.get('affordable_by_budget')} ｜ 平台建议 advice={verb}"
-                + (f"（{advice.get('reason', '')[:70]}）" if advice.get("reason") else "")
+        head = (f"{d.get('name')} · {d['pricing']['amount']} USDT/次 ｜ 余额可付={d.get('affordable_by_wallet')}"
+                f" 预算可付={d.get('affordable_by_budget')}"
                 + (f" ｜ ⚠ hints：{'；'.join(hints[:2])}" if hints else ""))
+        # 平台建议信息面：verb+理由 + 三信号量化依据 + 安全评估（一次报价全给齐）
+        lines = [head]
+        sig = advice.get("signals")
+        sec = advice.get("security")
+        lines.append(
+            f"    平台建议 advice={verb}"
+            + (f"（置信 {advice.get('confidence'):.2f}，理由：{advice.get('reason', '')}）"
+               if advice.get("confidence") is not None and advice.get("reason") else
+               (f"（{advice.get('reason', '')}）" if advice.get("reason") else ""))
+        )
+        if sig:
+            f = sig.get("fulfillment") or {}
+            r = sig.get("revenue") or {}
+            fr = sig.get("freshness") or {}
+            sr = f.get("success_rate")
+            sr_txt = f"{sr * 100:.0f}%" if isinstance(sr, (int, float)) else "无数据"
+            age = fr.get("age_h")
+            age_txt = f"{age:.1f}h 前" if isinstance(age, (int, float)) else "无活动"
+            lines.append(
+                f"    ├ 履约历史（近{f.get('window_hours')}h）：成功率 {sr_txt}"
+                + (f" · 成功 {f.get('calls_success')} 笔 / 失败 {f.get('calls_aborted')} 笔"
+                   if f.get("calls_success") is not None else "")
+                + (f" · p95 延迟 {f.get('p95_ms') / 1000:.1f}s" if f.get("p95_ms") else "")
+            )
+            lines.append(
+                f"    ├ 市场信号：链上计费 {r.get('charged_count', 0)} 笔 · 独立付费者 {r.get('distinct_payers')} · "
+                f"累计收入 {r.get('total')} USDT · 最后活跃 {age_txt}"
+            )
+        if sec:
+            lines.append(f"    ├ 安全评估：{sec.get('provider_identity')} · {sec.get('payee_binding')}")
+            lines.append(f"    │   {sec.get('billing_truth')} · {sec.get('fulfillment_anchor')} · 状态 {sec.get('service_status')}")
+            for note in (sec.get("notes") or [])[:2]:
+                lines.append(f"    └ {note}")
+        if advice.get("alternatives"):
+            alts = "；".join(
+                f"{a.get('id')}（{a.get('why', '')[:30]}）" for a in advice["alternatives"][:2]
+            )
+            lines.append(f"    备选：{alts}")
+        return "\n".join(lines)
     if name == "paid_service_call":
         receipt = str(d.get("receipt_id") or "-")
         return (f"✅ status={d.get('status_code')} ｜ 扣款 {_usdt(d.get('charged_raw'))} USDT"
@@ -262,13 +300,15 @@ def digest(name: str, text: str, is_error: bool) -> str:
 # Agent：意图识别 → 工具循环（含机械报价闸门）
 # ============================================================
 
-SYSTEM_PROMPT = """你是接入「琢信 CoinCall」平台的 Consumer Agent，通过 MCP 五个工具\
+SYSTEM_PROMPT = """你是接入「CoinCall」平台的 Consumer Agent，通过 MCP 五个工具\
 （wallet_status / catalog / service_quote / paid_service_call / spend_report）替用户完成付费数据任务。
 
 工作纪律：
 1. 流程固定：catalog 发现服务（按用户需求匹配 name/description/tags）→ service_quote 看价与平台建议 →
    paid_service_call 付费调用 → 基于返回数据回答用户问题。
 2. 付费前必须先 service_quote 同一服务：hints 非空（余额/授权/预算不足）→ 不要调用，把提示转告用户；
+   报价内嵌平台建议 advice：signals 是该服务的量化履约依据（成功率/p95/调用量/独立付费者/新鲜度），
+   security 是平台安全评估（链上身份/收款绑定/计费真相/履约锚定）——回答时可作为选型依据向用户转述；
    advice.verb=switch → 按 alternative 换推荐服务并向用户说明理由；proceed/keep/insufficient_data → 可继续。
 3. paid_service_call 是唯一花钱动作：params 严格按该服务 input_schema 构造（catalog 里有）；
    isError=true 时绝不重试付费调用，把人话指引转告用户（失败不会扣款）。
@@ -381,7 +421,7 @@ def main() -> None:
     bootstrap_api_key()
 
     print(LINE)
-    print("琢信 CoinCall · Consumer Agent CLI（全真实流程：LLM + MCP + 链上付费）")
+    print("CoinCall · Consumer Agent CLI（全真实流程：LLM + MCP + 链上付费）")
     print(LINE)
     host = llm.base_url.split("//")[-1].split("/")[0]
     print(f"[0] 装配：LLM={llm.model} @ {host} ｜ 钱包={wallet_source_label()}")
