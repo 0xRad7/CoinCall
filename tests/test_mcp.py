@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 import pytest
 from fake_chain import FakeChain
-from test_client import ANVIL1_ADDR, ANVIL1_KEY, CATALOG, RECEIPT_HEADERS
+from test_client import ADVICE, ANVIL1_ADDR, ANVIL1_KEY, CATALOG, RECEIPT_HEADERS
 
 from coincall.client import DEFAULT_CORE_URL, DEFAULT_GATEWAY_URL, Client
 from coincall.errors import CoinCallError
@@ -32,6 +32,8 @@ _KEEP_DEFAULT = object()  # 哨兵：区分"未传 wallet"与"显式传 None（�
 def _mock_http() -> httpx.Client:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "core.test":
+            if request.url.path == "/advice":
+                return httpx.Response(200, json=ADVICE)
             return httpx.Response(200, json=CATALOG)
         return httpx.Response(200, json={"echo": "hi"}, headers=RECEIPT_HEADERS)
 
@@ -234,6 +236,84 @@ def test_tool_service_quote_unknown_service_iserror() -> None:
     assert result["isError"] is True
     text = result["content"][0]["text"]
     assert "svc_missing" in text and "catalog" in text  # 人话指引而非裸 JSON
+
+
+@pytest.mark.unit
+def test_tool_service_quote_embeds_advice(tmp_path: Path) -> None:
+    """默认通道：报价内嵌 /advice（category/current/L0 日额透传），工具描述带 switch 纪律句。"""
+    advice_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "core.test":
+            if request.url.path == "/advice":
+                advice_requests.append(request)
+                return httpx.Response(200, json=ADVICE)
+            return httpx.Response(200, json=CATALOG)
+        return httpx.Response(200, json={"echo": "hi"}, headers=RECEIPT_HEADERS)
+
+    wallet = LocalWallet.from_key(
+        ANVIL1_KEY, chain=FakeChain(balance_raw=20000, allowance_raw=15000)
+    )
+    server = _server(
+        wallet=wallet,
+        policy=_policy(tmp_path),
+        http=httpx.Client(transport=httpx.MockTransport(handler), trust_env=False),
+    )
+    result = _result(
+        server.handle_request(
+            _request("tools/call", name="service_quote", arguments={"service_id": "svc_e2e_demo"})
+        )
+        or {}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["advice"]["verb"] == "keep"
+    assert payload["advice"]["recommend"] == "svc_e2e_demo"
+    assert payload["pricing"]["amount_raw"] == "10000"  # 报价本体原样
+    # advice 请求形状：current=本服务 / category=manifest 类目 / daily=L0 日额
+    assert len(advice_requests) == 1
+    assert advice_requests[0].url.params["current"] == "svc_e2e_demo"
+    assert advice_requests[0].url.params["category"] == "other"
+    assert advice_requests[0].url.params["daily_budget_raw"] == "20000"
+    # description 纪律句（工具面教学）
+    tools = _result(server.handle_request(_request("tools/list")) or {})["tools"]
+    desc = next(t for t in tools if t["name"] == "service_quote")["description"]
+    assert "advice" in desc and "verb=switch 时改调 recommend" in desc
+
+
+@pytest.mark.unit
+def test_tool_service_quote_advice_degrades_without_hurting_quote() -> None:
+    """失败降级：/advice 5xx 或 core 不可达 → advice={"error":"unavailable"}，报价本体不受影响。"""
+
+    def make_http(fail_advice: bool) -> httpx.Client:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "core.test":
+                if request.url.path == "/advice":
+                    if fail_advice:
+                        return httpx.Response(
+                            500,
+                            json={"error": "server_error", "detail": "boom", "code": "internal"},
+                        )
+                    raise httpx.ConnectError("core down")  # 传输层不可达同路降级
+                return httpx.Response(200, json=CATALOG)
+            return httpx.Response(200, json={"echo": "hi"}, headers=RECEIPT_HEADERS)
+
+        return httpx.Client(transport=httpx.MockTransport(handler), trust_env=False)
+
+    for http in (make_http(True), make_http(False)):
+        server = _server(http=http)
+        result = _result(
+            server.handle_request(
+                _request(
+                    "tools/call", name="service_quote", arguments={"service_id": "svc_e2e_demo"}
+                )
+            )
+            or {}
+        )
+        assert result["isError"] is False  # advice 死活不影响报价
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["advice"] == {"error": "unavailable"}
+        assert payload["price_raw"] == 10000 and payload["payee"].startswith("0x")
 
 
 @pytest.mark.unit

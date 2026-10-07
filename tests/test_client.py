@@ -31,11 +31,27 @@ CATALOG = {
     "services": [
         {
             "service_id": "svc_e2e_demo",
-            "manifest": {"pricing": {"amount": "0.01", "amount_raw": "10000", "token": "USDT"}},
+            "manifest": {
+                "category": "other",
+                "pricing": {"amount": "0.01", "amount_raw": "10000", "token": "USDT"},
+            },
             "status": "active",
         }
     ],
     "count": 1,
+}
+#: /advice 响应形态（对齐 coincall-core app/modules/decision.py::AdviceResponse）
+ADVICE = {
+    "verb": "keep",
+    "recommend": "svc_e2e_demo",
+    "confidence": 0.55,
+    "margin": 0.2,
+    "reason": "综合分接近",
+    "alternatives": [],
+    "budget_impact": "0.01 / 日额 0.05",
+    "evidence": "/decision/explain/svc_e2e_demo",
+    "as_of": "2026-10-07T00:00:00+00:00",
+    "category": "other",
 }
 RECEIPT_HEADERS = {
     "X-Receipt-Id": "rcp_abc123",
@@ -228,6 +244,54 @@ def test_budget_rejects_before_any_network_call() -> None:
         c.call("svc_e2e_demo", {"text": "two"})
     assert c.spent_raw == 10000  # 策略引擎口径与 spent 同步
     assert len(env.gateway_requests) == gateway_calls_after_first  # 未发任何请求
+
+
+# -- 决策建议（core GET /advice：verb + reason 人话） --
+
+
+@pytest.mark.unit
+def test_advice_request_shape_and_response() -> None:
+    """三参全传 → 查询串逐项；全缺省 → 无参数纯推荐；4xx → GatewayError 人话。"""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/advice":
+            captured.append(request)
+            return httpx.Response(200, json=ADVICE)
+        return httpx.Response(200, json=CATALOG)
+
+    c = Client(
+        api_key="cck_test",
+        wallet=None,
+        gateway_url="http://gw.test",
+        core_url="http://core.test",
+        http=httpx.Client(transport=httpx.MockTransport(handler), trust_env=False),
+    )
+    out = c.advice(category="other", current="svc_e2e_demo", daily_budget_raw=20000)
+    assert out == ADVICE
+    req = captured[0]
+    assert req.method == "GET"
+    assert req.url.params["category"] == "other"
+    assert req.url.params["current"] == "svc_e2e_demo"
+    assert req.url.params["daily_budget_raw"] == "20000"
+
+    c.advice()  # 全缺省 → 无查询参数（全量分区纯推荐）
+    assert len(captured) == 2
+    assert str(captured[1].url).endswith("/advice")
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        body = {"error": "invalid_request", "detail": "未知 category", "code": "unknown_category"}
+        return httpx.Response(422, json=body)
+
+    c2 = Client(
+        api_key="cck_test",
+        wallet=None,
+        gateway_url="http://gw.test",
+        core_url="http://core.test",
+        http=httpx.Client(transport=httpx.MockTransport(fail), trust_env=False),
+    )
+    with pytest.raises(GatewayError, match="unknown_category"):
+        c2.advice(category="bogus")
 
 
 # -- 目录与杂项 --
