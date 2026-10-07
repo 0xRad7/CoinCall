@@ -136,7 +136,7 @@ function LoginFace({ connected, onProceed }: { connected: boolean; onProceed: ()
           ) : (
             <ConnectWalletButton
               size="normal"
-              label="连接钱包登录"
+              label="连接钱包"
               title="只读取钱包地址（eth_requestAccounts）；签名与交易都在钱包扩展弹窗里确认"
             />
           )}
