@@ -238,6 +238,18 @@ def load_private_key(network: str, env: Mapping[str, str] | None = None) -> str:
     sys.exit(1)
 
 
+_ZERO_ADDRESS = "0x" + "0" * 40
+
+
+def assert_nonzero_deploy_params(token: str, operator: str, deployer: str) -> None:
+    """审计 F-02 缓解（2026-10-08）：合约 constructor 无零地址校验且 immutable——
+    部署前脚本侧断言 token/operator/deployer 均非零地址，零值直接拒部署。"""
+    for name, addr in (("token", token), ("operator", operator), ("deployer", deployer)):
+        if addr.lower() == _ZERO_ADDRESS:
+            msg = f"部署参数 {name} 为零地址（0x0）——拒绝部署（审计 F-02 缓解）"
+            raise SystemExit(f"[FATAL] {msg}")
+
+
 def resolve_operator(net: Network, args: argparse.Namespace, deployer: str) -> ChecksumAddress:
     """operator=PayVault 构造器第二参：--operator 覆写 > 主网 keystore 默认 > 测试网=署名者。"""
     if args.operator:
@@ -364,6 +376,7 @@ def run_mainnet(w3: Web3, net: Network, args: argparse.Namespace) -> None:
     account = account_from_key(load_private_key("mainnet"))
     deployer = Web3.to_checksum_address(account.address)
     operator = resolve_operator(net, args, deployer)
+    assert_nonzero_deploy_params(token=net.token_address, operator=operator, deployer=deployer)
     artifact = load_artifact("PayVault")
 
     # ---- 只读预检（不签名、不发交易） ------------------------------------------
@@ -482,6 +495,9 @@ def run_testnet(w3: Web3, net: Network, args: argparse.Namespace) -> None:
     deployment_path = DEPLOYMENTS_DIR / net.deployment_file
     account = account_from_key(load_private_key("testnet"))
     operator_address = resolve_operator(net, args, account.address)
+    assert_nonzero_deploy_params(
+        token=net.token_address, operator=operator_address, deployer=account.address
+    )
     balance = w3.eth.get_balance(operator_address)
     print(f"[1/7] {net.network_label} chainId={net.chain_id} 连接 OK")
     print(f"[1/7] operator={operator_address}")

@@ -210,3 +210,19 @@ def test_resolve_operator_precedence() -> None:
     )
     deployer = "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a"
     assert resolve_operator(NETWORKS["testnet"], parse_args([]), deployer) == deployer
+
+
+def test_zero_address_params_rejected(capsys):
+    """审计 F-02 缓解锚（2026-10-08）：token/operator/deployer 任一为零地址 → 部署拒绝。"""
+    good = {
+        "token": "0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C",
+        "operator": "0xb1ea3EA94e2Fd7Cb9244cD460dA863FC4b61033A",
+        "deployer": "0xe888f718b100f37e933Ab0FA6f5dbE260E4eA3C4",
+    }
+    zero = "0x" + "0" * 40
+    for field in ("token", "operator", "deployer"):
+        bad = {**good, field: zero}
+        with pytest.raises(SystemExit) as ei:
+            deploy_mod.assert_nonzero_deploy_params(**bad)
+        assert "零地址" in str(ei.value) and "F-02" in str(ei.value)
+    deploy_mod.assert_nonzero_deploy_params(**good)  # 正常三参不抛
