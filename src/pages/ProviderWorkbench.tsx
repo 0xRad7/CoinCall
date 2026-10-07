@@ -93,6 +93,7 @@ export default function ProviderWorkbench() {
           agentId={teamPage}
           onBack={() => setTeamPage(null)}
           onPublish={startPublish}
+          onRenamed={undefined}
         />
       )}
     </div>
@@ -1599,20 +1600,42 @@ function WithdrawPanel({ wallets, onDone }: { wallets: string[]; onDone: () => v
 export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: number) => void; onPublish: (team: MyTeam) => void }) {
   const w = useWallet();
   const mine = useAsync(() => (w.address ? teamsApi.mine(w.address) : Promise.resolve(null)), [w.address]);
+  const [showImport, setShowImport] = useState(false);
 
   if (!w.address) {
     return (
-      <div className="card">
-        <h3>我的 Teams</h3>
-        <p className="card-desc">一个钱包可建多个团队，每个团队发布多个服务。连接钱包查看/创建你的团队。</p>
-        <div className="flex">
-          <span className="dim">团队的身份与收款都锚定你的钱包：</span>
-          <ConnectWalletButton size="small" />
+      <div className="card" style={{ textAlign: "center", padding: "48px 32px" }}>
+        <h2 style={{ margin: "0 0 8px" }}>创建你的第一个团队</h2>
+        <p className="card-desc" style={{ fontSize: 14 }}>一次钱包签名，链上身份自动管理。先连接钱包开始。</p>
+        <div style={{ marginTop: 20 }}>
+          <ConnectWalletButton size="normal" label="连接钱包，开始创建" />
         </div>
       </div>
     );
   }
 
+  const teams = mine.data?.teams ?? null;
+
+  // 新用户空态：居中大卡主 CTA（一键发起全流程）
+  if (mine.data != null && teams != null && teams.length === 0) {
+    return (
+      <div>
+        <CreateTeamButton onCreated={onOpenTeam} hero />
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <button type="button" className="copy-chip dim" onClick={() => setShowImport((v) => !v)}>
+            {showImport ? "收起导入" : "已有链上身份？导入"}
+          </button>
+        </div>
+        {showImport && (
+          <div className="card" style={{ marginTop: 8 }}>
+            <ClaimStep initial={null} onNext={() => mine.reload()} hideNext />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 有团队：维持现状（右上角 + 卡片网格）
   return (
     <div className="card">
       <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -1620,7 +1643,7 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
           <h3 className="mb-0">我的 Teams</h3>
           <p className="card-desc" style={{ margin: "2px 0 0" }}>钱包 {w.address.slice(0, 8)}… · 一个钱包可建多个团队</p>
         </div>
-        <CreateTeamButton onCreated={() => mine.reload()} inline />
+        <CreateTeamButton onCreated={onOpenTeam} inline />
       </div>
       <AsyncSection state={mine} empty="还没有团队">
         {(m) =>
@@ -1642,7 +1665,7 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
                     <span className="svc-name">{t.display_name}</span>
                     <Badge kind="ok">{t.service_count} 服务</Badge>
                   </div>
-                  <div className="mono dim" style={{ fontSize: 11 }}>team #{t.agent_id} · 创建于 {t.created_at.slice(0, 10)}</div>
+                  <div className="dim" style={{ fontSize: 11 }}>创建于 {t.created_at.slice(0, 10)}</div>
                   <div className="flex" style={{ justifyContent: "flex-end", marginTop: 8 }}>
                     <button
                       className="btn small secondary"
@@ -1659,18 +1682,21 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
         }
       </AsyncSection>
 
-      <details style={{ marginTop: 16 }}>
-        <summary className="dim" style={{ cursor: "pointer", fontSize: 12 }}>导入已有身份（高级）</summary>
-        <div style={{ marginTop: 10, padding: 12, border: "1px dashed var(--border-strong)", borderRadius: 8, background: "var(--surface-2)" }}>
-          <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>已有 ERC-8004 身份/Agent ID 的老用户入口——认领（绑定+登记）与注册新身份闭环都在这里。</div>
+      <div style={{ marginTop: 12 }}>
+        <button type="button" className="copy-chip dim" onClick={() => setShowImport((v) => !v)}>
+          {showImport ? "收起导入" : "已有链上身份？导入（高级）"}
+        </button>
+      </div>
+      {showImport && (
+        <div className="card" style={{ marginTop: 8, boxShadow: "none", background: "var(--surface-2)" }}>
           <ClaimStep initial={null} onNext={() => mine.reload()} hideNext />
         </div>
-      </details>
+      )}
     </div>
   );
 }
 
-/** 创建团队：输入名 → prepare（代发铸造）→ AgentWalletSet 签名 → 绑定 → providers → 打开新团队主页。 */
+/** 创建团队（一键流）：点击 → prepare（代发铸造，默认名「我的团队」，origin 进 agentURI）→ AgentWalletSet 签名 → 绑定 → providers → 落地 Team 详情。 */
 export function CreateTeamButton({
   onCreated,
   inline,
@@ -1924,9 +1950,31 @@ function TeamCredentialsModal({ agentId, onClose }: { agentId: number; onClose: 
 }
 
 /** Team 主页：聚合战绩卡 + 服务管理。 */
-export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBack: () => void; onPublish: (team: MyTeam) => void }) {
+export function TeamHome({ agentId, onBack, onPublish, onRenamed }: { agentId: number; onBack: () => void; onPublish: (team: MyTeam) => void; onRenamed?: () => void }) {
+  const w = useWallet();
   const team = useAsync(() => teamsApi.detail(agentId), [agentId]);
   const [teamCredOpen, setTeamCredOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<unknown>(null);
+
+  const doRename = async () => {
+    if (!team.data || !newName.trim()) return;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      // 改名 = 同钱包重复提交幂等更新（POST /providers 同 claim_wallet）
+      await coreApi.registerProvider(agentId, newName.trim(), team.data.team.claim_wallet ?? w.address ?? "");
+      setRenaming(false);
+      team.reload();
+      onRenamed?.();
+    } catch (e) {
+      setRenameError(e);
+    } finally {
+      setRenameBusy(false);
+    }
+  };
 
   return (
     <div className="card">
@@ -1948,9 +1996,26 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
       <AsyncSection state={team} empty="团队不存在">
         {(t) => (
           <>
-            <h3 style={{ marginTop: 12 }}>{t.team.display_name}</h3>
+            <div className="flex" style={{ alignItems: "baseline", gap: 8, marginTop: 12 }}>
+              <h3 style={{ margin: 0 }}>{t.team.display_name}</h3>
+              {!renaming && (
+                <button className="btn small ghost" onClick={() => { setRenaming(true); setNewName(t.team.display_name); }} title="同钱包重复提交=幂等改名">
+                  改名
+                </button>
+              )}
+            </div>
+            {renaming && (
+              <div className="flex" style={{ marginTop: 8, maxWidth: 420 }}>
+                <input type="text" value={newName} maxLength={128} onChange={(e) => setNewName(e.target.value)} aria-label="团队新名称" placeholder="新名称" />
+                <button className="btn small" disabled={renameBusy || !newName.trim()} onClick={doRename}>
+                  {renameBusy ? "保存中…" : "保存"}
+                </button>
+                <button className="btn small secondary" disabled={renameBusy} onClick={() => setRenaming(false)}>取消</button>
+              </div>
+            )}
+            {renameError != null && <ErrorBox error={renameError} />}
             <div className="dim mono" style={{ fontSize: 11, marginBottom: 10 }}>
-              team #{t.team.agent_id} · 服务收款钱包 {t.team.claim_wallet?.slice(0, 10) ?? "未绑定"}… · 创建于 {t.team.created_at.slice(0, 19)}
+              服务收款钱包 {t.team.claim_wallet?.slice(0, 10) ?? "未绑定"}… · 创建于 {t.team.created_at.slice(0, 19)}
             </div>
             <div className="stat-grid">
               <StatCard
@@ -2032,7 +2097,7 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
               </table>
             )}
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-              改价/暂停/凭证管理在总览目录 → 你的服务卡 → 「上游认证头」或经 Manifest 重发；公共视图数据 = 总览目录。
+              凭证管理在「团队默认认证头」与服务级「上游认证头」；公共视图数据 = 总览目录。
             </div>
           </>
         )}

@@ -139,7 +139,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("我的 Teams（mine）", () => {
-  it("空态：主按钮「+ 创建团队」+ 引导文案 + 高级折叠", async () => {
+  it("空态：居中大卡「创建你的第一个团队」+ 一键主按钮（无名字输入步）+ 低调导入链接", async () => {
     render(
       <WalletProvider>
         <MyTeamsStep onOpenTeam={vi.fn()} onPublish={vi.fn()} />
@@ -147,9 +147,12 @@ describe("我的 Teams（mine）", () => {
       </WalletProvider>
     );
     await connect();
-    expect(await screen.findByText(/还没有团队——点右上角「\+ 创建团队」/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+ 创建团队" })).toBeTruthy();
-    expect(screen.getByText(/导入已有身份（高级）/)).toBeTruthy();
+    expect(await screen.findByText("创建你的第一个团队")).toBeTruthy();
+    expect(screen.getByText(/一次钱包签名，链上身份自动管理/)).toBeTruthy();
+    const btn = screen.getByRole("button", { name: "创建团队" });
+    expect(btn.closest(".card")!.textContent).toContain("创建你的第一个团队"); // hero 大卡内
+    expect(screen.queryByLabelText("团队名称")).toBeNull(); // 无名字输入步
+    expect(screen.getByText(/已有链上身份？导入/)).toBeTruthy(); // 低调链接
   });
 
   it("列表渲染：团队卡片（名称/服务数/入口）+ 整卡点击进详情", async () => {
@@ -175,35 +178,33 @@ describe("我的 Teams（mine）", () => {
 });
 
 describe("创建团队全链", () => {
-  it("prepare→签名→绑定→providers 提交体断言→✓ 创建成功", async () => {
+  it("一键全链：点「创建团队」→ prepare(默认名+origin)→签名→绑定→providers 提交体断言→✓ 落地详情", async () => {
     const onCreated = vi.fn();
     render(
       <WalletProvider>
-        <CreateTeamButton onCreated={onCreated} />
+        <CreateTeamButton onCreated={onCreated} hero />
         <ConnectProbe />
       </WalletProvider>
     );
     await connect();
-    fireEvent.click(screen.getByRole("button", { name: "+ 创建团队" }));
-    fireEvent.change(screen.getByLabelText("团队名称"), { target: { value: "My New Team" } });
-    expect(document.body.textContent).toContain("只需");
-    expect(document.body.textContent).toContain("一次钱包签名");
-    fireEvent.click(screen.getByRole("button", { name: "创建团队" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建团队" })); // 一次点击直接发起
 
-    expect(await screen.findByText(/✓ 创建成功/)).toBeTruthy();
-    expect(onCreated).toHaveBeenCalledWith(171);
-    // providers 提交体：{agent_id:171, display_name, claim_wallet=连接地址}
+    expect(await screen.findByText(/✓ 创建成功——正在进入团队…/)).toBeTruthy();
+    expect(onCreated).toHaveBeenCalledWith(171); // 落地 Team 详情
+    // prepare 请求体：默认名 + origin=window.location.origin
+    const prep = calls.find((c) => c.url === "/api/core/teams/prepare")!;
+    expect(JSON.parse(prep.body!)).toEqual({ display_name: "我的团队", origin: window.location.origin });
+    // providers 提交体：{agent_id, display_name=我的团队, claim_wallet=连接地址}
     const prov = calls.find((c) => c.url === "/api/core/providers" && c.method === "POST")!;
-    expect(JSON.parse(prov.body!)).toEqual({ agent_id: 171, display_name: "My New Team", claim_wallet: MY });
-    // 绑定请求：newWallet=连接地址、dry_run=false
+    expect(JSON.parse(prov.body!)).toEqual({ agent_id: 171, display_name: "我的团队", claim_wallet: MY });
+    // 绑定请求：newWallet=连接地址、dry_run=false、签名 65 字节
     const bind = calls.find((c) => /\/agent-identity\/171\/wallet$/.test(c.url))!;
     const bindBody = JSON.parse(bind.body!) as { wallet_address: string; dry_run: boolean; signature: string };
     expect(bindBody.wallet_address.toLowerCase()).toBe(MY.toLowerCase());
     expect(bindBody.dry_run).toBe(false);
     expect(bindBody.signature).toMatch(/^0x[0-9a-f]{130}$/);
-    // prepare 请求体
-    const prep = calls.find((c) => c.url === "/api/core/teams/prepare")!;
-    expect(JSON.parse(prep.body!)).toEqual({ display_name: "My New Team" });
+    // hero 卡全程不显示 Agent ID 数字
+    expect(document.querySelector(".card")!.textContent).not.toMatch(/#\d+|team #/);
   });
 });
 
@@ -275,15 +276,15 @@ describe("主路径字样残留扫描", () => {
     expect(teamsBlock.length).toBeGreaterThan(100);
     // 主路径组件区不含主路径字样（高级折叠 summary「导入已有身份（高级）」与 ClaimStep 引用是允许的）
     const sanitized = teamsBlock
-      .replace(/导入已有身份（高级）[\s\S]*?<\/details>/g, "…");
+      .replace(/已有链上身份？导入[\s\S]*?\n      \)/g, "…");
     expect(sanitized).not.toContain("认领");
     expect(sanitized).not.toContain("Agent ID");
   });
 });
 
 describe("微调：创建按钮位置 + 整卡可点 + 发布页分组", () => {
-  it("「+ 创建团队」在「我的 Teams」标题行右侧（同 flex 行内）", async () => {
-    mineTeams = [];
+  it("有团队时：「+ 创建团队」在「我的 Teams」标题行右侧（同 flex 行内）；卡片网格渲染", async () => {
+    mineTeams = [{ agent_id: 170, display_name: "RadAI", claim_wallet: MY, service_count: 1, created_at: "t" }];
     render(
       <WalletProvider>
         <MyTeamsStep onOpenTeam={vi.fn()} onPublish={vi.fn()} />
@@ -294,6 +295,7 @@ describe("微调：创建按钮位置 + 整卡可点 + 发布页分组", () => {
     const btn = await screen.findByRole("button", { name: "+ 创建团队" });
     const headerRow = btn.closest("div.flex")!;
     expect(headerRow.textContent).toContain("我的 Teams"); // 按钮与标题同在 header 行
+    await waitFor(() => expect(screen.getByText("RadAI")).toBeTruthy()); // 网格视图
   });
 
   it("团队卡无「打开团队」按钮；fireEvent.click 卡片触发 onOpenTeam；键盘可达（tabIndex=0+role=button）", async () => {
@@ -340,5 +342,51 @@ describe("微调：创建按钮位置 + 整卡可点 + 发布页分组", () => {
     expect(bar.className).toContain("sticky-action-bar");
     expect(bar.textContent).toContain("发布服务");
     expect(screen.getByRole("button", { name: "← 返回仪表盘" })).toBeTruthy();
+  });
+});
+
+describe("新用户动线四修正", () => {
+  it("空态无嵌套 details（高级导入拍平单层）；导入链接点击展开 ClaimStep", async () => {
+    render(
+      <WalletProvider>
+        <MyTeamsStep onOpenTeam={vi.fn()} onPublish={vi.fn()} />
+        <ConnectProbe />
+      </WalletProvider>
+    );
+    await connect();
+    await screen.findByText("创建你的第一个团队");
+    // hero 路径不使用 details 嵌套
+    expect(document.querySelectorAll("details").length).toBe(0);
+    // 导入链接展开
+    fireEvent.click(screen.getByText(/已有链上身份？导入/));
+    await waitFor(() => expect(document.body.textContent).toContain("Agent ID"));
+    // 展开后导入区本身不被 details 包裹（ClaimStep 内部的注册引导折叠属组件内部，非本区嵌套）
+    expect(document.querySelector("details > .card")).toBeNull();
+    expect([...document.querySelectorAll("details")].every((d) => !d.textContent?.includes("导入"))).toBe(true);
+  });
+
+  it("成功落地 Team 详情：改名按钮在头部；改名提交幂等 POST /providers", async () => {
+    // Team 详情 fixture（teams/170 已 mock）
+    render(
+      <WalletProvider>
+        <TeamHome agentId={170} onBack={vi.fn()} onPublish={vi.fn()} />
+        <ConnectProbe />
+      </WalletProvider>
+    );
+    await connect();
+    await screen.findByText("RadAI");
+    expect(screen.getByRole("button", { name: "改名" })).toBeTruthy();
+    // 详情头部无 Agent ID 数字（team # 已移除）
+    const headText = document.querySelector(".card")!.textContent;
+    expect(headText).not.toMatch(/team #\d+/);
+    // 改名流程
+    fireEvent.click(screen.getByRole("button", { name: "改名" }));
+    fireEvent.change(screen.getByLabelText("团队新名称"), { target: { value: "RadAI v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const prov = calls.find((c) => c.url === "/api/core/providers" && c.method === "POST");
+      expect(prov).toBeTruthy();
+      expect(JSON.parse(prov!.body!)).toEqual({ agent_id: 170, display_name: "RadAI v2", claim_wallet: MY });
+    });
   });
 });
