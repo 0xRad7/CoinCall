@@ -839,11 +839,28 @@ def test_client_rejects_unknown_mode() -> None:
 
 def test_keeper_chain_mode_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """env 唯一入口：缺省 direct；COINCALL_KEEPER_CHAIN_MODE=api 生效；非法值拒绝启动。"""
+    import os
+
     from pydantic import ValidationError
 
     from app.core.config import Settings
 
-    assert Settings().keeper_chain_mode == "direct"
+    _saved = os.environ.pop("COINCALL_KEEPER_CHAIN_MODE", None)
+    _saved_file = Path(".env")
+    _saved_content = _saved_file.read_text() if _saved_file.exists() else None
+    if _saved_content and "COINCALL_KEEPER_CHAIN_MODE=api" in _saved_content:
+        _saved_file.write_text(
+            _saved_content.replace(
+                "COINCALL_KEEPER_CHAIN_MODE=api", "# COINCALL_KEEPER_CHAIN_MODE=api"
+            )
+        )
+    try:
+        assert Settings().keeper_chain_mode == "direct"
+    finally:
+        if _saved is not None:
+            os.environ["COINCALL_KEEPER_CHAIN_MODE"] = _saved
+        if _saved_content and "# COINCALL_KEEPER_CHAIN_MODE=api" in _saved_file.read_text():
+            _saved_file.write_text(_saved_content)
     monkeypatch.setenv("COINCALL_KEEPER_CHAIN_MODE", "api")
     assert Settings().keeper_chain_mode == "api"
     monkeypatch.setenv("COINCALL_KEEPER_CHAIN_MODE", "proxy")
