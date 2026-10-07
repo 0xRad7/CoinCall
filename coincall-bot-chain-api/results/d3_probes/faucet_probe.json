@@ -1,0 +1,37 @@
+{
+ "info_status": 200,
+ "info_body": {
+  "code": 0,
+  "message": "success",
+  "data": {
+   "assets": [
+    {
+     "claim_amount": "10",
+     "cooldown_hours": 0.1667,
+     "enabled": true,
+     "token_address": "",
+     "token_symbol": "BOT",
+     "token_type": "native"
+    },
+    {
+     "claim_amount": "1000",
+     "cooldown_hours": 0.1667,
+     "enabled": true,
+     "token_address": "0x75edC9335175Fc0552D51D48439F229c10420fe3",
+     "token_symbol": "USDT",
+     "token_type": "erc20"
+    }
+   ],
+   "chain_name": "BOT Chain Testnet",
+   "claim_amount": "10",
+   "cooldown_hours": 0.1667,
+   "enabled": true,
+   "token_symbol": "BOT"
+  }
+ },
+ "claim_dummy_status": 400,
+ "claim_dummy_body": {
+  "code": 10003,
+  "message": "Turnstile verification failed"
+ }
+}

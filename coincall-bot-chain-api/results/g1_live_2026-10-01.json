@@ -1,0 +1,79 @@
+{
+  "gate": "G1 协议冻结（02 篇测试计划）",
+  "date": "2026-10-01",
+  "network": "testnet 968 (https://rpc.bohr.life/)",
+  "result": "PASS",
+  "total": 14,
+  "cases": [
+    {
+      "id": "tests.test_01_rpc_live::test_chain_id_is_968",
+      "time_s": 0.28,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_net_version_is_968",
+      "time_s": 0.08,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_client_version_geth",
+      "time_s": 0.09,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_block_number_alive",
+      "time_s": 2.29,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_gas_price_constant_20_gwei",
+      "time_s": 0.19,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_base_fee_per_gas_zero",
+      "time_s": 0.19,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_block_interval_sub_second_chain",
+      "time_s": 2.12,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_debug_trace_method_not_available",
+      "time_s": 0.19,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_01_rpc_live::test_get_block_receipts_available",
+      "time_s": 0.19,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_02_accounts::test_new_eoa_shape_nonce_balance",
+      "time_s": 0.4,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_02_accounts::test_get_code_empty_for_eoa",
+      "time_s": 0.19,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_02_accounts::test_nonce_latest_equals_pending_for_idle_account",
+      "time_s": 0.39,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_02_accounts::test_rpc_balance_matches_blockscout",
+      "time_s": 1.57,
+      "status": "passed"
+    },
+    {
+      "id": "tests.test_02_accounts::test_blockscout_stats_shape",
+      "time_s": 0.21,
+      "status": "passed"
+    }
+  ]
+}

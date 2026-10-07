@@ -1,0 +1,10 @@
+{
+ "status": 200,
+ "body": {
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": [
+   "0x0000000071727de22e5e9d8baf0edac6f37da032"
+  ]
+ }
+}

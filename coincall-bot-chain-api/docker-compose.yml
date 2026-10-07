@@ -1,0 +1,32 @@
+name: coincall-bot-chain-api  # 仓库更名（2026-10-05），compose 项目名同步
+
+services:
+  redis:
+    image: redis:7-alpine
+    # 04 篇：运行时协调数据全可丢弃，无持久化
+    command: ["redis-server", "--appendonly", "no"]
+    ports: ["6379:6379"]
+
+  api:
+    build: .
+    environment:
+      # 网络开关（部署区分唯一入口）：.env 设 BOT_CHAIN_NETWORK=mainnet
+      # 且 BOT_CHAIN_ALLOW_MAINNET=1 才切主网 677（铁律 A1 双重锁），缺省测试网 968
+      BOT_CHAIN_NETWORK: ${BOT_CHAIN_NETWORK:-testnet}
+      BOT_CHAIN_ALLOW_MAINNET: ${BOT_CHAIN_ALLOW_MAINNET:-}
+      REDIS_URL: redis://redis:6379/0
+      DUCKDB_PATH: /app/data/botchain.duckdb
+      # 出资私钥（仅测试网）：从 .env 注入，切勿写进文件；主网模式服务端拒载（铁律 A4）
+      BOT_CHAIN_TEST_PRIVATE_KEY: ${BOT_CHAIN_TEST_PRIVATE_KEY:-}
+      BOT_CHAIN_KEYSTORE_SECRET: ${BOT_CHAIN_KEYSTORE_SECRET:-}
+      # 主网 botchain.ai 域仅代理可达（铁律 A7）；容器内代理地址不能用 127.0.0.1，
+      # 须写 http://host.docker.internal:<端口>（macOS/Windows Desktop 自带，Linux 靠下方 extra_hosts）
+      PROXY: ${PROXY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Linux 把宿主代理映射进容器
+    volumes:
+      - ./data:/app/data # botchain.duckdb + keystore
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis

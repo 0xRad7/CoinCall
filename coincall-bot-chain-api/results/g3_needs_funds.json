@@ -1,0 +1,22 @@
+{
+  "gate": "G3 needs_funds 补跑",
+  "date": "2026-10-02",
+  "total": 9,
+  "passed": [
+    "tests/test_03_tx.py::TestTxLiveNeedsFunds::test_self_transfer_roundtrip",
+    "tests/test_03_tx.py::TestTxLiveNeedsFunds::test_nonce_strictly_increases",
+    "tests/test_04_tokens.py::TestTokenNeedsFunds::test_approve_and_event",
+    "tests/test_04_tokens.py::TestTokenNeedsFunds::test_transfer_decimals_rounding_guard",
+    "tests/test_05_erc4337.py::TestAaNeedsFunds::test_estimate_simulation_full_pass",
+    "tests/test_06_erc8004.py::TestErc8004NeedsFunds::test_register_and_verify",
+    "tests/test_07_bdex.py::TestBdexNeedsFunds::test_approve_and_minimal_swap",
+    "tests/test_07_bdex.py::TestBdexNeedsFunds::test_decimals_unit_guard"
+  ],
+  "failed": [],
+  "skipped": [
+    {
+      "id": "tests/test_05_erc4337.py::TestAaNeedsFunds::test_full_userop_lifecycle",
+      "reason": "bundler 收单不打包（estimate 模拟已验证签名/结构/nonce；偏差 #17）——已知基础设施限制，非失败"
+    }
+  ]
+}

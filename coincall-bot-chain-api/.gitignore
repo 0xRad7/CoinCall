@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# 秘密与本地环境（私钥绝不入库）
+.env
+*.key
+
+# 运行时数据（duckdb / keystore）
+data/
+*.duckdb
+*.duckdb.wal
+
+# 构建产物
+dist/
+build/
