@@ -17,7 +17,8 @@ const proxy = {
 export default defineConfig({
   plugins: [react()],
   // host: true = 监听 0.0.0.0，局域网机器可访问（后端三服务仍仅本机，经此代理转发）
-  server: { port: 5173, host: true, proxy },
+  // hmr:false=关闭热更新（发起人 2026-10-07）：编辑不再实时推送，改完统一重启前端
+  server: { port: 5173, host: true, hmr: false, proxy },
   preview: { port: 5173, host: true, proxy },
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
