@@ -1,0 +1,1017 @@
+"""决策层 API（10 篇）：带证明的四分量排序——收入(链上)×履约(网关)×反馈(付费)×新鲜度。
+
+评分公式（§0.5 本轮裁决，全部在响应里自描述，Agent 可独立重算）：
+- score = 0.5*revenue + 0.3*fulfillment + 0.2*freshness（发起人裁决：反馈层移除）
+- revenue     = 0.5*norm(ln(total_raw+1)) + 0.5*norm(distinct_payers)
+                （total_raw=链上 Charged 全量真相，复用 charged_events；distinct=网关窗口统计）
+- fulfillment = success_rate * latency_bonus(p95_ms)（≤2s 满分、≥10s 零分、其间线性；
+                success_rate=(success+settled)/(success+settled+aborted)，坏账不入分母）
+- freshness   = exp(-ln2*Δh/48)（Δh=as_of−last_activity；as_of 显式传入即演示时间注入）
+- norm = 窗口内 min-max（候选集=本次响应的分区内服务；零区间=0.5）
+
+/advice（decision-as-advice §3 方案一）：同一引擎的极简判定式投影——verb + 人话 reason
+（确定性模板拼接，禁 LLM）+ ≤2 备选 + 预算占比 + 证据二级指针；recommend 恒可从
+/decision/services 同分区排序复算（同引擎双视图：人看证据，Agent 听建议）。
+"""
+
+import hashlib
+import json
+import math
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.errors import ApiError
+from app.modules.leaderboard import (
+    GatewayStatsSource,
+    _sync_quietly,
+    to_amount,
+)
+from app.modules.manifest import CATEGORIES, manifest_category, manifest_tags
+from app.modules.security_scan import severity_counts
+from app.storage.db import CoreStore
+
+router = APIRouter(tags=["decision"])
+
+#: 冻结权重（10 §0.5）；响应自描述，改动=契约级变更
+DECISION_WEIGHTS: dict[str, float] = {
+    "revenue": 0.5,
+    "fulfillment": 0.3,
+    "freshness": 0.2,
+}
+SCORE_FORMULA = (
+    "score = 0.5*revenue + 0.3*fulfillment + 0.2*freshness（反馈层已移除，2026-10-07）；"
+    "revenue=0.5*norm(ln(total_raw+1))+0.5*norm(distinct_payers)；"
+    "fulfillment=success_rate*latency_bonus(p95)（≤2000ms=1，≥10000ms=0，线性）；"
+    "freshness=exp(-ln2*Δh/48)"
+)
+NORM_NOTE = "norm=窗口内 min-max（候选集=响应分区内的服务；零区间=0.5）"
+
+FRESHNESS_HALF_LIFE_H = 48.0
+FEEDBACK_PRIOR_STRENGTH = 10
+FEEDBACK_PRIOR_NEUTRAL = 3.0
+DEFAULT_WINDOW_HOURS = 168
+LATENCY_BONUS_FULL_MS = 2_000
+LATENCY_BONUS_ZERO_MS = 10_000
+#: 交易哈希 0x + 64 hex
+TX_HASH_HEX_LEN = 66
+REVENUE_FORMULA = "0.5*norm(ln(total_raw+1)) + 0.5*norm(distinct_payers)"
+FULFILLMENT_FORMULA = (
+    "success_rate * latency_bonus(p95_ms)；success_rate=(success+settled)/"
+    "(success+settled+aborted)；bonus: p95≤2000ms=1，≥10000ms=0，其间线性"
+)
+FEEDBACK_FORMULA = ()
+FRESHNESS_FORMULA = "exp(-ln2*Δh/48)"
+
+
+# ---------------------------------------------------------------------------
+# 纯函数分量（单测口径=本模块 docstring 公式）
+# ---------------------------------------------------------------------------
+
+
+def parse_ts(value: object) -> datetime | None:
+    """网关/入参时间戳解析：ISO 或 'YYYY-MM-DD HH:MM:SS'；naive 视作 UTC；不可解析 None。"""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def parse_as_of(value: str) -> datetime:
+    """as_of 解析（默认 now）；非法 → 422 bad_as_of（演示时间注入参数）。"""
+    if not value.strip():
+        return datetime.now(UTC)
+    dt = parse_ts(value)
+    if dt is None:
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail=f"as_of 非法 ISO 时间: {value!r}",
+            code="bad_as_of",
+        )
+    return dt
+
+
+def latency_bonus(p95_ms: int | None) -> float | None:
+    """p95 → 延迟加分：≤2s=1，≥10s=0，其间线性；无数据 None（不折算为 0 值证据）。"""
+    if p95_ms is None:
+        return None
+    if p95_ms <= LATENCY_BONUS_FULL_MS:
+        return 1.0
+    if p95_ms >= LATENCY_BONUS_ZERO_MS:
+        return 0.0
+    return (LATENCY_BONUS_ZERO_MS - p95_ms) / (LATENCY_BONUS_ZERO_MS - LATENCY_BONUS_FULL_MS)
+
+
+def freshness_score(last_activity: datetime | None, as_of: datetime) -> tuple[float, float | None]:
+    """(score, age_h)：无活动=(0.0, None)；Δh 负值钳 0（as_of 早于活动不加分）。"""
+    if last_activity is None:
+        return (0.0, None)
+    age_h = max(0.0, (as_of - last_activity).total_seconds() / 3600)
+    return (math.pow(2, -age_h / FRESHNESS_HALF_LIFE_H), age_h)
+
+
+def _norm(values: list[float]) -> list[float]:
+    """窗口内 min-max；零区间 → 0.5（全员等值时中性，不影响相对排序）。"""
+    if not values:
+        return []
+    lo, hi = min(values), max(values)
+    if hi == lo:
+        return [0.5] * len(values)
+    return [(v - lo) / (hi - lo) for v in values]
+
+
+def _to_int(value: Any) -> int | None:  # noqa: ANN401 —— 网关统计行字段形态未冻结到类型
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float(value: Any) -> float | None:  # noqa: ANN401 —— 同 _to_int：宽松入参窄化出口
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 取数上下文（一次收集，多端点共用）
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Context:
+    """决策取数快照：active 服务 + 网关窗口统计 + 链上收入 + 反馈聚合 + 锚定 + 安全扫描。"""
+
+    services: list[dict[str, Any]]
+    stats_by_service: dict[str, dict[str, Any]]
+    stats_available: bool
+    revenue_by_wallet: dict[str, dict[str, Any]]
+    anchor_latest: dict[int, dict[str, Any]]
+    payload_by_agent: dict[int, dict[str, Any]]
+    digest_by_agent: dict[int, str]
+    window_hours: int
+    security_by_service: dict[str, dict[str, Any]] = field(default_factory=dict)
+    degraded: list[str] = field(default_factory=list)
+
+
+def _fulfillment_metrics(calls: dict[str, Any] | None) -> dict[str, Any]:
+    """网关统计行 → 履约指标（口径：docstring 公式；calls 缺失=不可用）。"""
+    if calls is None:
+        return {
+            "available": False,
+            "calls_success": None,
+            "calls_settled": None,
+            "calls_aborted": None,
+            "bad_debt": None,
+            "success_rate": None,
+            "p50_ms": None,
+            "p95_ms": None,
+        }
+    success = _to_int(calls.get("calls_success"))
+    settled = _to_int(calls.get("calls_settled"))
+    aborted = _to_int(calls.get("calls_aborted"))
+    num = (success or 0) + (settled or 0)
+    den = num + (aborted or 0)
+    rate = round(num / den, 6) if den > 0 else None
+    return {
+        "available": True,
+        "calls_success": success,
+        "calls_settled": settled,
+        "calls_aborted": aborted,
+        "bad_debt": _to_int(calls.get("bad_debt")),
+        "success_rate": rate,
+        "p50_ms": _to_int(calls.get("p50_ms")),
+        "p95_ms": _to_int(calls.get("p95_ms")),
+    }
+
+
+def _canonical_digest(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _build_context(request: Request, *, window_hours: int) -> _Context:
+    _sync_quietly(request)  # Charged 收入懒同步（锁+最小间隔，同排行榜通道）
+    store: CoreStore = request.app.state.store
+    services = store.list_services("active")
+    stats: dict[str, Any] | None = None
+    degraded: list[str] = []
+    gateway: GatewayStatsSource = request.app.state.gateway_stats
+    try:
+        stats = gateway.stats_view(window_hours)
+    except Exception as exc:  # 网关不可达：决策面降级（履约/新鲜度按无数据），不 500
+        degraded.append(f"gateway_stats_failed: {exc.__class__.__name__}")
+    stats_by_service: dict[str, dict[str, Any]] = {
+        str(row.get("service_id")): row for row in (stats or {}).get("services", [])
+    }
+    revenue_by_wallet = {r["provider"]: r for r in store.charged_by_provider()}
+    anchor_latest = store.anchor_latest_map()
+
+    # 锚定载荷（10 §1：fulfillment+feedback 合并 JSON 的 sha256）按 provider 分组；
+    # payload 与 digest 同源同构（explain/pending 透出的载荷与被签名摘要恒一致）
+    by_agent: dict[int, dict[str, dict[str, Any]]] = {}
+    for svc in services:
+        provider = svc["manifest"].get("provider", {})
+        agent_id = provider.get("agent_id")
+        if agent_id is None:
+            continue
+        sid = svc["service_id"]
+        metrics = _fulfillment_metrics(stats_by_service.get(sid))
+        by_agent.setdefault(int(agent_id), {})[sid] = {
+            "fulfillment": {**metrics, "window_hours": window_hours},
+        }
+    payload_by_agent: dict[int, dict[str, Any]] = {}
+    digest_by_agent: dict[int, str] = {}
+    for agent_id, services_payload in by_agent.items():
+        payload = {
+            "version": 1,
+            "provider_agent_id": agent_id,
+            "window_hours": window_hours,
+            "services": services_payload,
+        }
+        payload_by_agent[agent_id] = payload
+        digest_by_agent[agent_id] = _canonical_digest(payload)
+    return _Context(
+        services=services,
+        stats_by_service=stats_by_service,
+        stats_available=stats is not None,
+        revenue_by_wallet=revenue_by_wallet,
+        anchor_latest=anchor_latest,
+        payload_by_agent=payload_by_agent,
+        digest_by_agent=digest_by_agent,
+        window_hours=window_hours,
+        security_by_service=store.service_security_map(),
+        degraded=degraded,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 视图模型
+# ---------------------------------------------------------------------------
+
+
+class RevenueComponent(BaseModel):
+    total_raw: int = Field(description="链上 Charged 聚合（唯一真相，全量无时间窗）")
+    total: str
+    charged_count: int
+    distinct_payers: int | None = Field(description="网关窗口去重支付钱包数（§0.5 新增指标）")
+    score_component: float
+    formula: str = REVENUE_FORMULA
+    proof: str = Field(description="链上收入证明端点（ Charged 交易哈希清单）")
+
+
+class FulfillmentComponent(BaseModel):
+    available: bool
+    calls_success: int | None
+    calls_settled: int | None
+    calls_aborted: int | None
+    bad_debt: int | None
+    success_rate: float | None
+    p50_ms: int | None
+    p95_ms: int | None
+    window_hours: int
+    score_component: float | None = Field(
+        default=None, description="无履约数据时 None（总分按 0 计，证据不伪造零值）"
+    )
+    formula: str = FULFILLMENT_FORMULA
+    proof: dict[str, str | None] = Field(
+        description="digest=履约+反馈聚合 JSON sha256；anchor_tx=已锚定交易（可核）"
+    )
+
+
+class FreshnessComponent(BaseModel):
+    last_activity_at: str | None
+    age_h: float | None
+    half_life_h: float = FRESHNESS_HALF_LIFE_H
+    score_component: float
+    formula: str = FRESHNESS_FORMULA
+
+
+class Components(BaseModel):
+    revenue: RevenueComponent
+    fulfillment: FulfillmentComponent
+    freshness: FreshnessComponent
+
+
+class DecisionRow(BaseModel):
+    service_id: str
+    name: str
+    status: str
+    category: str
+    tags: list[str]
+    provider_wallet: str
+    provider_agent_id: int | None
+    price_raw: str = Field(description="manifest pricing.amount_raw（权威值）")
+    price: str
+    score: float
+    components: Components
+
+
+class DecisionServicesResponse(BaseModel):
+    category: str | None
+    window_hours: int
+    as_of: str = Field(description="本次评分基准时刻（显式传入=演示时间注入）")
+    sort: str
+    weights: dict[str, float]
+    formula: str
+    norm: str
+    services: list[DecisionRow]
+    degraded: list[str]
+
+
+class DecisionCategoriesResponse(BaseModel):
+    categories: list[str]
+    counts: dict[str, int]
+    total_active: int
+
+
+class AnchorInfo(BaseModel):
+    digest: str
+    anchor_tx: str | None
+    anchored_at: str | None
+    payload: dict[str, Any]
+
+
+class ExplainResponse(DecisionRow):
+    window_hours: int
+    as_of: str
+    weights: dict[str, float]
+    anchor: AnchorInfo
+
+
+class AnchorPendingItem(BaseModel):
+    provider_agent_id: int
+    digest: str
+    payload: dict[str, Any]
+
+
+class AnchorPendingResponse(BaseModel):
+    window_hours: int
+    pending: list[AnchorPendingItem]
+
+
+class AnchorResultRequest(BaseModel):
+    """keeper 锚定回执：{agent_id, digest, tx_hash}（幂等落 anchor_records）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: int = Field(ge=1)
+    digest: str
+    tx_hash: str
+
+
+class AnchorResultResponse(BaseModel):
+    agent_id: int
+    digest: str
+    tx_hash: str
+    duplicate: bool
+
+
+# ---------------------------------------------------------------------------
+# 行计算（归一化在候选集内）
+# ---------------------------------------------------------------------------
+
+
+def _candidate_rows(ctx: _Context, category: str | None, as_of: datetime) -> list[dict[str, Any]]:
+    """分区过滤 + 逐行原始值收集（归一化输入）。"""
+    rows: list[dict[str, Any]] = []
+    for svc in ctx.services:
+        manifest = svc["manifest"]
+        cat = manifest_category(manifest)
+        if category is not None and cat != category:
+            continue
+        provider = manifest.get("provider", {})
+        wallet = str(provider.get("wallet", "")).lower()
+        agent_id = provider.get("agent_id")
+        revenue = ctx.revenue_by_wallet.get(wallet)
+        total_raw = int(revenue["revenue_raw"]) if revenue else 0
+        calls = ctx.stats_by_service.get(svc["service_id"])
+        distinct = _to_int(calls.get("distinct_payers")) if calls else None
+        last_activity = (
+            parse_ts(calls.get("last_activity_at") or calls.get("last_call_at")) if calls else None
+        )
+        fresh, age_h = freshness_score(last_activity, as_of)
+        pricing = manifest.get("pricing", {})
+        rows.append(
+            {
+                "service_id": svc["service_id"],
+                "name": str(manifest.get("name", "")),
+                "status": svc["status"],
+                "category": cat,
+                "tags": manifest_tags(manifest),
+                "provider_wallet": wallet,
+                "provider_agent_id": int(agent_id) if agent_id is not None else None,
+                "price_raw": str(pricing.get("amount_raw", "0")),
+                "price": to_amount(int(pricing.get("amount_raw", "0"))),
+                "total_raw": total_raw,
+                "charged_count": int(revenue["charged_count"]) if revenue else 0,
+                "distinct_payers": distinct,
+                "fulfillment": _fulfillment_metrics(calls),
+                "freshness": fresh,
+                "last_activity_at": last_activity.isoformat() if last_activity else None,
+                "age_h": age_h,
+            }
+        )
+    return rows
+
+
+def _finalize_rows(ctx: _Context, rows: list[dict[str, Any]]) -> list[DecisionRow]:
+    """候选集内 min-max 归一化 + 加权合成（公式=模块 docstring，响应自描述）。"""
+    norm_ln = _norm([math.log(r["total_raw"] + 1) for r in rows])
+    norm_distinct = _norm([float(r["distinct_payers"] or 0) for r in rows])
+    out: list[DecisionRow] = []
+    for i, r in enumerate(rows):
+        rev_value = 0.5 * norm_ln[i] + 0.5 * norm_distinct[i]
+        metrics: dict[str, Any] = r["fulfillment"]
+        bonus = latency_bonus(metrics["p95_ms"])
+        ful_value = (
+            None
+            if metrics["success_rate"] is None or bonus is None
+            else metrics["success_rate"] * bonus
+        )
+        fresh_value = r["freshness"]
+        score = (
+            DECISION_WEIGHTS["revenue"] * rev_value
+            + DECISION_WEIGHTS["fulfillment"] * (ful_value or 0.0)
+            + DECISION_WEIGHTS["freshness"] * fresh_value
+        )
+        agent_id = r["provider_agent_id"]
+        digest = ctx.digest_by_agent.get(agent_id) if agent_id is not None else None
+        anchor = ctx.anchor_latest.get(agent_id) if agent_id is not None else None
+        out.append(
+            DecisionRow(
+                service_id=r["service_id"],
+                name=r["name"],
+                status=r["status"],
+                category=r["category"],
+                tags=r["tags"],
+                provider_wallet=r["provider_wallet"],
+                provider_agent_id=agent_id,
+                price_raw=r["price_raw"],
+                price=r["price"],
+                score=round(score, 4),
+                components=Components(
+                    revenue=RevenueComponent(
+                        total_raw=r["total_raw"],
+                        total=to_amount(r["total_raw"]),
+                        charged_count=r["charged_count"],
+                        distinct_payers=r["distinct_payers"],
+                        score_component=round(rev_value, 4),
+                        proof=(
+                            f"/leaderboard/providers/{r['provider_wallet']}/proof"
+                            if r["provider_wallet"]
+                            else ""
+                        ),
+                    ),
+                    fulfillment=FulfillmentComponent(
+                        available=metrics["available"],
+                        calls_success=metrics["calls_success"],
+                        calls_settled=metrics["calls_settled"],
+                        calls_aborted=metrics["calls_aborted"],
+                        bad_debt=metrics["bad_debt"],
+                        success_rate=metrics["success_rate"],
+                        p50_ms=metrics["p50_ms"],
+                        p95_ms=metrics["p95_ms"],
+                        window_hours=ctx.window_hours,
+                        score_component=None if ful_value is None else round(ful_value, 4),
+                        proof={
+                            "digest": digest or "",
+                            "anchor_tx": anchor["tx_hash"] if anchor else None,
+                        },
+                    ),
+                    freshness=FreshnessComponent(
+                        last_activity_at=r["last_activity_at"],
+                        age_h=None if r["age_h"] is None else round(r["age_h"], 3),
+                        score_component=round(fresh_value, 4),
+                    ),
+                ),
+            )
+        )
+    return out
+
+
+def _sort_rows(rows: list[DecisionRow], sort: str) -> list[DecisionRow]:
+    if sort == "price":
+        return sorted(rows, key=lambda r: (-int(r.price_raw), r.service_id))
+    return sorted(rows, key=lambda r: (-r.score, r.service_id))
+
+
+def _check_category(category: str) -> str | None:
+    """空=全量分区；非法词表值 422。"""
+    if not category:
+        return None
+    if category not in CATEGORIES:
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail=f"未知 category: {category!r}（词表: {CATEGORIES}）",
+            code="unknown_category",
+        )
+    return category
+
+
+# ---------------------------------------------------------------------------
+# 端点
+# ---------------------------------------------------------------------------
+
+
+@router.get("/decision/categories", response_model=DecisionCategoriesResponse)
+def decision_categories(request: Request) -> DecisionCategoriesResponse:
+    """类目词表 + 各计数（按 active manifests；缺省 other，10 §0.5）。"""
+    store: CoreStore = request.app.state.store
+    counts = dict.fromkeys(CATEGORIES, 0)
+    active = store.list_services("active")
+    for svc in active:
+        counts[manifest_category(svc["manifest"])] += 1
+    return DecisionCategoriesResponse(
+        categories=list(CATEGORIES), counts=counts, total_active=len(active)
+    )
+
+
+@router.get("/decision/services", response_model=DecisionServicesResponse)
+def decision_services(
+    request: Request,
+    category: str = "",
+    window_hours: int = Query(DEFAULT_WINDOW_HOURS, ge=1, le=87_600),
+    as_of: str = "",
+    sort: str = "score",
+) -> DecisionServicesResponse:
+    """带证明的排序（10 §3）：分区内四分量加权 + 每行证据包（as_of=演示时间注入）。"""
+    if sort not in ("score", "price"):
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail=f"sort 仅支持 score|price: {sort!r}",
+            code="bad_sort",
+        )
+    partition = _check_category(category)
+    as_of_dt = parse_as_of(as_of)
+    ctx = _build_context(request, window_hours=window_hours)
+    rows = _candidate_rows(ctx, partition, as_of_dt)
+    final = _sort_rows(_finalize_rows(ctx, rows), sort)
+    return DecisionServicesResponse(
+        category=partition,
+        window_hours=window_hours,
+        as_of=as_of_dt.isoformat(),
+        sort=sort,
+        weights=DECISION_WEIGHTS,
+        formula=SCORE_FORMULA,
+        norm=NORM_NOTE,
+        services=final,
+        degraded=ctx.degraded,
+    )
+
+
+@router.get("/decision/explain/{service_id}", response_model=ExplainResponse)
+def decision_explain(
+    service_id: str,
+    request: Request,
+    window_hours: int = Query(DEFAULT_WINDOW_HOURS, ge=1, le=87_600),
+    as_of: str = "",
+) -> ExplainResponse:
+    """单服务完整证据包（10 §3）：含反馈原始条目（receipt_id+时间戳）与锚定载荷。"""
+    as_of_dt = parse_as_of(as_of)
+    ctx = _build_context(request, window_hours=window_hours)
+    target = next((s for s in ctx.services if s["service_id"] == service_id), None)
+    if target is None:
+        raise ApiError(
+            status_code=404,
+            error="not_found",
+            detail=f"service 不存在或非 active: {service_id}",
+            code="service_not_found",
+        )
+    # 归一化基准=该服务所在类目分区（与 /decision/services?category= 同口径）
+    partition = manifest_category(target["manifest"])
+    rows = _candidate_rows(ctx, partition, as_of_dt)
+    finalized = _finalize_rows(ctx, rows)
+    row = next(r for r in finalized if r.service_id == service_id)
+    agent_id = row.provider_agent_id
+    digest = ctx.digest_by_agent.get(agent_id) if agent_id is not None else None
+    anchor = ctx.anchor_latest.get(agent_id) if agent_id is not None else None
+    return ExplainResponse(
+        **row.model_dump(),
+        window_hours=window_hours,
+        as_of=as_of_dt.isoformat(),
+        weights=DECISION_WEIGHTS,
+        anchor=AnchorInfo(
+            digest=digest or "",
+            anchor_tx=anchor["tx_hash"] if anchor else None,
+            anchored_at=anchor["anchored_at"] if anchor else None,
+            payload=_anchor_payload_for(ctx, agent_id),
+        ),
+    )
+
+
+def _anchor_payload_for(ctx: _Context, agent_id: int | None) -> dict[str, Any]:
+    """该 agent 的锚定载荷（与 digest 同源：取自 _Context 构建期的同一对象）。"""
+    if agent_id is None:
+        return {}
+    return ctx.payload_by_agent.get(agent_id, {})
+
+
+@router.get("/internal/decision/anchor-pending", response_model=AnchorPendingResponse)
+def anchor_pending(
+    request: Request,
+    window_hours: int = Query(DEFAULT_WINDOW_HOURS, ge=1, le=87_600),
+) -> AnchorPendingResponse:
+    """待锚定清单：digest 与最新锚定不一致（或从未锚定）的 provider（keeper 拉取）。"""
+    ctx = _build_context(request, window_hours=window_hours)
+    items: list[AnchorPendingItem] = []
+    for agent_id, digest in sorted(ctx.digest_by_agent.items()):
+        if ctx.anchor_latest.get(agent_id, {}).get("digest") == digest:
+            continue
+        items.append(
+            AnchorPendingItem(
+                provider_agent_id=agent_id,
+                digest=digest,
+                payload=_anchor_payload_for(ctx, agent_id),
+            )
+        )
+    return AnchorPendingResponse(window_hours=window_hours, pending=items)
+
+
+@router.post("/internal/decision/anchor-result", response_model=AnchorResultResponse)
+def anchor_result(body: AnchorResultRequest, request: Request) -> AnchorResultResponse:
+    """锚定回执落库（幂等）：digest 必须命中当前 pending 计算，防锚定过期摘要。"""
+    ctx = _build_context(request, window_hours=DEFAULT_WINDOW_HOURS)
+    if body.agent_id not in ctx.digest_by_agent:
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail=f"agent 无 active 服务或未知: {body.agent_id}",
+            code="anchor_agent_unknown",
+        )
+    if body.digest != ctx.digest_by_agent[body.agent_id]:
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail="digest 与当前待锚定摘要不一致（过期/算错）",
+            code="anchor_digest_mismatch",
+        )
+    tx = body.tx_hash.strip().lower()
+    if not tx.startswith("0x") or len(tx) != TX_HASH_HEX_LEN:
+        raise ApiError(
+            status_code=422,
+            error="invalid_request",
+            detail=f"tx_hash 非法: {body.tx_hash!r}",
+            code="bad_tx_hash",
+        )
+    store: CoreStore = request.app.state.store
+    inserted = store.anchor_record(body.agent_id, body.digest, tx)
+    return AnchorResultResponse(
+        agent_id=body.agent_id, digest=body.digest, tx_hash=tx, duplicate=not inserted
+    )
+
+
+# ---------------------------------------------------------------------------
+# /advice 极简判定视图（decision-as-advice §3 方案一：同引擎双视图，Agent 消费）
+# ---------------------------------------------------------------------------
+
+#: indifferent 死区阈值：榜首与 current 分差小于该值 → 不值得换（阈值自描述，可辩）
+ADVICE_INDIFFERENT_MARGIN = 0.05
+#: reason 模板触发阈值（三信号分量分差人话化；全部由 finalized rows 数字确定性生成）
+ADVICE_REVENUE_GAP = 0.2
+ADVICE_SUCCESS_RATE_GAP = 0.1
+ADVICE_LATENCY_GAP_MS = 1000
+#: freshness 人话阈值：age_h<1="刚刚活跃"；<24="N 小时前活跃"
+ADVICE_FRESH_JUST_NOW_H = 1.0
+ADVICE_FRESH_RECENT_H = 24.0
+#: reason 信号段上限（三信号各至多一段；"较你选的 {current}" 子句另拼不计入）
+ADVICE_MAX_SIGNAL_SEGMENTS = 3
+ADVICE_INSUFFICIENT_REASON = "分区暂无足够数据，建议按价格与服务描述自选"
+
+AdviceVerb = Literal["recommend", "keep", "switch", "indifferent", "insufficient_data"]
+
+
+class AdviceAlternative(BaseModel):
+    id: str
+    why: str = Field(description="同模板取一条最显著差异；无命中→综合分差")
+
+
+class AdviceSignals(BaseModel):
+    """建议对象的量化依据（同一引擎 components 的直接投影；Agent 可向用户转述）。"""
+
+    service_id: str
+    score: float
+    revenue: dict[str, object] = Field(description="链上收入：charged_count/distinct_payers/total")
+    fulfillment: dict[str, object] = Field(
+        description="履约历史：success_rate/p95_ms/calls_success/calls_aborted/window_hours"
+    )
+    freshness: dict[str, object] = Field(description="新鲜度：age_h/last_activity_at")
+
+
+class AdviceSecurity(BaseModel):
+    """平台安全评估（只陈述已核验事实；未覆盖维度在 notes 明确披露，不伪造结论）。"""
+
+    provider_identity: str = Field(description="链上身份（ERC-8004 agent_id）状态人话")
+    payee_binding: str = Field(description="收款地址与身份绑定状态人话")
+    billing_truth: str = Field(description="计费真相：链上 Charged 可核验")
+    fulfillment_anchor: str = Field(
+        description="履约数据摘要的链上锚定状态（无锚定=窗口未到，非异常）"
+    )
+    service_status: str = Field(description="服务当前状态（active/paused）")
+    content_scan: str = Field(
+        description=(
+            "内容扫描：最近探测的投毒/泄露扫描结论人话"
+            "（未见特征/有发现/从未探测三态，发现明细见 /services/security/{id}）"
+        )
+    )
+    notes: list[str] = Field(default_factory=list, description="已核验项与未覆盖维度")
+
+
+class AdviceResponse(BaseModel):
+    """极简判定式（Agent 只需读 verb + reason 即可行动；证据退为二级指针）。"""
+
+    verb: AdviceVerb = Field(
+        description=(
+            "recommend=纯推荐（current 缺失/不在分区）；keep=current 即榜首；"
+            "switch=更优且分差≥0.05；indifferent=分差死区；insufficient_data=分区无数据"
+        )
+    )
+    recommend: str | None = Field(default=None, description="建议服务；insufficient_data 时 None")
+    confidence: float | None = Field(default=None, description="recommend 的 score（0~1）")
+    margin: float | None = Field(
+        default=None, description="与次名（无 current/即榜首时）或与 current 的分差"
+    )
+    reason: str = Field(description="确定性模板拼接（禁 LLM），数字全部来自 finalized rows")
+    alternatives: list[AdviceAlternative] = Field(default_factory=list, description="≤2 条")
+    budget_impact: str | None = Field(
+        default=None, description="daily_budget_raw 提供时 'price / 日额 share'；缺省 null"
+    )
+    evidence: str | None = Field(
+        default=None, description="证据二级指针 /decision/explain/{recommend}（非证据本体）"
+    )
+    as_of: str
+    category: str | None = None
+    signals: AdviceSignals | None = Field(
+        default=None,
+        description="recommend 的量化依据（三信号具体值；insufficient_data 时 None）",
+    )
+    security: AdviceSecurity | None = Field(
+        default=None,
+        description=(
+            "平台安全评估（链上身份/收款绑定/计费真相/履约锚定/服务状态/内容扫描 + 披露）"
+        ),
+    )
+
+
+def _advice_signal_segments(rec: DecisionRow, cmp: DecisionRow | None) -> list[str]:
+    """三信号分量分差 → 人话段（确定性模板；顺序=权重序，截断至上限 3 段）。
+
+    - 收入分差>0.2 → "收入明显领先"/"收入明显落后"（rec 相对 cmp）
+    - 履约 success_rate 差>0.1 → "履约 X% vs Y%"（rec 在前）
+    - p95 差>1000ms → "延迟快/慢 N ms"（rec 更快=快）
+    - freshness（仅描述 rec 自身）：age_h<1 → "刚刚活跃"；<24 → "N 小时前活跃"
+    cmp=None（同分区唯一服务）时仅 freshness 可触发。
+    """
+    segs: list[str] = []
+    if cmp is not None:
+        rev_gap = rec.components.revenue.score_component - cmp.components.revenue.score_component
+        if rev_gap > ADVICE_REVENUE_GAP:
+            segs.append("收入明显领先")
+        elif rev_gap < -ADVICE_REVENUE_GAP:
+            segs.append("收入明显落后")
+        sr_rec = rec.components.fulfillment.success_rate
+        sr_cmp = cmp.components.fulfillment.success_rate
+        if (
+            sr_rec is not None
+            and sr_cmp is not None
+            and abs(sr_rec - sr_cmp) > (ADVICE_SUCCESS_RATE_GAP)
+        ):
+            segs.append(f"履约 {round(sr_rec * 100)}% vs {round(sr_cmp * 100)}%")
+        p_rec = rec.components.fulfillment.p95_ms
+        p_cmp = cmp.components.fulfillment.p95_ms
+        if p_rec is not None and p_cmp is not None and abs(p_rec - p_cmp) > ADVICE_LATENCY_GAP_MS:
+            diff = round(abs(p_rec - p_cmp))
+            segs.append(f"延迟{'快' if p_rec < p_cmp else '慢'} {diff} ms")
+    age_h = rec.components.freshness.age_h
+    if age_h is not None:
+        if age_h < ADVICE_FRESH_JUST_NOW_H:
+            segs.append("刚刚活跃")
+        elif age_h < ADVICE_FRESH_RECENT_H:
+            segs.append(f"{round(age_h)} 小时前活跃")
+    return segs[:ADVICE_MAX_SIGNAL_SEGMENTS]
+
+
+def _advice_reason(
+    rec: DecisionRow,
+    cmp: DecisionRow | None,
+    margin: float | None,
+    *,
+    current_id: str | None,
+) -> str:
+    """reason = 信号段（≤3）" + "连接 + 比较对象为 current 时另拼"较你选的 {current}"。
+
+    零命中回退（确定性）：分差达阈值→"综合分领先 X"，否则→"综合分接近"。
+    """
+    segs = _advice_signal_segments(rec, cmp)
+    if current_id is not None and cmp is not None and cmp.service_id == current_id:
+        segs.append(f"较你选的 {current_id}")
+    if not segs:
+        segs = [
+            f"综合分领先 {margin:.2f}"
+            if margin is not None and margin >= ADVICE_INDIFFERENT_MARGIN
+            else "综合分接近"
+        ]
+    text = " + ".join(segs)
+    return text[:1].upper() + text[1:]
+
+
+def _advice_alternative_why(alt: DecisionRow, rec: DecisionRow) -> str:
+    """备选一句话：同模板取最显著（权重序首条命中）差异；无命中→综合分差。"""
+    segs = _advice_signal_segments(alt, rec)
+    if segs:
+        return segs[0]
+    return f"综合分低 {round(rec.score - alt.score, 4):.2f}"
+
+
+def _fmt_ratio(value: float) -> str:
+    """占比 → 定点串（4 位小数去尾零）：0.05→"0.05"、0.2→"0.2"。"""
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _advice_signals(rec: DecisionRow) -> AdviceSignals:
+    """三信号量化投影：Agent 无需二跳 /decision/explain 即可转述依据。"""
+    f = rec.components.fulfillment
+    r = rec.components.revenue
+    return AdviceSignals(
+        service_id=rec.service_id,
+        score=rec.score,
+        revenue={
+            "charged_count": r.charged_count,
+            "distinct_payers": r.distinct_payers,
+            "total": r.total,
+        },
+        fulfillment={
+            "success_rate": f.success_rate,
+            "p95_ms": f.p95_ms,
+            "calls_success": f.calls_success,
+            "calls_aborted": f.calls_aborted,
+            "window_hours": f.window_hours,
+        },
+        freshness={
+            "age_h": rec.components.freshness.age_h,
+            "last_activity_at": rec.components.freshness.last_activity_at,
+        },
+    )
+
+
+#: content_scan 从未探测话术（诚实披露：probe 是 Provider 手动触发的采样）
+ADVICE_SCAN_NEVER_PROBED = "内容扫描：从未探测（Provider 发布后未跑过探测）"
+
+
+def _content_scan_text(service_id: str, scan: dict[str, Any] | None) -> str:
+    """服务最新扫描记录 → 人话（确定性模板；从未探测/未见特征/有发现三态）。"""
+    if scan is None:
+        return ADVICE_SCAN_NEVER_PROBED
+    if scan.get("clean"):
+        scanned_at = str(scan.get("scanned_at") or "")
+        return f"内容扫描：未见投毒/泄露特征（最近探测 {scanned_at}）"
+    findings = scan.get("findings") or []
+    counts = severity_counts(findings)
+    parts = "、".join(f"{sev} {n} 项" for sev, n in counts.items() if n)
+    summary = parts or "严重度未知"
+    return f"内容扫描：{len(findings)} 项发现（{summary}），详见 /services/security/{service_id}"
+
+
+def _advice_security(rec: DecisionRow, scan: dict[str, Any] | None) -> AdviceSecurity:
+    """安全评估投影：只陈述已核验事实；未覆盖维度显式披露（不伪造扫描结论）。
+
+    scan=None（从未探测）时内容扫描维度如实标注未覆盖；已探测时如实列出，
+    扫描边界（确定性规则、探测时点采样）单独披露。
+    """
+    f = rec.components.fulfillment
+    anchor_tx = (f.proof or {}).get("anchor_tx")
+    if scan is None:
+        notes = [
+            "已核验：链上身份注册 / 收款绑定 / 链上计费 / 履约锚定 / 服务状态",
+            "暂未覆盖：上游内容投毒扫描、响应数据泄露检测"
+            "（该服务从未探测；探测入口 POST /services/probe 带 service_id）",
+        ]
+    else:
+        notes = [
+            "已核验：链上身份注册 / 收款绑定 / 链上计费 / 履约锚定 / 服务状态 / "
+            "响应内容扫描（投毒/泄露）",
+            "扫描边界：确定性规则（禁 LLM）、探测时点采样；语义级对抗投毒与转发路径实时拦截未覆盖",
+        ]
+    return AdviceSecurity(
+        provider_identity=(
+            f"链上身份 #{rec.provider_agent_id}（ERC-8004）已注册"
+            if rec.provider_agent_id
+            else "无链上身份 tokenId（发布时未绑定）"
+        ),
+        payee_binding=(
+            f"收款地址 {rec.provider_wallet[:10]}… 与身份绑定（收入直进 provider 钱包）"
+            if rec.provider_agent_id
+            else f"收款地址 {rec.provider_wallet[:10]}…（未绑定链上身份，请核实）"
+        ),
+        billing_truth="计费以链上 Charged 事件为唯一真相（收入证明端点可核）",
+        fulfillment_anchor=(
+            f"履约数据摘要已锚定上链（tx {str(anchor_tx)[:18]}…）"
+            if anchor_tx
+            else "履约数据摘要尚未锚定（锚定窗口未到，非异常）"
+        ),
+        service_status=rec.status,
+        content_scan=_content_scan_text(rec.service_id, scan),
+        notes=notes,
+    )
+
+
+@router.get("/advice", response_model=AdviceResponse)
+def advice(
+    request: Request,
+    category: str = "",
+    current: str = Query("", description="Agent 本来想调的 service_id（缺省=纯推荐）"),
+    daily_budget_raw: int | None = Query(None, ge=1, description="L0 日预算现值（算占比用）"),
+    as_of: str = "",
+) -> AdviceResponse:
+    """极简判定视图（decision-as-advice §3 方案一）：同引擎的判定式投影。
+
+    判定序（确定性）：分区无 active 服务或全无履约数据 → insufficient_data（不给貌似
+    权威的建议，按价格升序兜底）；current 缺失/不在分区 → recommend；current 即榜首
+    （含同分区唯一服务）→ keep；榜首与 current 分差 <0.05 → indifferent；否则 switch。
+    reason 由 finalized rows 数字确定性模板拼接（禁 LLM）；recommend 恒等于
+    /decision/services 同分区榜首（同引擎一致性，可复算）。取数窗口恒用默认 168h
+    （引擎口径固定，与看板一致）。
+    """
+    partition = _check_category(category)
+    as_of_dt = parse_as_of(as_of)
+    ctx = _build_context(request, window_hours=DEFAULT_WINDOW_HOURS)
+    final = _sort_rows(_finalize_rows(ctx, _candidate_rows(ctx, partition, as_of_dt)), "score")
+
+    if not final or all(r.components.fulfillment.success_rate is None for r in final):
+        cheapest = sorted(final, key=lambda r: (int(r.price_raw), r.service_id))[:2]
+        return AdviceResponse(
+            verb="insufficient_data",
+            reason=ADVICE_INSUFFICIENT_REASON,
+            alternatives=[
+                AdviceAlternative(id=r.service_id, why=f"价格 {r.price}") for r in cheapest
+            ],
+            as_of=as_of_dt.isoformat(),
+            category=partition,
+        )
+
+    top = final[0]
+    runner_up = final[1] if len(final) > 1 else None
+    current_row = next((r for r in final if r.service_id == current), None) if current else None
+
+    verb: AdviceVerb
+    if current_row is None:
+        verb = "recommend"
+        cmp_row = runner_up
+        current_id: str | None = None
+    elif current_row.service_id == top.service_id:
+        verb = "keep"
+        cmp_row = runner_up
+        current_id = None
+    else:
+        current_id = current_row.service_id
+        cmp_row = current_row
+        if top.score - current_row.score < ADVICE_INDIFFERENT_MARGIN:
+            verb = "indifferent"
+        else:
+            verb = "switch"
+
+    margin = round(top.score - cmp_row.score, 4) if cmp_row is not None else None
+
+    budget_impact: str | None = None
+    if daily_budget_raw is not None:
+        share = int(top.price_raw) / daily_budget_raw
+        budget_impact = f"{top.price} / 日额 {_fmt_ratio(share)}"
+
+    alternatives = [
+        AdviceAlternative(id=r.service_id, why=_advice_alternative_why(r, top))
+        for r in final
+        if r.service_id != top.service_id
+    ][:2]
+
+    return AdviceResponse(
+        verb=verb,
+        recommend=top.service_id,
+        confidence=top.score,
+        margin=margin,
+        reason=_advice_reason(top, cmp_row, margin, current_id=current_id),
+        alternatives=alternatives,
+        budget_impact=budget_impact,
+        evidence=f"/decision/explain/{top.service_id}",
+        as_of=as_of_dt.isoformat(),
+        category=partition,
+        signals=_advice_signals(top),
+        security=_advice_security(top, ctx.security_by_service.get(top.service_id)),
+    )

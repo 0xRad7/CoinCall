@@ -1,0 +1,65 @@
+[project]
+name = "coincall-core"
+version = "0.1.0"
+description = "CoinCall 管理面：服务目录 / ServiceManifest / api key 签发与校验（ETH Wuhan 2026）"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "duckdb>=1.0",
+    "httpx==0.28.1",
+    "cryptography==44.0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-markers"
+asyncio_mode = "auto"
+markers = [
+    "unit: 离线单元测试（DB 用 tmp_path fixture，零网络）",
+    "live: 打真实外部服务的只读用例（本服务 P0 无此类）",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF", "T20", "S", "ANN", "PL"]
+ignore = [
+    "PLR0913",     # FastAPI 依赖注入参数多属正常
+    "RUF001",      # 中文文档：全角标点误报（移植 bot-chain-api C-02 沉淀）
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ANN", "PLR2004", "S105", "S106"]  # 断言字面量/测试无注解（C-02）
+"app/storage/**" = ["ANN401"]     # JSON 序列化边界，Any 是正确类型（bot-chain-api C-09）
+
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.coverage.run]
+source = ["app"]
