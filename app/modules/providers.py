@@ -6,6 +6,7 @@ V1 内置两种：
 """
 
 import ipaddress
+import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -108,6 +109,9 @@ def _guard_forward_url(url: str, *, allow_loopback: bool) -> str:
     return url
 
 
+logger = logging.getLogger(__name__)
+
+
 class HttpJsonProvider:
     """http_json 型端点：POST JSON → JSON，超时按 manifest（硬顶 60s 在 core 校验）。"""
 
@@ -151,7 +155,12 @@ class HttpJsonProvider:
                 break
             except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
                 if attempt + 1 < attempts:
-                    continue  # GET 上游连接级抖动：静默重试一次
+                    logger.warning(
+                        "GET 上游连接级断连，重试一次: url=%s err=%s",
+                        manifest.manifest.endpoint.url,
+                        exc,
+                    )
+                    continue
                 raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
             except httpx.HTTPError as exc:
                 raise ProviderError(f"provider 超时/网络错误: {exc}") from exc

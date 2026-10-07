@@ -11,6 +11,7 @@
 
 import hashlib
 import json
+import logging
 import time
 import uuid
 from datetime import UTC, datetime
@@ -31,6 +32,9 @@ from app.modules.keeper import Keeper
 from app.modules.manifest_client import ManifestInfo, ServiceNotFoundError
 from app.modules.providers import ProviderAdapter, ProviderError, ProviderResult
 from app.modules.receipt import ReceiptSigner, build_receipt, receipt_ts, sign_receipt
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(tags=["call"])
 
@@ -156,6 +160,13 @@ def _idempotency_replay(
     replay: dict[str, Any] = dict(hit)
     replay_headers = dict(replay["headers"])
     replay_headers["X-Idempotency-Replay"] = "1"
+    logger.info(
+        "幂等重放命中（未新扣款）: service=%s wallet=%s idem_key=%s receipt=%s",
+        service_id,
+        consumer_wallet,
+        key,
+        replay_headers.get("X-Receipt-Id"),
+    )
     return JSONResponse(
         status_code=replay["status_code"],
         content=replay["body"],
@@ -273,6 +284,12 @@ async def _forward_and_finalize(  # noqa: PLR0917 —— 单请求上下文参�
     except ProviderError as exc:
         gate.release(key_info.key_id, price)
         store.mark_call(call_id, CallStatus.ABORTED)
+        logger.warning(
+            "provider 转发失败（不结算）: service=%s call=%s err=%s",
+            manifest.service_id,
+            call_id,
+            exc,
+        )
         raise ApiError(
             status_code=502, error="service_error", detail=str(exc), code="provider_failed"
         ) from exc
