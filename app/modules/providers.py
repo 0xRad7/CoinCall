@@ -128,26 +128,36 @@ class HttpJsonProvider:
         _guard_forward_url(manifest.manifest.endpoint.url, allow_loopback=self.allow_loopback)
         timeout_s = manifest.manifest.endpoint.timeout_ms / 1000
         started = time.monotonic()
-        try:
-            if manifest.manifest.endpoint.method == "GET":
-                resp = await self.http.get(
-                    manifest.manifest.endpoint.url,
-                    params=_query_params(body),
-                    timeout=timeout_s,
-                    headers=dict(upstream_headers) if upstream_headers else None,
-                )
-            else:
-                resp = await self.http.post(
-                    manifest.manifest.endpoint.url,
-                    json=body,
-                    timeout=timeout_s,
-                    headers=dict(upstream_headers) if upstream_headers else None,
-                )
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
+        method = manifest.manifest.endpoint.method
+        # 连接级错误（连接被断/建连失败）对 GET 上游重试一次：冷启动/隧道抖动常见，
+        # 失败本来就不结算，重试对消费端透明；POST 上游不重试（防上游重复执行副作用）。
+        attempts = 2 if method == "GET" else 1
+        for attempt in range(attempts):
+            try:
+                if method == "GET":
+                    resp = await self.http.get(
+                        manifest.manifest.endpoint.url,
+                        params=_query_params(body),
+                        timeout=timeout_s,
+                        headers=dict(upstream_headers) if upstream_headers else None,
+                    )
+                else:
+                    resp = await self.http.post(
+                        manifest.manifest.endpoint.url,
+                        json=body,
+                        timeout=timeout_s,
+                        headers=dict(upstream_headers) if upstream_headers else None,
+                    )
+                break
+            except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
+                if attempt + 1 < attempts:
+                    continue  # GET 上游连接级抖动：静默重试一次
+                raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
+        del started  # 延迟统计在路由层统一做
         if resp.status_code // 100 != PROVIDER_2XX_BASE:
             raise ProviderError(f"provider 返回 {resp.status_code}")
-        del started  # 延迟统计在路由层统一做
         try:
             return ProviderResult(status_code=resp.status_code, body=resp.json())
         except ValueError as exc:

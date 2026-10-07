@@ -66,3 +66,38 @@ def test_get_injects_credentials_too():
     asyncio.run(p.forward(_get_manifest(), {"q": "x"}, upstream_headers={"X-API-KEY": "sk-1"}))
     sent = {k.lower(): v for k, v in captured["headers"].items()}
     assert sent.get("x-api-key") == "sk-1"
+
+
+def test_get_retries_once_on_connection_drop():
+    """GET 上游连接级断连（冷启动/隧道抖动）静默重试一次后成功。
+
+    2026-10-07 线上：ngrok 上游间歇 RemoteProtocolError（2/3 失败），消费端 502 但未扣款；
+    重试对消费端透明。POST 上游不重试（防上游重复执行副作用）——由语义保证，此处锚 GET 行为。
+    """
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        return httpx.Response(200, json={"ok": 1})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False)
+    p = HttpJsonProvider(http=http)
+    result = asyncio.run(p.forward(_get_manifest(), {"q": "hi"}))
+    assert result.status_code == 200 and result.body == {"ok": 1}
+    assert calls["n"] == 2  # 第一次断连 + 第二次成功
+
+
+def test_get_both_attempts_drop_raises_provider_error():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.RemoteProtocolError("drop")
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False)
+    p = HttpJsonProvider(http=http)
+    with pytest.raises(ProviderError, match="provider 超时/网络错误"):
+        asyncio.run(p.forward(_get_manifest(), {"q": "hi"}))
+    assert calls["n"] == 2  # 重试过一次后仍失败才报 502
