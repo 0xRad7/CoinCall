@@ -152,6 +152,39 @@ export default function Help() {
             </ul>
           </div>
           <div className="card" style={{ marginTop: 16, marginBottom: 0 }}>
+            <h3>接入我的 Agent</h3>
+            <p className="card-desc">试用调通后，消费端工作台出现「给我的 Agent 接入」导出卡——三种形态按 Agent 宿主能力分档：</p>
+            <table className="list">
+              <thead>
+                <tr><th>形态</th><th>适用 Agent</th><th>交付物</th><th>交互边界</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>A. MCP Server</b>（主路径）</td>
+                  <td>任何 MCP 客户端（Claude/ZCode/Cursor/自研）</td>
+                  <td>stdio server（uv run 即起）；五工具面 = 决策闭环</td>
+                  <td>工具调用即付费调用；预算/白名单由 env 注入 L0 引擎在本地强制</td>
+                </tr>
+                <tr>
+                  <td><b>B. Python SDK</b></td>
+                  <td>LangChain / 自研 Agent 进程内</td>
+                  <td><span className="mono">from coincall import Client</span>（pip 安装）</td>
+                  <td>代码级完全控制；PolicyConfig 参数显式传</td>
+                </tr>
+                <tr>
+                  <td><b>C. Skill</b>（指导层）</td>
+                  <td>有 skill 机制的宿主</td>
+                  <td>coincall-consumer skill（SKILL.md + call.py CLI）</td>
+                  <td>教 Agent <b>如何安全地</b>用 A/B：先查价→超限问人→失败不重试→每笔报收据</td>
+                </tr>
+              </tbody>
+            </table>
+            <InfoBox>
+              导出配置里的 COINCALL_WALLET_KEY 永远是<b>指向 0600 文件的路径</b>而非明文；复制前需完成 4 项安全自检
+              （私钥文件 0600 / 预算三顶已设 / 白名单已配 / 明文 key 不进代码库）。
+            </InfoBox>
+          </div>
+          <div className="card" style={{ marginTop: 16, marginBottom: 0 }}>
             <h3>探测与 Schema 识别</h3>
             <p className="card-desc">发布 http_json 服务前的「先试试上游通不通」：</p>
             <ul style={{ paddingLeft: 18, lineHeight: 1.9 }}>

@@ -14,6 +14,7 @@ import { encodeAddrUint, fetchAllowance, fetchTokenBalance, type TxProgress } fr
 import { isUserRejected } from "../chain/injected";
 import { buildCallAuthorization, buildPaymentHeader } from "../chain/signing";
 import { SchemaForm } from "../components/SchemaForm";
+import { AgentExportCard } from "../components/AgentExportCard";
 import { Badge, ConfirmDialog, CopyButton, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
 import { humanizeChallenge, humanizeError } from "../lib/errors";
 import { addSpentRaw, appendHistory, clearHistory, loadBudgetRaw, loadHistory, loadSpentRaw, saveBudgetRaw, type CallHistoryEntry } from "../lib/storage";
@@ -54,6 +55,7 @@ export default function ConsumerWorkbench() {
           <FundsSection />
           <ApiKeySection />
           <TrialCallSection />
+          <HasHistoryGate />
           <HistorySection />
           <BudgetSection />
         </>
@@ -862,6 +864,18 @@ function ChallengePanel({ challenge }: { challenge: Gateway402Challenge }) {
       </details>
     </div>
   );
+}
+
+/** 试用调通后（有调用历史）出现「给我的 Agent 接入」导出卡。 */
+function HasHistoryGate() {
+  const [has, setHas] = useState(() => loadHistory().length > 0);
+  useEffect(() => {
+    const h = () => setHas(loadHistory().length > 0);
+    window.addEventListener("coincall:history", h);
+    return () => window.removeEventListener("coincall:history", h);
+  }, []);
+  if (!has) return null;
+  return <AgentExportCard />;
 }
 
 /* ============ 5. 调用历史 ============ */
