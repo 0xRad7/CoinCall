@@ -1268,6 +1268,213 @@ export function WithdrawStep() {
 /* ============ Teams 形态：我的 Teams（新首步）+ Team 主页 ============ */
 
 /** 新首步：我的 Teams（连接钱包 → mine 列表 / 空态创建 / 老身份导入折叠在高级区）。 */
+
+/* ============ 收入 Grid（仪表盘页首，自动查询） ============ */
+
+export interface RevenueSummary {
+  totalRaw: bigint; // Σ 各团队链上 Charged
+  creditsRaw: bigint; // Σ 各收款钱包 PayVault credits（未提现）
+  withdrawnRaw: bigint; // totalRaw - creditsRaw（页内口径）
+  teamsCount: number;
+  chargedCount: number;
+  wallets: string[];
+}
+
+/** 拉取收入三数：mine → Promise.all(teams detail) → Σ revenue；收款钱包去重 → Promise.all(credits) → Σ。 */
+async function fetchRevenueSummary(wallet: string): Promise<RevenueSummary> {
+  const mine = await teamsApi.mine(wallet);
+  const details = await Promise.all(mine.teams.map((t) => teamsApi.detail(t.agent_id).catch(() => null)));
+  let totalRaw = 0n;
+  let creditsRaw = 0n;
+  let chargedCount = 0;
+  const walletSet = new Set<string>();
+  for (const d of details) {
+    if (!d) continue;
+    totalRaw += BigInt(d.revenue.total_raw);
+    chargedCount += d.revenue.charged_count;
+    for (const w of d.revenue.wallets) walletSet.add(w);
+    for (const s of d.services) if (s.manifest.provider.wallet) walletSet.add(s.manifest.provider.wallet.toLowerCase());
+  }
+  const wallets = [...walletSet];
+  const creditsArr = await Promise.all(wallets.map((w) => fetchProviderCredits(w).catch(() => 0n)));
+  creditsRaw = creditsArr.reduce((a, b) => a + b, 0n);
+  // 已提现 = 总收入 − 当前 credits（口径：credits 是 Charged 后尚未 providerWithdraw 的部分）
+  const withdrawnRaw = totalRaw > creditsRaw ? totalRaw - creditsRaw : 0n;
+  return { totalRaw, creditsRaw, withdrawnRaw, teamsCount: mine.teams.length, chargedCount, wallets };
+}
+
+/** 收入 Grid：三卡 + 提现内嵌（未提现卡带主按钮）。未连接钱包不渲染（父层控制）。 */
+export function RevenueGrid({ onWithdrawn }: { onWithdrawn?: () => void }) {
+  const w = useWallet();
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+
+  const rev = useAsync(
+    () => (w.address ? fetchRevenueSummary(w.address) : Promise.resolve(null)),
+    [w.address, refreshTick]
+  );
+
+  if (!w.address) return null; // 未连接不渲染（保险；父层也有前置）
+
+  const loading = rev.loading && rev.data == null;
+  const failed = rev.error != null && rev.data == null;
+
+  return (
+    <div className="card">
+      <div className="flex" style={{ justifyContent: "space-between" }}>
+        <h3 className="mb-0">收入总览</h3>
+        <div className="btn-row">
+          <button className="btn small secondary" onClick={() => setRefreshTick((t) => t + 1)} disabled={loading}>
+            刷新
+          </button>
+        </div>
+      </div>
+      <p className="card-desc" style={{ marginTop: 4 }}>
+        链上 Charged 聚合（{rev.data?.teamsCount ?? "…"} 个团队 · {rev.data?.chargedCount ?? "…"} 笔）· PayVault credits 为未提现口径
+      </p>
+
+      {loading && <Spinner label="自动查询收入三数（mine → teams → credits）…" />}
+      {failed && (
+        <div className="alert warn">
+          <b>收入查询失败</b>——可能是链节点瞬断。点「刷新」重试；数字仅作展示，不影响链上资金。
+          <ErrorBox error={rev.error} />
+        </div>
+      )}
+
+      {rev.data && (
+        <div className="stat-grid">
+          <StatCard
+            k="总收入（链上 Charged）"
+            value={`${fromRaw(rev.data.totalRaw)} USDT`}
+            sub={`raw=${rev.data.totalRaw.toString()} · ${rev.data.chargedCount} 笔`}
+            evidence={<EvidencePair hash={`Σ teams revenue_raw=${rev.data.totalRaw.toString()}`} href="https://scan.bohr.life" label="链上 Charged 口径，去 scan 核对" />}
+          />
+          <div className="stat-card">
+            <div className="k">未提现收入（可提现）</div>
+            <div className="v num tone-success">{fromRaw(rev.data.creditsRaw)} USDT</div>
+            <div className="s num">raw={rev.data.creditsRaw.toString()} · PayVault credits</div>
+            <div className="s">
+              <button className="btn small" style={{ marginTop: 4 }} onClick={() => setWithdrawOpen((o) => !o)} disabled={rev.data!.creditsRaw === 0n}>
+                {withdrawOpen ? "收起提现" : "提现"}
+              </button>
+            </div>
+          </div>
+          <StatCard
+            k="已提现收入"
+            value={`${fromRaw(rev.data.withdrawnRaw)} USDT`}
+            sub={`raw=${rev.data.withdrawnRaw.toString()} · 口径=总收入−当前 credits`}
+          />
+        </div>
+      )}
+
+      {withdrawOpen && <WithdrawPanel wallets={rev.data?.wallets ?? []} onDone={() => { setWithdrawOpen(false); setRefreshTick((t) => t + 1); onWithdrawn?.(); }} />}
+    </div>
+  );
+}
+
+/** 内嵌提全面板：收款钱包逐个显示 credits → 全额 providerWithdraw（经注入钱包）。 */
+function WithdrawPanel({ wallets, onDone }: { wallets: string[]; onDone: () => void }) {
+  const w = useWallet();
+  const [credits, setCredits] = useState<Record<string, bigint>>({});
+  const [busy, setBusy] = useState(false);
+  const [waitingWallet, setWaitingWallet] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [tx, setTx] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all(wallets.map((wv) => fetchProviderCredits(wv).catch(() => 0n).then((c) => [wv, c] as const))).then((pairs) => {
+      if (alive) setCredits(Object.fromEntries(pairs));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [wallets]);
+
+  const withdraw = async (walletAddr: string) => {
+    const amount = credits[walletAddr] ?? 0n;
+    if (amount <= 0n) return;
+    setBusy(true);
+    setWaitingWallet(true);
+    setError(null);
+    setCancelled(false);
+    try {
+      const sel = await w.requireProvider();
+      if (!sel) throw new Error("未选择浏览器钱包。");
+      await ensureChain968(sel.provider);
+      const from = (await silentAccounts(sel.provider)) ?? (await connectInjected(sel.provider)).address;
+      const hash = await sendInjectedTx(sel.provider, from, VAULT_ADDR, encodeAddrUint(SEL_C.providerWithdraw, walletAddr, amount));
+      setWaitingWallet(false);
+      setTx(hash);
+      await waitForInjectedReceipt(hash);
+      onDone();
+    } catch (e) {
+      if (isUserRejected(e)) setCancelled(true);
+      else setError(e);
+    } finally {
+      setBusy(false);
+      setWaitingWallet(false);
+      setConfirming(null);
+    }
+  };
+
+  return (
+    <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginTop: 12, marginBottom: 0 }}>
+      <h3 className="mt-0" style={{ fontSize: 14 }}>提现（PayVault credits → 钱包，铁律 P8 路径恒开）</h3>
+      {wallets.length === 0 ? (
+        <Empty text="还没有收款钱包——先发布服务产生收入。" />
+      ) : (
+        <table className="list">
+          <thead>
+            <tr><th>收款钱包</th><th>credits（未提现）</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            {wallets.map((wv) => {
+              const c = credits[wv];
+              return (
+                <tr key={wv}>
+                  <td className="mono" style={{ fontSize: 12 }}>{wv.slice(0, 10)}…{wv.slice(-6)}</td>
+                  <td className="num">{c == null ? <Spinner /> : `${fromRaw(c)} USDT`}<span className="dim num"> · raw={c?.toString() ?? "…"}</span></td>
+                  <td>
+                    {c != null && c > 0n ? (
+                      <button className="btn small danger" disabled={busy} onClick={() => setConfirming(wv)}>
+                        提现全额
+                      </button>
+                    ) : (
+                      <span className="dim">{c === 0n ? "无可提现" : "…"}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <ConfirmDialog
+        open={confirming != null}
+        title="确认上链提现（不可逆）"
+        body={
+          <div>
+            将从 PayVault 把 <b className="num">{confirming ? fromRaw(credits[confirming] ?? 0n) : "-"} USDT</b>（raw={confirming ? (credits[confirming] ?? 0n).toString() : "-"}）提现到{" "}
+            <span className="mono">{confirming?.slice(0, 10)}…</span>。交易由注入钱包发送，上链后不可撤销。
+          </div>
+        }
+        confirmText="确认提现"
+        onConfirm={() => confirming && void withdraw(confirming)}
+        onCancel={() => setConfirming(null)}
+      />
+      {cancelled && <WarnBox>你取消了提现交易（钱包弹窗里拒绝）。没有产生任何交易，可重新发起。</WarnBox>}
+      {error != null && <ErrorBox error={error} />}
+      {waitingWallet && (
+        <div className="alert info"><span className="flex"><span className="spin" /> 等待钱包确认…（请在扩展弹窗里确认提现交易）</span></div>
+      )}
+      {tx && <SuccessBox>提现交易已发送：<TxLink hash={tx} /></SuccessBox>}
+    </div>
+  );
+}
+
 export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: number) => void; onPublish: (team: MyTeam) => void }) {
   const w = useWallet();
   const mine = useAsync(() => (w.address ? teamsApi.mine(w.address) : Promise.resolve(null)), [w.address]);
