@@ -1475,24 +1475,42 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
 
   return (
     <div className="card">
-      <h3>我的 Teams（{w.address.slice(0, 8)}…）</h3>
-      <p className="card-desc">钱包 → Teams → 服务：一个钱包可建多个团队，每个团队发布多个服务。</p>
+      <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <h3 className="mb-0">我的 Teams</h3>
+          <p className="card-desc" style={{ margin: "2px 0 0" }}>钱包 {w.address.slice(0, 8)}… · 一个钱包可建多个团队</p>
+        </div>
+        <CreateTeamButton onCreated={() => mine.reload()} inline />
+      </div>
       <AsyncSection state={mine} empty="还没有团队">
         {(m) =>
           m.teams.length === 0 ? (
-            <div className="empty" style={{ padding: "24px 0" }}>还没有团队——创建你的第一个团队，开始上架服务。</div>
+            <div className="empty" style={{ padding: "24px 0" }}>还没有团队——点右上角「+ 创建团队」开始上架服务。</div>
           ) : (
-            <div className="svc-grid">
+            <div className="svc-grid" style={{ marginTop: 12 }}>
               {m.teams.map((t) => (
-                <div key={t.agent_id} className="svc-card" onClick={() => onOpenTeam(t.agent_id)} role="button" aria-label={`打开团队 ${t.display_name}`}>
+                <div
+                  key={t.agent_id}
+                  className="svc-card clickable"
+                  onClick={() => onOpenTeam(t.agent_id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenTeam(t.agent_id); } }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`打开团队 ${t.display_name}`}
+                >
                   <div className="flex" style={{ justifyContent: "space-between" }}>
                     <span className="svc-name">{t.display_name}</span>
                     <Badge kind="ok">{t.service_count} 服务</Badge>
                   </div>
                   <div className="mono dim" style={{ fontSize: 11 }}>team #{t.agent_id} · 创建于 {t.created_at.slice(0, 10)}</div>
-                  <div className="btn-row" style={{ marginTop: 8 }}>
-                    <button className="btn small" onClick={(e) => { e.stopPropagation(); onOpenTeam(t.agent_id); }}>打开团队</button>
-                    <button className="btn small secondary" onClick={(e) => { e.stopPropagation(); onPublish(t); }}>发布新服务</button>
+                  <div className="flex" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+                    <button
+                      className="btn small secondary"
+                      onClick={(e) => { e.stopPropagation(); onPublish(t); }}
+                      title="为此团队发布新服务（也可点整卡进详情后再发布）"
+                    >
+                      发布新服务
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1500,8 +1518,6 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
           )
         }
       </AsyncSection>
-
-      <CreateTeamButton onCreated={() => mine.reload()} />
 
       <details style={{ marginTop: 16 }}>
         <summary className="dim" style={{ cursor: "pointer", fontSize: 12 }}>导入已有身份（高级）</summary>
@@ -1515,7 +1531,7 @@ export function MyTeamsStep({ onOpenTeam, onPublish }: { onOpenTeam: (agentId: n
 }
 
 /** 创建团队：输入名 → prepare（代发铸造）→ AgentWalletSet 签名 → 绑定 → providers → 打开新团队主页。 */
-export function CreateTeamButton({ onCreated }: { onCreated?: (agentId: number) => void }) {
+export function CreateTeamButton({ onCreated, inline }: { onCreated?: (agentId: number) => void; inline?: boolean }) {
   const w = useWallet();
   const [name, setName] = useState("");
   const [open, setOpen] = useState(false);
@@ -1574,9 +1590,9 @@ export function CreateTeamButton({ onCreated }: { onCreated?: (agentId: number) 
   const busy = phase != null && phase !== "done";
 
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={inline ? {} : { marginTop: 14 }}>
       {open ? (
-        <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginBottom: 0 }}>
+        <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginBottom: 0, marginTop: 12 }}>
           <div className="field" style={{ marginBottom: 8 }}>
             <label>团队名称</label>
             <input type="text" value={name} maxLength={128} placeholder="例如 RadAI" onChange={(e) => setName(e.target.value)} aria-label="团队名称" />
@@ -1603,7 +1619,7 @@ export function CreateTeamButton({ onCreated }: { onCreated?: (agentId: number) 
           {error != null && <ErrorBox error={error} />}
         </div>
       ) : (
-        <button className="btn" onClick={() => setOpen(true)}>+ 创建团队</button>
+        <button className={inline ? "btn small" : "btn"} onClick={() => setOpen(true)}>+ 创建团队</button>
       )}
     </div>
   );

@@ -369,3 +369,11 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .mode-card.consumer .mc-role { color: var(--consumer); }
 .mode-card.consumer .mc-role .dot { background: var(--consumer); }
 .mode-card.consumer .mc-go { color: var(--consumer); }
+
+/* 团队卡整卡可点（hover 高亮 + 键盘可达） */
+.svc-card.clickable { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+.svc-card.clickable:hover, .svc-card.clickable:focus-visible { border-color: var(--primary); box-shadow: 0 2px 8px rgba(47, 95, 224, 0.15); outline: none; }
+
+/* 发布页分组卡 + 粘性操作条 */
+.form-group-card { margin-bottom: var(--space-5); }
+.sticky-action-bar { position: sticky; bottom: 0; z-index: 20; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); box-shadow: 0 -2px 12px rgba(20, 30, 50, 0.08); margin-top: var(--space-4); }
