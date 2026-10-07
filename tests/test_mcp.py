@@ -26,6 +26,7 @@ from tools.mcp_server import PROTOCOL_VERSION, CoinCallMcpServer, build_client_f
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 FIVE_TOOLS = ["catalog", "service_quote", "paid_service_call", "spend_report", "wallet_status"]
+_KEEP_DEFAULT = object()  # 哨兵：区分"未传 wallet"与"显式传 None（无钱包用例）"
 
 
 def _mock_http() -> httpx.Client:
@@ -38,16 +39,18 @@ def _mock_http() -> httpx.Client:
 
 
 def _server(
-    wallet: LocalWallet | None = None,
+    wallet: object = _KEEP_DEFAULT,
     policy: PolicyConfig | None = None,
     http: httpx.Client | None = None,
 ) -> CoinCallMcpServer:
     """工厂注入 mock 客户端的 server（wallet/policy 可注入新三工具的用例）。"""
 
+    effective_wallet = LocalWallet.from_key(ANVIL1_KEY) if wallet is _KEEP_DEFAULT else wallet
+
     def factory() -> Client:
         return Client(
             api_key="cck_test",
-            wallet=wallet if wallet is not None else LocalWallet.from_key(ANVIL1_KEY),
+            wallet=effective_wallet,  # type: ignore[arg-type] —— 哨兵已消解，仅剩 None|LocalWallet
             gateway_url="http://gw.test",
             core_url="http://core.test",
             http=http or _mock_http(),
