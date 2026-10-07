@@ -129,6 +129,39 @@ class Client:
                 return int(svc["manifest"]["pricing"]["amount_raw"])
         raise CoinCallError(f"服务不在目录: {service_id}（先 catalog() 查可用服务）")
 
+    # -- 决策建议 --
+
+    def advice(
+        self,
+        category: str | None = None,
+        current: str | None = None,
+        daily_budget_raw: int | None = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
+        """core GET /advice——决策引擎的判定式投影（verb + reason 人话 + ≤2 备选）。
+
+        verb：recommend（纯推荐）/ keep（current 即榜首）/ switch（有更优且分差≥0.05）/
+        indifferent（分差死区）/ insufficient_data（分区无数据）。
+        category 缺省=全量分区；current=Agent 本来想调的服务；daily_budget_raw
+        提供时响应含 budget_impact 占比；timeout_s 覆写本次超时（service_quote
+        内嵌走 3s 短超时，防 advice 拖垮报价）。
+        """
+        params: dict[str, str | int] = {}
+        if category:
+            params["category"] = category
+        if current:
+            params["current"] = current
+        if daily_budget_raw is not None:
+            params["daily_budget_raw"] = daily_budget_raw
+        request_kwargs: dict[str, Any] = {"params": params}
+        if timeout_s is not None:
+            request_kwargs["timeout"] = timeout_s
+        resp = self._http.get(f"{self.core_url}/advice", **request_kwargs)
+        if resp.status_code >= HTTP_BAD_REQUEST:
+            raise self._gateway_error(resp)
+        return resp.json()
+
     # -- 付费调用 --
 
     @property
