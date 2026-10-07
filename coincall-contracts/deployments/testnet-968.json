@@ -1,0 +1,88 @@
+{
+  "epoch": 2,
+  "network": "botchain-testnet",
+  "chainId": 968,
+  "payVault": "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0",
+  "token": "0x75edC9335175Fc0552D51D48439F229c10420fe3",
+  "tokenSymbol": "USDT",
+  "operator": "0xC37fFE97B4D2C3D0187B1dDEDF273E52A461B63a",
+  "deployTxHash": "0x95a76e44662761fab48f894b159f052ca3eb5a2eac3ee63a3b57dafd643895e5",
+  "blockNumber": 25870488,
+  "compilerVersion": "0.8.24",
+  "deployTime": "2026-10-06T04:52:46+00:00",
+  "bytecodeHash": "0xc682276bae872af4ff55a29ded0e744ac3d013371223b5f36681b8902220acba",
+  "deployTxs": {
+    "payVault": "0x95a76e44662761fab48f894b159f052ca3eb5a2eac3ee63a3b57dafd643895e5"
+  },
+  "domainSeparator": "0x00ae87cf4248afb7385a6ec05d3c4b294616dec3c0f44effecd64acb06c2d8e6",
+  "eip712": {
+    "domain": {
+      "name": "PayVault",
+      "version": "1",
+      "chainId": 968
+    },
+    "structType": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)",
+    "goldenVector": "vectors/eip712_golden.json"
+  },
+  "abiFiles": {
+    "payVault": "artifacts/PayVault.json",
+    "mockUsdt": "artifacts/MockUSDT.json"
+  },
+  "gasPriceWei": 20000000000,
+  "epochs": [
+    {
+      "epoch": 1,
+      "token": "0x4F8f2eaAA3988E9f59B72C93262DDC1084E540fb",
+      "tokenSymbol": "MockUSDT",
+      "payVault": "0xFe91F55C0e7Ccbc4A6619C67544Ab453cf79C471",
+      "deployTxHash": "0xb7cd16735dd0a82b22d619e56b079ae80ef94cb40d85b9cf0f56b74261f41130",
+      "retiredAt": "2026-10-06T04:52:46+00:00",
+      "reason": "token switch to real USDT"
+    }
+  ],
+  "smoke": {
+    "withdraw_zero_credits_reverts_insufficient_credits": true,
+    "unauthorized_charge_failed": true,
+    "unauthorized_charge_tx": "0x3bf640da0cce895aa8f7f5abdd94d5b676f9bc28a4d3b85ac35feb9e0e387bb0",
+    "consumer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "provider": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    "charge_tx": "0xf8f4e89bdc94e4ee8e22893d5445b425c148c9b4fe74ceb78cfc03923f09d584",
+    "charged_events": [
+      {
+        "provider": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+        "from": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        "nonce": "0x000000000000000000000000000000000000000000000000000000000000aa01",
+        "value": 2000000
+      },
+      {
+        "provider": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+        "from": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        "nonce": "0x000000000000000000000000000000000000000000000000000000000000aa02",
+        "value": 3000000
+      },
+      {
+        "provider": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+        "from": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        "nonce": "0x000000000000000000000000000000000000000000000000000000000000aa03",
+        "value": 5000000
+      }
+    ],
+    "charged_matches_queue": true,
+    "credits_after_charge": 10000000,
+    "i4_after_charge": true,
+    "nonce_replay_rejected": true,
+    "replay_tx": "0xcfdda304efacfa7273dcacf4eb14014fe44265a333b16291c2e86c36abe5b8ee",
+    "withdraw_tx": "0x94baedf65793bd79b0b2b368cd2940dcd2ec37e85f6cc34c76626ac4ed5692d9",
+    "withdrawn_event": {
+      "provider": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "to": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "amount": 10000000
+    },
+    "withdraw_received": 10000000,
+    "withdraw_received_equals_credits": true,
+    "i4_after_withdraw": true,
+    "domain_separator_matches_vector_domain": true,
+    "previous_epoch_vault_untouched": true
+  },
+  "smokeAllPassed": true
+}

@@ -1,0 +1,40 @@
+{
+  "epoch": 1,
+  "network": "botchain-mainnet",
+  "chainId": 677,
+  "payVault": "0x39f9c91992BAfd1528ef87aFDf8B17b7b6cc1818",
+  "token": "0xaBabc7Ddc03e501d190C676BF3d92ef0e6e87a3C",
+  "tokenSymbol": "USDT",
+  "operator": "0xb1ea3EA94e2Fd7Cb9244cD460dA863FC4b61033A",
+  "deployTxHash": "0xed7cf89878fcf94da650995ce22d2bb67c51a174b5c747900016b0b10e3929f2",
+  "blockNumber": 25878130,
+  "compilerVersion": "0.8.24",
+  "deployTime": "2026-10-07T17:11:42.772269+00:00",
+  "bytecodeHash": "0x1e6e83e105d6db32fe6830c8bbe62415dffafd9a3575418f265ec006133797b2",
+  "deployTxs": {
+    "payVault": "0xed7cf89878fcf94da650995ce22d2bb67c51a174b5c747900016b0b10e3929f2"
+  },
+  "domainSeparator": "0xdb23b412a34364764336b28e1b07adae8195809fa94aaa19f881aef834b7231c",
+  "eip712": {
+    "domain": {
+      "name": "PayVault",
+      "version": "1",
+      "chainId": 677,
+      "verifyingContract": "0x39f9c91992BAfd1528ef87aFDf8B17b7b6cc1818"
+    },
+    "structType": "Authorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)",
+    "goldenVector": "vectors/eip712_golden.json"
+  },
+  "abiFiles": {
+    "payVault": "artifacts/PayVault.json"
+  },
+  "notes": [
+    "主网纪元 1：keystore 直署（bot-chain-api /contracts/deploy，TxService keystore 签名，私钥未出库）",
+    "构造参数已链上核验：token=主网USDT / operator=keystore 托管地址（2026-10-08 发起人手动部署）",
+    "冒烟未跑（红线：AI 不自主上链；后续人工最小冒烟：chargeWithSigBatch 对无签名单笔应 bad_signature 拒绝 + providerWithdraw 权限）",
+    "gas 805318 @ 20gwei = 0.0161 BOT"
+  ],
+  "smoke": {
+    "status": "pending-manual"
+  }
+}

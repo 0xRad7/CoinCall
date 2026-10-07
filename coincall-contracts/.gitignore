@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+
+# 环境与密钥（私钥永不入库）
+.env
+*.key
+
+# 注意：artifacts/（编译产物）与 deployments/（部署事实）必须入库，是其他仓接线的唯一来源
