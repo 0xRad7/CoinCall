@@ -20,12 +20,13 @@ from typing import Any
 import httpx
 
 from coincall.errors import (
-    BudgetExceededError,
+    BudgetExceededError,  # noqa: F401 —— 向后兼容 re-export（v1 budget_raw 用户 except 用）
     CoinCallError,
     GatewayError,
     PaymentRequiredError,
     WalletError,
 )
+from coincall.policy import PolicyConfig, PolicyEngine
 from coincall.signing import Authorization, build_payment_header
 from coincall.wallet import LocalWallet
 
@@ -70,6 +71,7 @@ class Client:
         core_url: str = DEFAULT_CORE_URL,
         budget_raw: int | None = None,
         *,
+        policy: PolicyConfig | PolicyEngine | None = None,
         http: httpx.Client | None = None,
         auth_window_s: int = AUTH_WINDOW_S,
     ) -> None:
@@ -78,6 +80,15 @@ class Client:
         self.gateway_url = gateway_url.rstrip("/")
         self.core_url = core_url.rstrip("/")
         self.budget_raw = budget_raw
+        self.policy: PolicyEngine | None
+        if isinstance(policy, PolicyEngine):
+            self.policy = policy
+        elif policy is not None:
+            self.policy = PolicyEngine(policy)
+        elif budget_raw is not None:
+            self.policy = PolicyEngine(PolicyConfig(total_budget_raw=budget_raw))
+        else:
+            self.policy = None
         self.auth_window_s = auth_window_s
         self._http = http or httpx.Client(trust_env=False, timeout=HTTP_TIMEOUT_S)
         self._catalog: dict[str, Any] | None = None
@@ -127,8 +138,8 @@ class Client:
     ) -> CallResult:
         """调用付费服务：签名支付授权 → X-PAYMENT → 网关 →（402→人话指引）。"""
         price_raw = self.service_price_raw(service_id)
-        if self.budget_raw is not None and self._spent_raw + price_raw > self.budget_raw:
-            raise BudgetExceededError(self._spent_raw, self.budget_raw, price_raw)
+        if self.policy is not None:
+            self.policy.check(service_id, price_raw)  # L0：签名前评估（人话拒绝）
         if self.wallet is None:
             raise WalletError(
                 "未装配本地付费钱包：LocalWallet.from_key()/create() 后传入 Client(wallet=…)"
@@ -163,6 +174,12 @@ class Client:
             raise self._gateway_error(resp)
 
         self._spent_raw += price_raw
+        if self.policy is not None:
+            self.policy.record_receipt(
+                self.policy.record_intent(service_id, price_raw, auth.nonce.hex()),
+                resp.headers.get("X-Receipt-Id", ""),
+                price_raw,
+            )
         passthrough = {k: resp.headers[k] for k in RECEIPT_HEADERS if k in resp.headers}
         return CallResult(
             service_id=service_id,

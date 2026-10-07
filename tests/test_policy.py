@@ -3,7 +3,8 @@
 import json
 
 import pytest
-from coincall.policy import PolicyConfig, PolicyEngine, PolicyViolation
+
+from coincall.policy import PolicyConfig, PolicyEngine, PolicyViolationError
 
 pytestmark = pytest.mark.unit
 
@@ -26,13 +27,13 @@ def cfg(**kw):
 def test_triple_budget(tmp_path):
     e = PolicyEngine(cfg(state_path=tmp_path / "s.json", ledger_path=tmp_path / "l.jsonl"))
     e.check("svc", 100)  # ok
-    with pytest.raises(PolicyViolation, match="单笔"):
+    with pytest.raises(PolicyViolationError, match="单笔"):
         e.check("svc", 101)
     e.check("svc", 100)
     e.check("svc", 100)
     e.check("svc", 100)
-    e.check("svc", 90)  # 日 490
-    with pytest.raises(PolicyViolation, match="日"):
+    e.check("svc", 100)  # 日 500 满额
+    with pytest.raises(PolicyViolationError, match="日"):
         e.check("svc", 50)
     # 总额边界
     e2 = PolicyEngine(
@@ -43,18 +44,20 @@ def test_triple_budget(tmp_path):
             ledger_path=tmp_path / "l2.jsonl",
         )
     )
-    for _ in range(3):
+    e2.check("svc", 100)
+    e2.check("svc", 100)  # 总额 200
+    with pytest.raises(PolicyViolationError, match="总额"):
         e2.check("svc", 100)
-    with pytest.raises(PolicyViolation, match="总额"):
-        e2.check("svc", 1)
 
 
 def test_budget_persists_across_restart(tmp_path):
     p = tmp_path / "s.json"
-    e = PolicyEngine(cfg(state_path=p, ledger_path=tmp_path / "l.jsonl"))
+    e = PolicyEngine(cfg(max_per_call_raw=500, state_path=p, ledger_path=tmp_path / "l.jsonl"))
     e.check("svc", 300)
-    e = PolicyEngine(cfg(state_path=p, ledger_path=tmp_path / "l.jsonl"))  # 重启
-    with pytest.raises(PolicyViolation, match="日"):
+    e = PolicyEngine(
+        cfg(max_per_call_raw=500, state_path=p, ledger_path=tmp_path / "l.jsonl")
+    )  # 重启
+    with pytest.raises(PolicyViolationError, match="日"):
         e.check("svc", 300)  # 日额 500，已花 300 再花 300 超
 
 
@@ -67,7 +70,7 @@ def test_allowlist_default_deny(tmp_path):
         )
     )
     e.check("svc_a", 10)
-    with pytest.raises(PolicyViolation, match="白名单"):
+    with pytest.raises(PolicyViolationError, match="白名单"):
         e.check("svc_b", 10)
 
 
@@ -76,7 +79,7 @@ def test_rate_limit_and_min_interval(tmp_path):
         cfg(min_interval_s=60, state_path=tmp_path / "s.json", ledger_path=tmp_path / "l.jsonl")
     )
     e.check("svc", 10)
-    with pytest.raises(PolicyViolation, match="间隔"):
+    with pytest.raises(PolicyViolationError, match="间隔"):
         e.check("svc", 10)
     e2 = PolicyEngine(
         cfg(
@@ -85,7 +88,7 @@ def test_rate_limit_and_min_interval(tmp_path):
     )
     e2.check("svc", 10)
     e2.check("svc", 10)
-    with pytest.raises(PolicyViolation, match="速率"):
+    with pytest.raises(PolicyViolationError, match="速率"):
         e2.check("svc", 10)
 
 
@@ -105,5 +108,5 @@ def test_ledger_append_only_three_stages(tmp_path):
 def test_disable_killswitch(tmp_path):
     e = PolicyEngine(cfg(state_path=tmp_path / "s.json", ledger_path=tmp_path / "l.jsonl"))
     e.disable("手动停机")
-    with pytest.raises(PolicyViolation, match="停机"):
+    with pytest.raises(PolicyViolationError, match="停机"):
         e.check("svc", 1)

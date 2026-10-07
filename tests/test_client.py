@@ -14,12 +14,12 @@ from fake_chain import FakeChain
 
 from coincall.client import Client
 from coincall.errors import (
-    BudgetExceededError,
     CoinCallError,
     GatewayError,
     PaymentRequiredError,
     WalletError,
 )
+from coincall.policy import PolicyViolationError
 from coincall.signing import PAY_VAULT_ADDRESS, eip712_digest, recover_signer
 from coincall.wallet import LocalWallet
 
@@ -220,10 +220,9 @@ def test_budget_rejects_before_any_network_call() -> None:
     c.call("svc_e2e_demo", {"text": "one"})
     assert c.spent_raw == 10000
     gateway_calls_after_first = len(env.gateway_requests)
-    with pytest.raises(BudgetExceededError) as exc_info:
+    with pytest.raises(PolicyViolationError, match="总额"):
         c.call("svc_e2e_demo", {"text": "two"})
-    assert exc_info.value.spent_raw == 10000
-    assert exc_info.value.budget_raw == 15000
+    assert c.spent_raw == 10000  # 策略引擎口径与 spent 同步
     assert len(env.gateway_requests) == gateway_calls_after_first  # 未发任何请求
 
 
