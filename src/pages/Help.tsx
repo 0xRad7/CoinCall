@@ -73,6 +73,14 @@ export default function Help() {
             </div>
           </div>
           <div style={{ marginTop: 16 }}>
+            <div className="dim" style={{ marginBottom: 6, marginTop: 8 }}>产品层级：钱包 → Teams → 服务（创建团队 = 一次钱包签名，链上身份由平台自动管理）：</div>
+            <div className="diagram" style={{ marginBottom: 8 }}>
+              <div className="node" style={{ borderColor: "var(--success)" }}><h4>你的钱包（1）</h4><p>连接一次即可<br />签团队身份/付费授权/提现</p></div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>Teams（N）</h4><p>一个钱包可建多个团队<br />每个团队=一个链上身份<br />创建只需一次签名</p></div>
+              <div className="arrow">→</div>
+              <div className="node"><h4>服务（N）</h4><p>每个团队发布多个服务<br />收入进团队认领钱包<br />链上身份自动管理</p></div>
+            </div>
             <div className="dim" style={{ marginBottom: 6 }}>三个钱包角色（别混成一个词）：</div>
             <div className="diagram">
               <div className="node" style={{ borderColor: "var(--text-3)" }}>
