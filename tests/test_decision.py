@@ -35,7 +35,7 @@ W_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 W_C = "0xcccccccccccccccccccccccccccccccccccccccc"
 PAYER = "0xdddddddddddddddddddddddddddddddddddddddd"
 
-WEIGHTS = {"revenue": 0.4, "fulfillment": 0.25, "feedback": 0.2, "freshness": 0.15}
+WEIGHTS = {"revenue": 0.5, "fulfillment": 0.3, "freshness": 0.2}
 
 
 def _client(
@@ -291,45 +291,6 @@ class TestDecisionServices:
             assert ful["score_component"] is None  # 无数据不折算成 0 值证据，只在总分按 0 计
             assert row["components"]["freshness"]["score_component"] == 0.0  # 无活动=0
 
-    def test_feedback_bayesian_shrinkage(self, tmp_path: Path) -> None:
-        """3 票满分局收缩后不得压过 300 票 4.8（10 §3 低样本收缩用例）。"""
-        gateway = FakeGatewayStatsClient(
-            stats={
-                "services": [
-                    _stats_row("svc_est", last_activity=T0),
-                    _stats_row("svc_new", last_activity=T0),
-                    _stats_row("svc_med", last_activity=T0),
-                ],
-                "totals": {},
-            }
-        )
-        with _client(tmp_path, gateway=gateway) as client:
-            assert client.post("/manifests", json=_manifest("svc_est", 137, W_A)).status_code == 201
-            assert client.post("/manifests", json=_manifest("svc_new", 138, W_B)).status_code == 201
-            assert client.post("/manifests", json=_manifest("svc_med", 139, W_C)).status_code == 201
-            store = client.app.state.store
-            # 300 票 4.8 / 3 票 5.0 / 100 票 3.0（全局先验 = 1755/403 ≈ 4.3548）
-            _seed_feedback(store, "svc_est", _ratings(4.8, 300))
-            _seed_feedback(store, "svc_new", _ratings(5.0, 3))
-            _seed_feedback(store, "svc_med", _ratings(3.0, 100))
-            body = client.get("/decision/services").json()
-            by_id = {r["service_id"]: r for r in body["services"]}
-            # 原始均值：new 5.0 > est 4.8；收缩后（先验=全局均值，m=10）反转
-            assert by_id["svc_new"]["components"]["feedback"]["avg"] == pytest.approx(5.0)
-            assert by_id["svc_est"]["components"]["feedback"]["avg"] == pytest.approx(4.8)
-            prior = 1755 / 403
-            assert by_id["svc_est"]["components"]["feedback"]["bayesian_avg"] == pytest.approx(
-                (10 * prior + 300 * 4.8) / 310, abs=1e-3
-            )
-            assert by_id["svc_new"]["components"]["feedback"]["bayesian_avg"] == pytest.approx(
-                (10 * prior + 3 * 5.0) / 13, abs=1e-3
-            )
-            assert [r["service_id"] for r in body["services"]] == ["svc_est", "svc_new", "svc_med"]
-            fb = by_id["svc_est"]["components"]["feedback"]
-            assert fb["verified_paid"] is True
-            assert fb["count"] == 300
-            assert fb["proof"] == "/feedback/services/svc_est"
-
     def test_freshness_as_of_injection_flips_order(self, tmp_path: Path) -> None:
         """演示时间注入（10 §0.5）：同数据、不同 as_of → 新鲜度衰减改变排序。"""
         gateway = FakeGatewayStatsClient(
@@ -409,27 +370,6 @@ class TestDecisionServices:
 
 
 class TestExplain:
-    def test_explain_full_evidence_with_feedback_entries(self, tmp_path: Path) -> None:
-        gateway = FakeGatewayStatsClient(stats={"services": [_stats_row("svc_t1")], "totals": {}})
-        with _client(tmp_path, gateway=gateway) as client:
-            assert (
-                client.post(
-                    "/manifests", json=_manifest("svc_t1", 137, W_A, category="translation")
-                ).status_code
-                == 201
-            )
-            store = client.app.state.store
-            _seed_feedback(store, "svc_t1", [5, 4])
-            body = client.get("/decision/explain/svc_t1").json()
-            assert body["service_id"] == "svc_t1"
-            assert body["category"] == "translation"
-            assert body["components"]["feedback"]["count"] == 2
-            entries = body["feedback_entries"]
-            assert len(entries) == 2
-            assert all(e["receipt_id"].startswith("rcp_") and e["created_at"] for e in entries)
-            assert {e["rating"] for e in entries} == {4, 5}
-            assert body["anchor"]["digest"].startswith("sha256:")
-
     def test_explain_unknown_404(self, tmp_path: Path) -> None:
         with _client(tmp_path) as client:
             resp = client.get("/decision/explain/svc_missing")

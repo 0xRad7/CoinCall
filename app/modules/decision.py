@@ -1,12 +1,11 @@
 """决策层 API（10 篇）：带证明的四分量排序——收入(链上)×履约(网关)×反馈(付费)×新鲜度。
 
 评分公式（§0.5 本轮裁决，全部在响应里自描述，Agent 可独立重算）：
-- score = 0.4*revenue + 0.25*fulfillment + 0.2*feedback + 0.15*freshness
+- score = 0.5*revenue + 0.3*fulfillment + 0.2*freshness（发起人裁决：反馈层移除）
 - revenue     = 0.5*norm(ln(total_raw+1)) + 0.5*norm(distinct_payers)
                 （total_raw=链上 Charged 全量真相，复用 charged_events；distinct=网关窗口统计）
 - fulfillment = success_rate * latency_bonus(p95_ms)（≤2s 满分、≥10s 零分、其间线性；
                 success_rate=(success+settled)/(success+settled+aborted)，坏账不入分母）
-- feedback    = norm(bayesian_avg)（先验=全局均值，先验强度 m=10；低样本向先验收缩）
 - freshness   = exp(-ln2*Δh/48)（Δh=as_of−last_activity；as_of 显式传入即演示时间注入）
 - norm = 窗口内 min-max（候选集=本次响应的分区内服务；零区间=0.5）
 """
@@ -34,16 +33,14 @@ router = APIRouter(tags=["decision"])
 
 #: 冻结权重（10 §0.5）；响应自描述，改动=契约级变更
 DECISION_WEIGHTS: dict[str, float] = {
-    "revenue": 0.4,
-    "fulfillment": 0.25,
-    "feedback": 0.2,
-    "freshness": 0.15,
+    "revenue": 0.5,
+    "fulfillment": 0.3,
+    "freshness": 0.2,
 }
 SCORE_FORMULA = (
-    "score = 0.4*revenue + 0.25*fulfillment + 0.2*feedback + 0.15*freshness；"
+    "score = 0.5*revenue + 0.3*fulfillment + 0.2*freshness（反馈层已移除，2026-10-07）；"
     "revenue=0.5*norm(ln(total_raw+1))+0.5*norm(distinct_payers)；"
     "fulfillment=success_rate*latency_bonus(p95)（≤2000ms=1，≥10000ms=0，线性）；"
-    "feedback=norm(bayesian_avg)（m=10，先验=全局均值）；"
     "freshness=exp(-ln2*Δh/48)"
 )
 NORM_NOTE = "norm=窗口内 min-max（候选集=响应分区内的服务；零区间=0.5）"
@@ -61,9 +58,7 @@ FULFILLMENT_FORMULA = (
     "success_rate * latency_bonus(p95_ms)；success_rate=(success+settled)/"
     "(success+settled+aborted)；bonus: p95≤2000ms=1，≥10000ms=0，其间线性"
 )
-FEEDBACK_FORMULA = (
-    "norm(bayesian_avg)；bayesian_avg=(m*prior+n*avg)/(m+n)，m=10，先验=全局均值（空库=3.0）"
-)
+FEEDBACK_FORMULA = ()
 FRESHNESS_FORMULA = "exp(-ln2*Δh/48)"
 
 
@@ -110,13 +105,6 @@ def latency_bonus(p95_ms: int | None) -> float | None:
     if p95_ms >= LATENCY_BONUS_ZERO_MS:
         return 0.0
     return (LATENCY_BONUS_ZERO_MS - p95_ms) / (LATENCY_BONUS_ZERO_MS - LATENCY_BONUS_FULL_MS)
-
-
-def bayesian_avg(count: int, avg: float | None, prior: float, m: int) -> float:
-    """贝叶斯收缩均值：低样本向先验收缩（10 §3，防 3 票满分压 300 票）。"""
-    if count <= 0 or avg is None:
-        return prior
-    return (m * prior + count * avg) / (m + count)
 
 
 def freshness_score(last_activity: datetime | None, as_of: datetime) -> tuple[float, float | None]:
@@ -168,8 +156,6 @@ class _Context:
     stats_by_service: dict[str, dict[str, Any]]
     stats_available: bool
     revenue_by_wallet: dict[str, dict[str, Any]]
-    fb_by_service: dict[str, dict[str, Any]]
-    prior: float
     anchor_latest: dict[int, dict[str, Any]]
     payload_by_agent: dict[int, dict[str, Any]]
     digest_by_agent: dict[int, str]
@@ -214,8 +200,8 @@ def _canonical_digest(payload: dict[str, Any]) -> str:
 
 
 def _build_context(request: Request, *, window_hours: int) -> _Context:
-    store: CoreStore = request.app.state.store
     _sync_quietly(request)  # Charged 收入懒同步（锁+最小间隔，同排行榜通道）
+    store: CoreStore = request.app.state.store
     services = store.list_services("active")
     stats: dict[str, Any] | None = None
     degraded: list[str] = []
@@ -228,9 +214,6 @@ def _build_context(request: Request, *, window_hours: int) -> _Context:
         str(row.get("service_id")): row for row in (stats or {}).get("services", [])
     }
     revenue_by_wallet = {r["provider"]: r for r in store.charged_by_provider()}
-    fb_by_service = store.feedback_by_service()
-    fb_global = store.feedback_global()
-    prior = float(fb_global["avg"]) if fb_global["avg"] is not None else FEEDBACK_PRIOR_NEUTRAL
     anchor_latest = store.anchor_latest_map()
 
     # 锚定载荷（10 §1：fulfillment+feedback 合并 JSON 的 sha256）按 provider 分组；
@@ -243,10 +226,8 @@ def _build_context(request: Request, *, window_hours: int) -> _Context:
             continue
         sid = svc["service_id"]
         metrics = _fulfillment_metrics(stats_by_service.get(sid))
-        fb = fb_by_service.get(sid, {"count": 0, "avg": None})
         by_agent.setdefault(int(agent_id), {})[sid] = {
             "fulfillment": {**metrics, "window_hours": window_hours},
-            "feedback": fb,
         }
     payload_by_agent: dict[int, dict[str, Any]] = {}
     digest_by_agent: dict[int, str] = {}
@@ -264,8 +245,6 @@ def _build_context(request: Request, *, window_hours: int) -> _Context:
         stats_by_service=stats_by_service,
         stats_available=stats is not None,
         revenue_by_wallet=revenue_by_wallet,
-        fb_by_service=fb_by_service,
-        prior=prior,
         anchor_latest=anchor_latest,
         payload_by_agent=payload_by_agent,
         digest_by_agent=digest_by_agent,
@@ -308,20 +287,6 @@ class FulfillmentComponent(BaseModel):
     )
 
 
-class FeedbackComponent(BaseModel):
-    count: int
-    avg: float | None
-    bayesian_avg: float
-    prior: float
-    prior_strength: int = FEEDBACK_PRIOR_STRENGTH
-    verified_paid: bool = Field(
-        default=True, description="资格即收据：入库反馈恒为已验证付费（10 §2）"
-    )
-    score_component: float
-    formula: str = FEEDBACK_FORMULA
-    proof: str
-
-
 class FreshnessComponent(BaseModel):
     last_activity_at: str | None
     age_h: float | None
@@ -333,7 +298,6 @@ class FreshnessComponent(BaseModel):
 class Components(BaseModel):
     revenue: RevenueComponent
     fulfillment: FulfillmentComponent
-    feedback: FeedbackComponent
     freshness: FreshnessComponent
 
 
@@ -369,13 +333,6 @@ class DecisionCategoriesResponse(BaseModel):
     total_active: int
 
 
-class FeedbackEntry(BaseModel):
-    receipt_id: str
-    rating: int
-    comment: str | None
-    created_at: str
-
-
 class AnchorInfo(BaseModel):
     digest: str
     anchor_tx: str | None
@@ -387,7 +344,6 @@ class ExplainResponse(DecisionRow):
     window_hours: int
     as_of: str
     weights: dict[str, float]
-    feedback_entries: list[FeedbackEntry] = Field(description="反馈原始条目（receipt 可点验）")
     anchor: AnchorInfo
 
 
@@ -442,7 +398,6 @@ def _candidate_rows(ctx: _Context, category: str | None, as_of: datetime) -> lis
         last_activity = (
             parse_ts(calls.get("last_activity_at") or calls.get("last_call_at")) if calls else None
         )
-        fb = ctx.fb_by_service.get(svc["service_id"], {"count": 0, "avg": None})
         fresh, age_h = freshness_score(last_activity, as_of)
         pricing = manifest.get("pricing", {})
         rows.append(
@@ -460,11 +415,6 @@ def _candidate_rows(ctx: _Context, category: str | None, as_of: datetime) -> lis
                 "charged_count": int(revenue["charged_count"]) if revenue else 0,
                 "distinct_payers": distinct,
                 "fulfillment": _fulfillment_metrics(calls),
-                "fb_count": int(fb["count"]),
-                "fb_avg": fb["avg"],
-                "bayesian": bayesian_avg(
-                    int(fb["count"]), fb["avg"], ctx.prior, FEEDBACK_PRIOR_STRENGTH
-                ),
                 "freshness": fresh,
                 "last_activity_at": last_activity.isoformat() if last_activity else None,
                 "age_h": age_h,
@@ -477,7 +427,6 @@ def _finalize_rows(ctx: _Context, rows: list[dict[str, Any]]) -> list[DecisionRo
     """候选集内 min-max 归一化 + 加权合成（公式=模块 docstring，响应自描述）。"""
     norm_ln = _norm([math.log(r["total_raw"] + 1) for r in rows])
     norm_distinct = _norm([float(r["distinct_payers"] or 0) for r in rows])
-    norm_bayes = _norm([r["bayesian"] for r in rows])
     out: list[DecisionRow] = []
     for i, r in enumerate(rows):
         rev_value = 0.5 * norm_ln[i] + 0.5 * norm_distinct[i]
@@ -488,12 +437,10 @@ def _finalize_rows(ctx: _Context, rows: list[dict[str, Any]]) -> list[DecisionRo
             if metrics["success_rate"] is None or bonus is None
             else metrics["success_rate"] * bonus
         )
-        fb_value = norm_bayes[i]
         fresh_value = r["freshness"]
         score = (
             DECISION_WEIGHTS["revenue"] * rev_value
             + DECISION_WEIGHTS["fulfillment"] * (ful_value or 0.0)
-            + DECISION_WEIGHTS["feedback"] * fb_value
             + DECISION_WEIGHTS["freshness"] * fresh_value
         )
         agent_id = r["provider_agent_id"]
@@ -539,14 +486,6 @@ def _finalize_rows(ctx: _Context, rows: list[dict[str, Any]]) -> list[DecisionRo
                             "digest": digest or "",
                             "anchor_tx": anchor["tx_hash"] if anchor else None,
                         },
-                    ),
-                    feedback=FeedbackComponent(
-                        count=r["fb_count"],
-                        avg=None if r["fb_avg"] is None else round(r["fb_avg"], 4),
-                        bayesian_avg=round(r["bayesian"], 4),
-                        prior=round(ctx.prior, 4),
-                        score_component=round(fb_value, 4),
-                        proof=f"/feedback/services/{r['service_id']}",
                     ),
                     freshness=FreshnessComponent(
                         last_activity_at=r["last_activity_at"],
@@ -654,16 +593,6 @@ def decision_explain(
     rows = _candidate_rows(ctx, partition, as_of_dt)
     finalized = _finalize_rows(ctx, rows)
     row = next(r for r in finalized if r.service_id == service_id)
-    store: CoreStore = request.app.state.store
-    entries = [
-        FeedbackEntry(
-            receipt_id=e["receipt_id"],
-            rating=int(e["rating"]),
-            comment=e["comment"],
-            created_at=e["created_at"],
-        )
-        for e in store.list_feedback(service_id)
-    ]
     agent_id = row.provider_agent_id
     digest = ctx.digest_by_agent.get(agent_id) if agent_id is not None else None
     anchor = ctx.anchor_latest.get(agent_id) if agent_id is not None else None
@@ -672,7 +601,6 @@ def decision_explain(
         window_hours=window_hours,
         as_of=as_of_dt.isoformat(),
         weights=DECISION_WEIGHTS,
-        feedback_entries=entries,
         anchor=AnchorInfo(
             digest=digest or "",
             anchor_tx=anchor["tx_hash"] if anchor else None,
