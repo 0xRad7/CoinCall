@@ -55,7 +55,7 @@ export default function ProviderWorkbench() {
           title="发布新服务"
           sub={
             <span>
-              团队 <b>{publishing.display_name}</b>（team #{publishing.agent_id}）· 收款钱包默认 = 认领钱包
+              团队 <b>{publishing.display_name}</b>（team #{publishing.agent_id}）· 服务收款钱包默认 = 认领钱包
             </span>
           }
           actions={
@@ -1259,14 +1259,14 @@ export function WithdrawStep() {
 
 export interface RevenueSummary {
   totalRaw: bigint; // Σ 各团队链上 Charged
-  creditsRaw: bigint; // Σ 各收款钱包 PayVault credits（未提现）
+  creditsRaw: bigint; // Σ 各服务收款钱包 PayVault credits（未提现）
   withdrawnRaw: bigint; // totalRaw - creditsRaw（页内口径）
   teamsCount: number;
   chargedCount: number;
   wallets: string[];
 }
 
-/** 拉取收入三数：mine → Promise.all(teams detail) → Σ revenue；收款钱包去重 → Promise.all(credits) → Σ。 */
+/** 拉取收入三数：mine → Promise.all(teams detail) → Σ revenue；服务收款钱包去重 → Promise.all(credits) → Σ。 */
 async function fetchRevenueSummary(wallet: string): Promise<RevenueSummary> {
   const mine = await teamsApi.mine(wallet);
   const details = await Promise.all(mine.teams.map((t) => teamsApi.detail(t.agent_id).catch(() => null)));
@@ -1358,7 +1358,7 @@ export function RevenueGrid({ onWithdrawn }: { onWithdrawn?: () => void }) {
   );
 }
 
-/** 内嵌提全面板：收款钱包逐个显示 credits → 全额 providerWithdraw（经注入钱包）。 */
+/** 内嵌提全面板：服务收款钱包逐个显示 credits → 全额 providerWithdraw（经注入钱包）。 */
 function WithdrawPanel({ wallets, onDone }: { wallets: string[]; onDone: () => void }) {
   const w = useWallet();
   const [credits, setCredits] = useState<Record<string, bigint>>({});
@@ -1410,11 +1410,11 @@ function WithdrawPanel({ wallets, onDone }: { wallets: string[]; onDone: () => v
     <div className="card" style={{ boxShadow: "none", background: "var(--surface-2)", marginTop: 12, marginBottom: 0 }}>
       <h3 className="mt-0" style={{ fontSize: 14 }}>提现（PayVault credits → 钱包，铁律 P8 路径恒开）</h3>
       {wallets.length === 0 ? (
-        <Empty text="还没有收款钱包——先发布服务产生收入。" />
+        <Empty text="还没有服务收款钱包——先发布服务产生收入。" />
       ) : (
         <table className="list">
           <thead>
-            <tr><th>收款钱包</th><th>credits（未提现）</th><th>操作</th></tr>
+            <tr><th>服务收款钱包</th><th>credits（未提现）</th><th>操作</th></tr>
           </thead>
           <tbody>
             {wallets.map((wv) => {
@@ -1665,13 +1665,23 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
             </div>
             {t.degraded.length > 0 && <WarnBox>部分数据降级：{t.degraded.join("、")}</WarnBox>}
 
-            <div className="section-title">团队服务</div>
+            <div className="section-title">团队服务（履约数据来自网关调用流水）</div>
             {t.services.length === 0 ? (
               <Empty text="还没有服务——点右上「发布新服务」" />
             ) : (
-              <table className="list">
+              <table className="list" aria-label="团队服务表">
                 <thead>
-                  <tr><th>服务</th><th>价格</th><th>履约</th><th>操作</th></tr>
+                  <tr>
+                    <th>服务</th>
+                    <th>价格</th>
+                    <th>调用成功</th>
+                    <th>中止</th>
+                    <th>p50</th>
+                    <th>p95</th>
+                    <th>支付者</th>
+                    <th>最近活跃</th>
+                    <th>操作</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {t.services.map((s) => {
@@ -1684,12 +1694,17 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
                           <div className="mono dim" style={{ fontSize: 11 }}>{s.service_id}</div>
                         </td>
                         <td className="num">{m.pricing.amount}</td>
-                        <td className="num dim" style={{ fontSize: 12 }}>
-                          {ful ? `${ful.calls_success}✓/${ful.calls_aborted}✗ · p95 ${ful.p95_ms}ms · ${ful.distinct_payers} 支付者` : "—"}
+                        <td className="num">{ful?.calls_success ?? "—"}</td>
+                        <td className="num dim">{ful?.calls_aborted ?? "—"}</td>
+                        <td className="num dim">{ful != null ? `${ful.p50_ms}ms` : "—"}</td>
+                        <td className="num dim">{ful != null ? `${ful.p95_ms}ms` : "—"}</td>
+                        <td className="num dim">{ful?.distinct_payers ?? "—"}</td>
+                        <td className="dim" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                          {ful?.last_activity_at ? timeAgoShort(ful.last_activity_at) : "—"}
                         </td>
                         <td>
                           <a className="btn small secondary" style={{ textDecoration: "none", display: "inline-flex" }} href="#/" onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent("coincall:view-team", { detail: agentId })); }}>
-                            公共视图
+                            管理
                           </a>
                         </td>
                       </tr>
@@ -1698,9 +1713,20 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
                 </tbody>
               </table>
             )}
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              改价/暂停/凭证管理在总览目录 → 你的服务卡 → 「上游认证头」或经 Manifest 重发；公共视图数据 = 总览目录。
+            </div>
           </>
         )}
       </AsyncSection>
     </div>
   );
+}
+
+
+function timeAgoShort(iso: string): string {
+  const h = (Date.now() - new Date(iso).getTime()) / 3_600_000;
+  if (h < 1) return `${Math.round(h * 60)} 分钟前`;
+  if (h < 48) return `${h.toFixed(1)} 小时前`;
+  return `${(h / 24).toFixed(1)} 天前`;
 }
