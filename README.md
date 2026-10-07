@@ -25,6 +25,12 @@ export COINCALL_BUDGET_RAW="1000000"             # 本地预算上限（最小�
 # 可选：COINCALL_GATEWAY_URL（默认 http://127.0.0.1:8030）/ COINCALL_CORE_URL（默认 http://127.0.0.1:8020）
 ```
 
+**主网切换（可选）**：`export COINCALL_NETWORK=mainnet` 即切 BOT Chain 主网
+**677**（rpc.botchain.ai，USDT `0xaBabc7…87a3C`）；缺省 `testnet`（968，行为与历史版本一致）。
+字段级精确覆写：`COINCALL_CHAIN_ID` / `COINCALL_RPC_URL` / `COINCALL_TOKEN_ADDRESS`
+（显式构造参数 > env > 网络表缺省）；主网 PayVault 地址不在表内，需
+`LocalWallet(pay_vault="0x主网金库地址")` 显式传入。
+
 ### 3) 第一次拿 key + 准备资金（只需一次）
 
 ```python
@@ -130,8 +136,8 @@ uv run pytest -q -m needs_funds                                # 真实付费端
 
 ## 诚实边界
 
-- **这是测试网实现**：链 968（rpc.bohr.life）、MockUSDT（公开 mint）、PayVault 演示合约。
-  主网部署前 `mint()` 不存在、代币地址与链 ID 都要换（构造参数已可注入）。
+- **缺省测试网**：链 968（rpc.bohr.life）、MockUSDT（公开 mint）、PayVault 演示合约。
+  主网 677 经 `COINCALL_NETWORK=mainnet` 切换（见《主网切换》）；`mint()` 仅测试网存在。
 - **预算是本地承诺**：`budget_raw` 由 SDK 在进程内强制（03 §6），平台不替 consumer 管预算；
   换个进程/不装 SDK 即不受限——这是"无裁判"设计的代价与自由。
 - **收据只透传不验签**：`X-Receipt-Sig` 的 HMAC secret 在网关侧，SDK 未做本地校验（P2 可加）。

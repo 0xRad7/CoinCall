@@ -7,6 +7,10 @@
 域与 PayVault 一致：name "PayVault" / version "1" / chainId 968，
 verifyingContract = 已部署的 PayVault（测试网 968）。
 
+主网参数化：CHAIN_ID 是缺省（测试网）域参数，取自 networks.TESTNET（单一来源）；
+实际签名链 ID 经 sign_authorization(chain_id=…) / LocalWallet(chain_id=…) 注入
+（缺省 968，COINCALL_NETWORK=mainnet 时由钱包缺省解析为 677）。
+
 Authorization 六元组（对齐 x402 / EIP-3009 TransferWithAuthorization）：
     Authorization(address from, address to, uint256 value,
                   uint256 validAfter, uint256 validBefore, bytes32 nonce)
@@ -21,10 +25,12 @@ from dataclasses import dataclass
 from eth_keys import keys as eth_keys
 from eth_utils import keccak, to_checksum_address
 
+from coincall.networks import TESTNET
+
 DOMAIN_NAME = "PayVault"
 DOMAIN_VERSION = "1"
-CHAIN_ID = 968
-PAY_VAULT_ADDRESS = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"  # epoch2
+CHAIN_ID = TESTNET.chain_id  # 缺省域链 ID（测试网 968；主网经 LocalWallet chain_id / env 切换）
+PAY_VAULT_ADDRESS = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"  # epoch2（测试网缺省金库）
 
 WORD_SIZE = 32  # EVM 字（地址左补齐与 nonce/私钥长度共用）
 

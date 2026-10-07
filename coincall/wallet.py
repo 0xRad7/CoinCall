@@ -18,7 +18,6 @@ from eth_account import Account
 from coincall.chain import (
     APPROVE_GAS,
     MINT_GAS,
-    TOKEN_ADDRESS,
     TOKEN_DECIMALS,
     ChainConnection,
     ChainGateway,
@@ -26,8 +25,8 @@ from coincall.chain import (
     erc20_mint_data,
 )
 from coincall.errors import WalletError
+from coincall.networks import resolve_network
 from coincall.signing import (
-    CHAIN_ID,
     PAY_VAULT_ADDRESS,
     Authorization,
     PaymentSignature,
@@ -101,7 +100,12 @@ def resolve_private_key(source: str | None = None, *, env_var: str = ENV_WALLET_
 
 
 class LocalWallet:
-    """消费者本地付费钱包：持钥、本地直签、资金视图；repr/str 永不泄露私钥。"""
+    """消费者本地付费钱包：持钥、本地直签、资金视图；repr/str 永不泄露私钥。
+
+    chain_id / rpc / token 缺省经 networks.resolve_network() 解析（缺省测试网
+    968 / rpc.bohr.life / USDT 0x75ed…；COINCALL_NETWORK=mainnet 切 677 主网），
+    显式参数永远优先于 env。
+    """
 
     def __init__(
         self,
@@ -109,19 +113,20 @@ class LocalWallet:
         *,
         chain: ChainGateway | None = None,
         rpc_url: str | None = None,
-        token_address: str = TOKEN_ADDRESS,
+        token_address: str | None = None,
         token_decimals: int = TOKEN_DECIMALS,
         pay_vault: str = PAY_VAULT_ADDRESS,
-        chain_id: int = CHAIN_ID,
+        chain_id: int | None = None,
     ) -> None:
+        network = resolve_network()
         self._account = account
         self.address = account.address
         self._chain = chain
         self._rpc_url = rpc_url
-        self.token_address = token_address
+        self.token_address = token_address or network.token_address
         self.token_decimals = token_decimals
         self.pay_vault = pay_vault
-        self.chain_id = chain_id
+        self.chain_id = network.chain_id if chain_id is None else chain_id
 
     # -- 生成与导入 --
 
@@ -131,10 +136,10 @@ class LocalWallet:
         *,
         chain: ChainGateway | None = None,
         rpc_url: str | None = None,
-        token_address: str = TOKEN_ADDRESS,
+        token_address: str | None = None,
         token_decimals: int = TOKEN_DECIMALS,
         pay_vault: str = PAY_VAULT_ADDRESS,
-        chain_id: int = CHAIN_ID,
+        chain_id: int | None = None,
     ) -> "LocalWallet":
         """本地生成专用付费钱包（03 §3 ①：Account.create，私钥不落任何平台）。"""
         return cls(
@@ -154,10 +159,10 @@ class LocalWallet:
         *,
         chain: ChainGateway | None = None,
         rpc_url: str | None = None,
-        token_address: str = TOKEN_ADDRESS,
+        token_address: str | None = None,
         token_decimals: int = TOKEN_DECIMALS,
         pay_vault: str = PAY_VAULT_ADDRESS,
-        chain_id: int = CHAIN_ID,
+        chain_id: int | None = None,
     ) -> "LocalWallet":
         """导入已有钱包：0x 私钥 / env 变量 / 0600 本地 key 文件。"""
         key = resolve_private_key(source)
@@ -174,12 +179,13 @@ class LocalWallet:
     def __repr__(self) -> str:
         return f"<LocalWallet {self.address} chain={self.chain_id}>"
 
-    # -- 链网关（惰性直连 rpc.bohr.life） --
+    # -- 链网关（惰性直连当前网络 RPC；缺省测试网 rpc.bohr.life） --
 
     @property
     def chain(self) -> ChainGateway:
         if self._chain is None:
-            self._chain = ChainConnection(self._rpc_url) if self._rpc_url else ChainConnection()
+            # 期望链 = 钱包 chain_id（A4：链上 chainId == 钱包 chain_id 断言先于签名）
+            self._chain = ChainConnection(self._rpc_url, expected_chain_id=self.chain_id)
         return self._chain
 
     # -- 资金准备（本地直签 raw tx） --
