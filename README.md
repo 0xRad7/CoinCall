@@ -131,9 +131,9 @@ Agent → service_quote（报价+平台建议+安全评估，免费）
 
 本仓库是平台的**版本钉子与分发清单**：`.gitignore` 白名单法只纳管 `coincall-*/` 目录，其余（脚本、报告、本地配置、数据）一概不入仓。
 
-- 七个 `coincall-*` 子仓均为**独立 git 仓库**，以 gitlink（mode 160000）钉住各自 HEAD——只钉版本，内容不入根仓；`coincall-docs` 非 git，以普通文件整体纳管
+- 七个 `coincall-*` 子仓已以 **git subtree 全量并入**（历史保留，克隆即得完整代码）；本机各子仓仍是独立 git 仓库，可继续独立提交
 - 各子仓独立演进、各自提交，并各自维护 `.gitignore` 与秘密防护；根仓层面额外全量排除 `.env`（保留 `.env.example`）、keystore、DuckDB 数据、日志与缓存
-- 升级子仓版本：先在子仓内提交，再回根仓 `git add <子目录>` 更新 gitlink 指针后提交
+- 升级子仓版本：先在子仓内提交，再回根仓同步——`git subtree pull --prefix=<子目录> <子仓绝对路径> main`（内容一致时可 `--squash` 减噪）
 
 ## License
 
