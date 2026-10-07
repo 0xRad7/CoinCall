@@ -99,7 +99,7 @@ export function AppShell() {
       <nav className="side-nav">
         <div className="brand">
           <span className="dot" />
-          币应 CoinCall
+          CoinCall 币应
         </div>
         {NAV_GROUPS.map((g) => (
           <div key={g.label} className="nav-group">

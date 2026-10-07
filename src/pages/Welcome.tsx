@@ -126,7 +126,7 @@ function LoginFace({ connected, onProceed }: { connected: boolean; onProceed: ()
       <header className="welcome-top">
         <span className="brand">
           <span className="dot" />
-          <span className="brand-title">CoinCall</span>
+          <span className="brand-title">CoinCall 币应</span>
         </span>
         <div className="welcome-top-actions">
           {connected ? (
@@ -146,7 +146,7 @@ function LoginFace({ connected, onProceed }: { connected: boolean; onProceed: ()
         {/* Hero：双向流光渐变大标题 + 正下方 mono 打字机副标题（▌常驻）+ 次级锚链接；底部微弱径向光晕 */}
         <section className="wl-hero">
           <h1 className="wl-fade d2">
-            <span className="wl-title">CoinCall</span>
+            <span className="wl-title">CoinCall 币应</span>
           </h1>
           <div className="wl-sub-type wl-fade d3" aria-label={SUB_TITLE}>
             <span className="wl-sub-text" ref={subRef} data-text={SUB_TITLE} aria-hidden="true" />
@@ -220,7 +220,7 @@ function PickFace() {
       <header className="welcome-top">
         <span className="brand">
           <span className="dot" />
-          CoinCall
+          CoinCall 币应
         </span>
         <span className="dim mono" title={w.address ?? undefined}>
           {w.address ? `${w.address.slice(0, 10)}…${w.address.slice(-6)}` : ""}
