@@ -20,8 +20,10 @@ import { IdentityRegister } from "../components/IdentityRegister";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
 import { JsonEditor } from "../components/JsonEditor";
 import { AsyncSection, Badge, ConfirmDialog, Empty, ErrorBox, InfoBox, Spinner, SuccessBox, TxLink, WarnBox } from "../components/ui";
+import { EvidencePair, PageHeader, StatCard } from "../components/shell";
 import { humanizeError, labelField } from "../lib/errors";
 import { useAsync } from "../lib/useAsync";
+import { useMode } from "../state/ModeContext";
 
 const STEPS = [
   { key: "teams", label: "① 我的 Teams" },
@@ -38,14 +40,24 @@ export default function ProviderWorkbench() {
     if (ok !== undefined) setDone((d) => ({ ...d, [step]: ok }));
   };
 
+  // 直接进入本工作台 = 选定 Provider 身份（与 /welcome 选卡同一粘滞存储）
+  const { mode, setMode } = useMode();
+  useEffect(() => {
+    if (mode !== "provider") setMode("provider");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 步骤间共享状态：当前团队（Teams 形态锚点）
   const [claimed, setClaimed] = useState<{ agent_id: number; display_name: string; wallet: string } | null>(null);
-  const [teamPage, setTeamPage] = useState<number | null>(null); // Team 主页（第②层视图，非步骤）
+  const [teamPage, setTeamPage] = useState<number | null>(null); // team 主页（第②层视图，非步骤）
 
   return (
     <div>
-      <h1 className="page-title">Provider 工作台</h1>
-      <p className="page-sub">把「登记身份 → 发布服务 → 收款」的五步接入流程变成点击流。所有上链动作都有二次确认与交易外链。</p>
+      <PageHeader
+        mode="provider"
+        title="Provider 工作台"
+        sub="把「登记身份 → 发布服务 → 收款」的五步接入流程变成点击流。所有上链动作都有二次确认与交易外链。"
+      />
 
       <div className="wizard-steps">
         {STEPS.map((s) => (
@@ -1187,9 +1199,23 @@ export function WithdrawStep() {
       </div>
 
       {credits !== null && (
-        <div className="alert info">
-          该地址在 PayVault 的未提现收入：<b className="num">{fromRaw(credits)} USDT</b>
-          <span className="dim num">（raw={credits.toString()}）</span> · 合约 {PAY_VAULT.slice(0, 10)}…
+        <div className="stat-grid" style={{ marginTop: 4 }}>
+          <StatCard
+            k="该地址在 PayVault 的未提现收入"
+            value={
+              <>
+                {fromRaw(credits)}
+                <span className="unit">USDT</span>
+              </>
+            }
+            sub={`raw=${credits.toString()}`}
+          />
+          <StatCard
+            k="记账合约（PayVault）"
+            value={<span style={{ fontSize: 16 }}>{PAY_VAULT.slice(0, 10)}…{PAY_VAULT.slice(-6)}</span>}
+            sub="I4：合约内 USDT 余额恒等于总 credits"
+            evidence={<EvidencePair hash={PAY_VAULT} href="https://scan.bohr.life" label="去 scan.bohr.life 查看合约" />}
+          />
         </div>
       )}
       {error != null && <ErrorBox error={error} />}
@@ -1415,40 +1441,33 @@ export function TeamHome({ agentId, onBack, onPublish }: { agentId: number; onBa
               team #{t.team.agent_id} · 服务收款钱包 {t.team.claim_wallet?.slice(0, 10) ?? "未绑定"}… · 创建于 {t.team.created_at.slice(0, 19)}
             </div>
             <div className="stat-grid">
-              <div className="stat-card">
-                <div className="k">团队收入</div>
-                <div className="v num">{fromRaw(BigInt(t.revenue.total_raw))}</div>
-                <div className="s num">{t.revenue.charged_count} 笔 Charged · raw={t.revenue.total_raw}</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">服务数</div>
-                <div className="v num">{t.services.length}</div>
-                <div className="s">在售能力</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">履约汇总</div>
-                <div className="v num" style={{ fontSize: 18 }}>
-                  {(() => {
-                    const svcs = t.fulfillment.services;
-                    const ok = svcs.reduce((a, s) => a + s.calls_success, 0);
-                    const abort = svcs.reduce((a, s) => a + s.calls_aborted, 0);
-                    return `${ok + abort > 0 ? Math.round((ok / (ok + abort)) * 100) : 100}%`;
-                  })()}
-                </div>
-                <div className="s num">p95 最慢 {Math.max(0, ...t.fulfillment.services.map((s) => s.p95_ms))}ms</div>
-              </div>
-              <div className="stat-card">
-                <div className="k">反馈</div>
-                <div className="v num" style={{ fontSize: 18 }}>
-                  {(() => {
-                    const total = t.feedback.services.reduce((a, s) => a + s.count, 0);
-                    if (total === 0) return "—";
-                    const sum = t.feedback.services.reduce((a, s) => a + (s.avg ?? 0) * s.count, 0);
-                    return `★${(sum / total).toFixed(1)}`;
-                  })()}
-                </div>
-                <div className="s num">{t.feedback.services.reduce((a, s) => a + s.count, 0)} 条</div>
-              </div>
+              <StatCard
+                k="团队收入"
+                value={fromRaw(BigInt(t.revenue.total_raw))}
+                sub={`${t.revenue.charged_count} 笔 Charged · raw=${t.revenue.total_raw}`}
+                evidence={<EvidencePair hash={`team_revenue_raw=${t.revenue.total_raw}`} href="https://scan.bohr.life" label="链上 Charged 口径，去 scan 核对" />}
+              />
+              <StatCard k="服务数" value={t.services.length} sub="在售能力" />
+              <StatCard
+                k="履约汇总"
+                value={(() => {
+                  const svcs = t.fulfillment.services;
+                  const ok = svcs.reduce((a, s) => a + s.calls_success, 0);
+                  const abort = svcs.reduce((a, s) => a + s.calls_aborted, 0);
+                  return `${ok + abort > 0 ? Math.round((ok / (ok + abort)) * 100) : 100}%`;
+                })()}
+                sub={`p95 最慢 ${Math.max(0, ...t.fulfillment.services.map((s) => s.p95_ms))}ms`}
+              />
+              <StatCard
+                k="反馈"
+                value={(() => {
+                  const total = t.feedback.services.reduce((a, s) => a + s.count, 0);
+                  if (total === 0) return "—";
+                  const sum = t.feedback.services.reduce((a, s) => a + (s.avg ?? 0) * s.count, 0);
+                  return `★${(sum / total).toFixed(1)}`;
+                })()}
+                sub={`${t.feedback.services.reduce((a, s) => a + s.count, 0)} 条`}
+              />
             </div>
             {t.degraded.length > 0 && <WarnBox>部分数据降级：{t.degraded.join("、")}</WarnBox>}
 
