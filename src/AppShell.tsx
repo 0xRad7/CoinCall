@@ -73,16 +73,11 @@ function navGroups(adminEnabled: boolean, isAdmin: boolean): Array<{
 }> {
   return [
   {
-    label: "公共",
-    items: adminEnabled && !isAdmin
-      ? []  // 管理员门禁开启+非管理员：不显示总览入口
-      : [{ to: "/", end: true, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" }],
-  },
-  {
     label: "工作台",
     items: [
       { to: "/provider", name: "Provider", sub: "团队与服务", identity: "provider" },
       { to: "/consumer", name: "Consumer", sub: "钱包与调用", identity: "consumer" },
+      ...(adminEnabled && !isAdmin ? [] : [{ to: "/" as const, end: true as const, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" }]),
     ],
   },
   {
