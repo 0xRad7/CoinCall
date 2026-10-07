@@ -118,7 +118,7 @@ describe("收入 Grid", () => {
     expect(container.textContent).not.toContain("收入总览");
   });
 
-  it("三卡自动查询：Σ Charged / Σ credits / 差额口径；提现按钮在未提现卡上", async () => {
+  it("两卡自动查询：Σ Charged / Σ credits；提现按钮在未提现卡上", async () => {
     // A 收款钱包=MY credits=0.01（10000）；B 收款钱包=OTHER credits=0.005（5000）
     creditsMock.mockImplementation(async (w: string) => (w.toLowerCase() === MY.toLowerCase() ? 10000n : 5000n));
 
@@ -137,9 +137,6 @@ describe("收入 Grid", () => {
     // 未提现 = 10000+5000 = 15000 (0.015)
     expect(screen.getByText("0.015 USDT")).toBeTruthy();
     expect(screen.getByText(/raw=15000 · PayVault credits/)).toBeTruthy();
-    // 已提现 = 50000-15000 = 35000 (0.035)
-    expect(screen.getByText("0.035 USDT")).toBeTruthy();
-    expect(screen.getByText(/口径=总收入−当前 credits/)).toBeTruthy();
     // 提现按钮在未提现卡上
     const withdrawBtn = screen.getByRole("button", { name: "提现" });
     expect(withdrawBtn.closest(".stat-card")!.textContent).toContain("未提现收入");
@@ -193,7 +190,7 @@ describe("收入 Grid", () => {
     );
     announce();
     fireEvent.click(screen.getByTestId("probe-connect"));
-    await waitFor(() => expect(screen.getAllByText("0.05 USDT").length).toBeGreaterThanOrEqual(1)); // 总收入正常（credits=0 时已提现=同额也会出现）
+    await waitFor(() => expect(screen.getAllByText("0.05 USDT").length).toBeGreaterThanOrEqual(1)); // 总收入正常
     await waitFor(() => expect(screen.getAllByText("0 USDT").length).toBeGreaterThanOrEqual(1)); // credits 失败按 0
   });
 });

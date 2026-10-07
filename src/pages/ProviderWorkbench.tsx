@@ -1345,11 +1345,6 @@ export function RevenueGrid({ onWithdrawn }: { onWithdrawn?: () => void }) {
               </button>
             </div>
           </div>
-          <StatCard
-            k="已提现收入"
-            value={`${fromRaw(rev.data.withdrawnRaw)} USDT`}
-            sub={`raw=${rev.data.withdrawnRaw.toString()} · 口径=总收入−当前 credits`}
-          />
         </div>
       )}
 
