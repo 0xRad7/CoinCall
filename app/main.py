@@ -5,6 +5,7 @@
 生产路径在 lifespan 装配真实实现（httpx → core、web3 → rpc.bohr.life）。
 """
 
+import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
@@ -101,6 +102,14 @@ def _mount_middleware(app: FastAPI, settings: Settings) -> None:
     app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(PaymentRequiredError, payment_required_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_error_handler)
+
+
+# 应用模块（app.*）INFO 级可观测日志：uvicorn 只配置自家 logger，root 无 handler 时
+# INFO 会被丢弃（Python lastResort 只放行 WARNING+）——幂等重放/GET 重试等关键事件靠它落盘
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 
 def create_app(
