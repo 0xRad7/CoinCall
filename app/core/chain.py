@@ -40,26 +40,33 @@ class BotChainAdapter:
             return "0x" + result.hex()
         return str(result)
 
-    async def _cached_call(self, cache_key: tuple[str, ...], to: str, data: str) -> int:
+    async def _cached_call(
+        self, cache_key: tuple[str, ...], to: str, data: str, *, force: bool = False
+    ) -> int:
         now = time.monotonic()
-        hit = self._cache.get(cache_key)
-        if hit is not None and now - hit[0] < self._cache_ttl:
-            return hit[1]
+        if not force:
+            hit = self._cache.get(cache_key)
+            if hit is not None and now - hit[0] < self._cache_ttl:
+                return hit[1]
         raw = await self._raw_call(to, data)
         value = int(raw, 16) if raw != "0x" else 0
         self._cache[cache_key] = (now, value)
         return value
 
-    async def erc20_balance(self, wallet: str, token: str) -> int:
+    async def erc20_balance(self, wallet: str, token: str, *, force: bool = False) -> int:
         data = _SELECTOR_BALANCEOF + wallet[2:].lower().rjust(64, "0")
-        return await self._cached_call(("balance", wallet.lower(), token.lower()), token, data)
+        return await self._cached_call(
+            ("balance", wallet.lower(), token.lower()), token, data, force=force
+        )
 
-    async def erc20_allowance(self, owner: str, spender: str, token: str) -> int:
+    async def erc20_allowance(
+        self, owner: str, spender: str, token: str, *, force: bool = False
+    ) -> int:
         data = (
             _SELECTOR_ALLOWANCE
             + owner[2:].lower().rjust(64, "0")
             + spender[2:].lower().rjust(64, "0")
         )
         return await self._cached_call(
-            ("allowance", owner.lower(), spender.lower(), token.lower()), token, data
+            ("allowance", owner.lower(), spender.lower(), token.lower()), token, data, force=force
         )

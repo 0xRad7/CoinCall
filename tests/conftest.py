@@ -109,11 +109,13 @@ class FakeChain:
         self.allowance = allowance
         self.calls: list[tuple[str, str, str]] = []
 
-    async def erc20_balance(self, wallet: str, token: str) -> int:
+    async def erc20_balance(self, wallet: str, token: str, *, force: bool = False) -> int:
         self.calls.append(("balance", wallet, token))
         return self.balance
 
-    async def erc20_allowance(self, owner: str, spender: str, token: str) -> int:
+    async def erc20_allowance(
+        self, owner: str, spender: str, token: str, *, force: bool = False
+    ) -> int:
         self.calls.append(("allowance", owner, spender))
         return self.allowance
 

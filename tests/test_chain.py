@@ -6,6 +6,7 @@ from app.core.chain import BotChainAdapter
 
 TOKEN = "0x75edC9335175Fc0552D51D48439F229c10420fe3"
 VAULT = "0x000000000000000000000000000000000000dEaD"
+SPENDER = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"
 WALLET = "0x9858EfFD232B4033E47d90003D41EC34EcaEda94"
 
 
@@ -68,3 +69,32 @@ async def test_live_balanceof_once() -> None:
     chain = BotChainAdapter(rpc_url="https://rpc.bohr.life/")
     balance = await chain.erc20_balance(VAULT, TOKEN)
     assert balance >= 0  # 只读冒烟，值不做断言口径
+
+
+@pytest.mark.unit
+async def test_force_bypasses_stale_cache() -> None:
+    """force=True 穿透短缓存读最新值——「判定不足时重查」的底座。
+
+    2026-10-07 线上：消费者刚 approve 完，网关 30s 缓存仍是旧授权值，继续 402。
+    """
+
+    class MutableChain(BotChainAdapter):
+        def __init__(self) -> None:
+            super().__init__(rpc_url="http://unused")
+            self.value = 100
+            self.reads = 0
+
+        async def _raw_call(self, to: str, data: str) -> str:
+            self.reads += 1
+            return hex(self.value)
+
+    chain = MutableChain()
+    first = await chain.erc20_allowance(WALLET, SPENDER, TOKEN)
+    assert first == 100 and chain.reads == 1
+    chain.value = 5_000_000  # 链上刚 approve
+    cached = await chain.erc20_allowance(WALLET, SPENDER, TOKEN)  # TTL 内命中缓存（旧值）
+    assert cached == 100 and chain.reads == 1
+    forced = await chain.erc20_allowance(WALLET, SPENDER, TOKEN, force=True)  # 穿透
+    assert forced == 5_000_000 and chain.reads == 2
+    after = await chain.erc20_allowance(WALLET, SPENDER, TOKEN)  # 穿透后缓存已更新
+    assert after == 5_000_000 and chain.reads == 2

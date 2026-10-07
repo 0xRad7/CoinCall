@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -32,9 +33,11 @@ class VerifyResult:
 class ChainAdapter(Protocol):
     """链上约束只读接口（02 §5b：eth_call 查 token balanceOf/allowance，结果短缓存）。"""
 
-    async def erc20_balance(self, wallet: str, token: str) -> int: ...
+    async def erc20_balance(self, wallet: str, token: str, *, force: bool = False) -> int: ...
 
-    async def erc20_allowance(self, owner: str, spender: str, token: str) -> int: ...
+    async def erc20_allowance(
+        self, owner: str, spender: str, token: str, *, force: bool = False
+    ) -> int: ...
 
 
 @dataclass
@@ -192,15 +195,27 @@ class PayVaultScheme:
                 ok=False, signer=signer, code="nonce_replayed", detail="nonce 已被使用"
             )
 
-        # 链上约束（fail-closed：适配器异常 → chain_unavailable）
+        # 链上约束（fail-closed：适配器异常 → chain_unavailable）。
+        # 判定「不足」时不信短缓存：穿透 force 重查一次再拒——刚 approve/transfer 完的
+        # 常见窗口期（缓存 TTL 内旧值会把已补足的钱包继续 402）。
+        price = int(expected_value_raw)
+
+        async def _read(force: bool) -> tuple[int, int]:
+            balance = await self.chain.erc20_balance(expected_from, self.token_address, force=force)
+            allowance = await self.chain.erc20_allowance(
+                expected_from, pay_to, self.token_address, force=force
+            )
+            return balance, allowance
+
         try:
-            balance = await self.chain.erc20_balance(expected_from, self.token_address)
-            allowance = await self.chain.erc20_allowance(expected_from, pay_to, self.token_address)
+            balance, allowance = await _read(force=False)
         except Exception as exc:
             return VerifyResult(
                 ok=False, signer=signer, code="chain_unavailable", detail=f"链上约束检查失败: {exc}"
             )
-        price = int(expected_value_raw)
+        if balance < price or allowance < price:
+            with contextlib.suppress(Exception):  # 穿透失败沿用旧值，按不足处理（fail-closed）
+                balance, allowance = await _read(force=True)
         if balance < price:
             return VerifyResult(
                 ok=False,
