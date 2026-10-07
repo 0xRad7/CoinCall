@@ -26,4 +26,13 @@ export default defineConfig({
     include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+        },
+      },
+    },
+  },
 } as ReturnType<typeof defineConfig>);
