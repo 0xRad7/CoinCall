@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     # ---- P1-2/P1-3：链上事实源（经 coincall-bot-chain-api，唯一链通道）----
     bot_chain_api_base_url: str = "http://127.0.0.1:8010"
     #: PayVault 合约（coincall-contracts/deployments/testnet-968.json 的事实源）
-    pay_vault_address: str = "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0  # epoch2"  # 公开合约地址
+    pay_vault_address: str = (
+        "0xa6E82Fd6648F9Ea8f695c37Edf89f2E5FDb89ff0"  # epoch2 金库（公开合约地址）
+    )
     #: PayVault 部署块（eth_getCode 实证：25795947 无代码/25795948 起 6696B）；首跑回补起点
     pay_vault_deploy_block: int = 25_870_488  # epoch2 部署块（事实源 contracts/deployments）
     #: ERC-8004 身份存在性校验结果短缓存秒数（含 not_found 负缓存）
