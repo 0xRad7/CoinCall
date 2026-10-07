@@ -340,7 +340,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 /* ---- 登录态主体（hero + 能力 + 指标 + 护栏），登录入口保持在右上角顶栏 ---- */
 .welcome-top-actions { display: flex; align-items: center; gap: var(--space-3); }
 .login .welcome-top .btn { padding: 9px 20px; font-size: 15px; }
-.welcome-login { flex: 1; width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 var(--space-4) clamp(12px, 2vh, 20px); }
+.welcome-login { flex: 1; width: 100%; max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--space-4) clamp(14px, 2.5vh, 32px); }
 
 /* 入场动效：hero 元素 fade-in-up 依次延迟（纯 CSS；reduced-motion 关闭） */
 @keyframes wl-fade-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
@@ -353,7 +353,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
 .wl-fade.d6 { animation-delay: 0.7s; }
 
 /* Hero：大标题（字体内部「双向流光」渐变）+ 正下方 mono 打字机副标题（JS 驱动，▌光标常驻）+ 锚点 CTA；底部微弱径向光晕 */
-.wl-hero { position: relative; isolation: isolate; text-align: left; padding: clamp(14px, 3vh, 32px) 0 clamp(12px, 2.5vh, 22px); }
+.wl-hero { position: relative; isolation: isolate; text-align: left; padding: clamp(18px, 3.5vh, 56px) 0 clamp(16px, 3vh, 44px); }
 .wl-hero::after { content: ""; position: absolute; left: -10%; bottom: -30%; width: 90%; max-width: 780px; height: 75%; background: radial-gradient(ellipse at center, rgba(45, 212, 191, 0.12) 0%, rgba(59, 130, 246, 0.05) 45%, transparent 70%); pointer-events: none; z-index: -1; }
 .wl-hero h1 { margin: 0; font-size: clamp(38px, 6.2vw, 58px); font-weight: 700; line-height: 1.08; letter-spacing: -0.02em; color: #f2f5fb; }
 /* 一级标题流光：background-position 110% ↔ -110% 往返（6s alternate）；
@@ -373,19 +373,19 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: var(--space-
   .wl-title { color: #2dd4bf; background: none; animation: none; }
 }
 /* 副标题打字机：容器 min-height 防删空抖动；文案在 data-text，由 LoginFace 的 useEffect 定时器链打/删 */
-.wl-sub-type { margin-top: 16px; min-height: 1.8em; font-family: var(--font-mono); font-size: clamp(15px, 2vw, 19px); font-weight: 500; letter-spacing: 0.05em; color: #5eead4; }
+.wl-sub-type { margin-top: clamp(14px, 2vh, 24px); min-height: 1.8em; font-family: var(--font-mono); font-size: clamp(15px, 2vw, 19px); font-weight: 500; letter-spacing: 0.05em; color: #5eead4; }
 .wl-sub-caret { display: inline-block; margin-left: 7px; color: #2dd4bf; animation: wl-blink 1s step-end infinite; }
 @keyframes wl-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
 /* Core Capabilities：Bento 网格（01 主推 2×2 大卡 / 02 03 普通 1×1 / 04 通栏宽卡），整体放大一档 */
-.wl-caps { margin-top: 2px; padding-top: clamp(12px, 2.5vh, 24px); scroll-margin-top: 72px; }
-.wl-sec-title { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: #e6e9ef; }
+.wl-caps { margin-top: 2px; padding-top: clamp(16px, 3vh, 44px); scroll-margin-top: 72px; }
+.wl-sec-title { display: flex; align-items: center; gap: 10px; margin: 0 0 clamp(10px, 1.6vh, 18px); font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: #e6e9ef; }
 .wl-sec-title::before { content: ""; width: 22px; height: 2px; border-radius: 1px; background: linear-gradient(90deg, #2dd4bf, rgba(45, 212, 191, 0)); flex-shrink: 0; }
-.bento-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.bento-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 16px; row-gap: clamp(14px, 2vh, 22px); }
 .bento-card {
   position: relative; overflow: hidden;
   background: #0f1520; border: 1px solid #1c2635; border-radius: 12px;
-  padding: 24px; min-height: 148px;
+  padding: 24px; min-height: clamp(140px, 16vh, 200px);
   transform: perspective(700px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
   transition: transform 0.18s ease-out, box-shadow 0.25s ease, border-color 0.25s ease;
 }
