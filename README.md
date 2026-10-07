@@ -49,6 +49,24 @@ CoinCall 是运行在 BOT Chain 上的 AI Agent 按次付费服务层：Agent �
 | `coincall-examples` | consumer_agent v1/v2（真实 LLM+MCP 演示）、agent_loop | — |
 | `coincall-docs` | 设计文档、审计报告、主网调研、runbook | — |
 
+## 环境依赖
+
+| 依赖 | 版本 | 用途 |
+|---|---|---|
+| macOS / Linux | — | `up.sh` 为 zsh 脚本（lsof/nohup/disown），Windows 请用 WSL |
+| [uv](https://docs.astral.sh/uv/) | ≥ 0.11 | 四个 Python 服务的依赖与运行（`uv run` 自动建 venv 并 sync，无需预装 Python；各仓要求 ≥ 3.12） |
+| Node.js + npm | ≥ 18（实测 24） | 控制台（Vite 5 + React + ethers）；首次需 `cd coincall-console && npm install` |
+| EVM 浏览器钱包 | MetaMask 等 | 控制台连接钱包用；需手动添加 BOT Chain 网络（见下） |
+
+**钱包网络参数**：主网 `chainId 677` · RPC `https://rpc.botchain.ai/` · 浏览器 `https://scan.botchain.ai`；测试网 `chainId 968` · RPC `https://rpc.bohr.life/` · 浏览器 `https://scan.bohr.life`。
+
+**前置条件**：
+
+- 端口空闲：`8010`（bot-chain-api）/ `8020`（core）/ `8030`（gateway）/ `5173`（console）
+- 各服务 `.env` 从对应 `.env.example` 复制起改（console `VITE_*` 链参数、gateway `COINCALL_*`、core `COINCALL_CORE_*` 前缀、bot-chain-api `BOT_CHAIN_*`）；`.env` 不入仓
+- 直连 `rpc.botchain.ai` 受限（DNS 污染）时需本地 HTTP 代理：`HTTPS_PROXY=http://127.0.0.1:7890`（up.sh 已为 core 注入，其余直连本机不受影响）
+- 可选：`consumer_agent` 演示需 DashScope API key；主网 operator 签名依赖 bot-chain-api 托管 keystore（不入仓，克隆副本不含，缺它则仅测试网/只读操作可用）
+
 ## 快速开始（测试网）
 
 ```bash
