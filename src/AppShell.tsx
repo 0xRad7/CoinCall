@@ -1,4 +1,4 @@
-import { NavLink, Outlet, Navigate } from "react-router-dom";
+import { NavLink, Outlet, Navigate, useLocation } from "react-router-dom";
 import { useWallet } from "./state/WalletContext";
 import { useMode } from "./state/ModeContext";
 import { ADMIN_ADDRESS, CHAIN_ID } from "./chain/constants";
@@ -102,10 +102,9 @@ export function AppShell() {
   const adminEnabled = ADMIN_ADDRESS !== "";
   const isAdmin = !adminEnabled || (w.address ?? "").toLowerCase() === ADMIN_ADDRESS;
 
-  // 非管理员访问 / → 送往 welcome
-  const hash = typeof window !== "undefined" ? window.location.hash : "";
-  const path = hash.startsWith("#") ? hash.slice(1).split("?")[0] : "";
-  if (adminEnabled && !isAdmin && (path === "/" || path === "")) {
+  // 响应式路由守卫：useLocation 使 SPA 内部导航也触发判定（原 window.location.hash 只在首次渲染读一次）
+  const loc = useLocation();
+  if (adminEnabled && !isAdmin && (loc.pathname === "/" || loc.pathname === "")) {
     return <Navigate to="/welcome" replace />;
   }
 
