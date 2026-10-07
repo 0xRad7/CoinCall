@@ -2,8 +2,9 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useWallet } from "./state/WalletContext";
 import { CHAIN_ID } from "./chain/constants";
 import { ConnectWalletButton } from "./components/ConnectWalletButton";
+import { ModePill, ThemeToggle } from "./components/shell";
 
-/** 顶栏（右上角）：钱包簇整组右对齐——连接后常驻地址 chip（含实际钱包名）+ 链徽标（不对时可点切链）+ 断开按钮。 */
+/** 顶栏（右上角）：钱包簇整组右对齐——连接后常驻地址 chip（含实际钱包名）+ 链徽标（不对时可点切链）+ 断开按钮；簇后是模式 pill 与主题切换。 */
 function WalletChipBar() {
   const w = useWallet();
   if (!w.address || !w.mode) {
@@ -13,6 +14,9 @@ function WalletChipBar() {
         <div className="wallet-cluster">
           <span className="dim">未连接钱包——签名与交易需要浏览器钱包（仅读取地址）</span>
           <ConnectWalletButton size="normal" />
+        </div>
+        <div className="topbar-tools">
+          <ThemeToggle />
         </div>
       </div>
     );
@@ -53,9 +57,39 @@ function WalletChipBar() {
           断开
         </button>
       </div>
+      <div className="topbar-tools">
+        <ModePill />
+        <ThemeToggle />
+      </div>
     </div>
   );
 }
+
+/** 侧栏导航：任务分组 + 每项一句灰字副标注（Provider/Consumer 项带身份色激活态）。 */
+const NAV_GROUPS: Array<{
+  label: string;
+  items: Array<{ to: string; end?: boolean; name: string; sub: string; identity?: "provider" | "consumer" }>;
+}> = [
+  {
+    label: "公共",
+    items: [
+      { to: "/", end: true, name: "总览", sub: "目录与比价" },
+    ],
+  },
+  {
+    label: "工作台",
+    items: [
+      { to: "/provider", name: "Provider", sub: "团队与服务", identity: "provider" },
+      { to: "/consumer", name: "Consumer", sub: "钱包与调用", identity: "consumer" },
+    ],
+  },
+  {
+    label: "支持",
+    items: [
+      { to: "/help", name: "帮助", sub: "流程与错误码" },
+    ],
+  },
+];
 
 export function AppShell() {
   return (
@@ -65,18 +99,23 @@ export function AppShell() {
           <span className="dot" />
           CoinCall 控制台
         </div>
-        <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
-          总览
-        </NavLink>
-        <NavLink to="/provider" className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
-          Provider 工作台
-        </NavLink>
-        <NavLink to="/consumer" className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
-          消费端工作台
-        </NavLink>
-        <NavLink to="/help" className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
-          帮助
-        </NavLink>
+        {NAV_GROUPS.map((g) => (
+          <div key={g.label} className="nav-group">
+            <div className="nav-group-label">{g.label}</div>
+            {g.items.map((it) => (
+              <NavLink
+                key={it.to}
+                to={it.to}
+                end={it.end}
+                data-identity={it.identity}
+                className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+              >
+                <span className="nav-name">{it.name}</span>
+                <span className="nav-sub">{it.sub}</span>
+              </NavLink>
+            ))}
+          </div>
+        ))}
         <div className="nav-foot">
           chainId 968 · BOT Chain
           <br />
