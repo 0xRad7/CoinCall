@@ -2,7 +2,8 @@
 
 - live：core(8020) 目录只读冒烟。
 - needs_funds：anvil #1 钱包 → mint+approve（本地直签 raw tx，BOT 付 gas）→
-  core 签 key → 对 svc_rad_ai 真实付费调用 200 → 等 keeper 结算（≤90s）→ 断言 Charged。
+  core 签 key → 对 binance_future_ai_increase_top_n 真实付费调用 200
+  → 等 keeper 结算（≤90s）→ 断言 Charged。
 
 8020/8030 连接拒绝（其他任务在重启服务）按纪律等 5s 重试。
 """
@@ -47,7 +48,9 @@ def test_catalog_live() -> None:
     assert resp.status_code == 200, resp.text
     catalog = resp.json()
     assert catalog["count"] >= 1
-    assert any(svc["service_id"] == "svc_rad_ai" for svc in catalog["services"])
+    assert any(
+        svc["service_id"] == "binance_future_ai_increase_top_n" for svc in catalog["services"]
+    )
 
 
 @pytest.mark.needs_funds
@@ -69,7 +72,7 @@ def test_paid_call_e2e_settled_by_keeper() -> None:
         approved = wallet.approve_vault("10")
         assert approved["status"] == 1, approved
     ready = wallet.balance()
-    assert ready.available_raw >= 10_000  # 至少够一笔 svc_rad_ai（0.01 USDT）
+    assert ready.available_raw >= 10_000  # 至少够一笔 binance_future_ai_increase_top_n（0.01 USDT）
 
     # ② core 签发 api key（绑定消费者钱包；明文只回一次）
     resp = _request_with_retry(
@@ -88,7 +91,7 @@ def test_paid_call_e2e_settled_by_keeper() -> None:
         http=_HTTP,
     )
     marker = f"p1-1-live-{uuid.uuid4().hex[:8]}"
-    result = client.call("svc_rad_ai", {"text": marker})
+    result = client.call("binance_future_ai_increase_top_n", {"text": marker})
     assert result.status_code == 200
     assert result.receipt_id and result.receipt_id.startswith("rcp_")
     assert result.charged_raw == "10000"
