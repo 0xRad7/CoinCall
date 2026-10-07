@@ -78,6 +78,32 @@ describe("顶栏全局连接入口", () => {
   });
 });
 
+describe("顶栏钱包簇右对齐", () => {
+  it("wallet-bar 为右对齐 header：钱包控件收拢在 wallet-cluster 钩子内贴右上角（小屏可换行仍右对齐）", () => {
+    render(
+      <WalletProvider>
+        <MemoryRouter>
+          <AppShell />
+        </MemoryRouter>
+      </WalletProvider>
+    );
+    const bar = document.querySelector(".wallet-bar");
+    expect(bar).toBeTruthy();
+    // 钱包簇是顶栏容器的直接子节点，「连接钱包」按钮收拢在簇内（布局钩子存在）
+    const cluster = bar?.firstElementChild ?? null;
+    expect(cluster?.classList.contains("wallet-cluster")).toBe(true);
+    const connectBtn = screen.getByRole("button", { name: "连接钱包" });
+    expect(cluster?.contains(connectBtn)).toBe(true);
+    // jsdom 不做真布局：断言样式表钩子——顶栏右对齐、簇内换行后仍右对齐
+    const css = readFileSync(join(__dirname, "..", "src", "styles.css"), "utf-8");
+    const barRule = css.match(/\.wallet-bar\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(barRule).toContain("justify-content: flex-end");
+    const clusterRule = css.match(/\.wallet-cluster\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(clusterRule).toContain("justify-content: flex-end");
+    expect(clusterRule).toContain("flex-wrap: wrap");
+  });
+});
+
 describe("发布表单内联入口", () => {
   function renderPublish() {
     return render(
