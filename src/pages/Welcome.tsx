@@ -175,6 +175,12 @@ function LoginFace({ connected, onProceed }: { connected: boolean; onProceed: ()
           </div>
         </section>
 
+        {/* 品牌页脚 */}
+        <footer className="wl-footer wl-fade d6">
+          <span className="wl-footer-brand">CoinCall 币应</span>
+          <span className="wl-footer-sep">·</span>
+          <span>All Rights Reserved © 2026</span>
+        </footer>
       </main>
     </div>
   );
