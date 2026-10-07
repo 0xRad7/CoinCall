@@ -343,3 +343,17 @@ def _auth_from_payload(payload: dict) -> object:
         valid_before=int(payload["validBefore"]),
         nonce=bytes.fromhex(payload["nonce"][2:]),
     )
+
+
+def test_default_idempotency_key_unique_per_call() -> None:
+    """按次付费语义回归锚：默认幂等键每次调用必须唯一。
+
+    2026-10-07 线上事故：确定性 hash(service_id+params) 使换钱包/再次购买的同参数调用
+    被网关幂等重放（新签名未消费、链上不扣款、消费端却显示已付费）。
+    重试去重必须显式传 idempotency_key。
+    """
+    from coincall.client import _default_idempotency_key
+
+    k1 = _default_idempotency_key("svc_rad_ai", {"limit": 10})
+    k2 = _default_idempotency_key("svc_rad_ai", {"limit": 10})
+    assert k1 != k2 and k1.startswith("ik-") and k2.startswith("ik-")

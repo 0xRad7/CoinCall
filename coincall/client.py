@@ -10,10 +10,9 @@ call(service_id, params) 内部：
 httpx 一律 trust_env=False（C-07：系统代理不得劫持 localhost 服务）。
 """
 
-import hashlib
-import json
 import secrets
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,9 +55,13 @@ class CallResult:
 
 
 def _default_idempotency_key(service_id: str, params: Any) -> str:  # noqa: ANN401 —— JSON 序列化边界
-    """自动幂等键 = 参数 hash（03 §5 ③：同参数重试同键，网关重放防双扣）。"""
-    canonical = json.dumps(params, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(f"{service_id}:{canonical}".encode()).hexdigest()
+    """自动幂等键 = 每次调用唯一（uuid）。
+
+    按次付费语义：同参数再买一次是新一笔消费，不是重试——若用确定性
+    hash(service_id+params)，网关会回放上一次的结果（新签名未消费、链上不扣款，
+    消费端却显示已付费）。需要重试去重（同一逻辑请求网络重发）时显式传 idempotency_key。
+    """
+    return f"ik-{uuid.uuid4().hex}"
 
 
 class Client:
