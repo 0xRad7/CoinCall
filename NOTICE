@@ -1,0 +1,59 @@
+NOTICE
+======
+
+Project:      CoinCall — platform source repositories (coincall-* directories
+              at the root of this repository)
+Copyright 2026 0xRad7 <sevenlm361@gmail.com>
+
+License
+-------
+This project is licensed under the Business Source License 1.1 (BSL 1.1).
+The full license text is in the LICENSE file at the root of this repository.
+
+  - License Grant Date:  2026-10-08
+  - Change Date:         2030-10-08
+  - Change License:      GNU General Public License version 2.0 or later
+    (SPDX: GPL-2.0-or-later)
+
+Effective on the Change Date (or the fourth anniversary of the first publicly
+available distribution of a specific version, whichever comes first), the
+Work is granted under the terms of the Change License and the pre-Change-Date
+grant terminates, as stated in the LICENSE.
+
+Additional Use Grant (informative summary)
+------------------------------------------
+Evaluation, research, teaching, hackathon and demonstration use, and use for
+Your own internal business operations are permitted. Before the Change Date,
+offering the Work (or any service materially derived from it) to third
+parties on a commercial basis is NOT permitted — such use requires a
+commercial license from the Licensor. The authoritative text is the
+"Additional Use Grant" parameter in the LICENSE file.
+
+TODOs
+-----
+1. Licensor identity (confirm or replace): the "Licensor" parameter in
+   LICENSE and the copyright line above currently use the identity read from
+   git config (user.name / user.email) of the coincall-* subrepositories:
+   "0xRad7 <sevenlm361@gmail.com>". If the project should instead be licensed
+   under a legal entity or team name, replace the Licensor parameter in
+   LICENSE and the copyright line in this NOTICE.
+
+2. Change Date adjustment: currently 2030-10-08, i.e. four years after the
+   License Grant Date 2026-10-08 (the customary four-year window of BSL 1.1).
+   To shorten or extend the protection window, edit only the "Change Date:"
+   parameter in LICENSE (format YYYY-MM-DD). Note that BSL 1.1 additionally
+   provides that Change-License rights take effect on the Change Date OR the
+   fourth anniversary of the first publicly available distribution of a given
+   version, whichever comes first — so an earlier public release date can
+   effectively shorten the window.
+
+3. Per-subrepository LICENSE (coverage gap): this root LICENSE covers the
+   ordinary files of the root repository. The coincall-* directories are
+   separate git repositories referenced from the root repository as gitlinks;
+   strictly speaking, a root LICENSE does not automatically apply to the
+   contents of those nested repositories. For complete protection it is
+   recommended to place a copy of this same LICENSE (with the "Licensed
+   Work" parameter adjusted to name the specific subrepository) at the root
+   of each coincall-* subrepository, and to have the main thread mention in
+   the root README that licensing is governed by the LICENSE in each
+   repository.

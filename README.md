@@ -6,3 +6,7 @@
 - `coincall-docs` 非 git 仓库，以普通文件整体纳管。
 - 各子仓独立演进、各自提交，并各自维护 `.gitignore` 与秘密防护；根仓层面额外全量排除 `.env`（保留 `.env.example`）、keystore、DuckDB 数据、日志与各类缓存。
 - 升级子仓版本：先在子仓内提交，再回根仓 `git add <子目录>` 更新 gitlink 指针后提交。
+
+## License
+
+本仓库与 coincall-* 子仓适用 BSL 1.1（评估/研究/教学/黑客松/演示/自用放行；2030-10-08 起转 GPL-2.0+）。根仓参数见 [LICENSE](LICENSE)，版权与 TODO 见 [NOTICE](NOTICE)；各子仓建议各放同名副本（见 NOTICE TODO-3）。
