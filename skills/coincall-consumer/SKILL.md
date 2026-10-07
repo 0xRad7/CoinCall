@@ -28,9 +28,17 @@ export COINCALL_ALLOWED_SERVICES=svc_rad_ai # 服务白名单（逗号分隔；�
    `hint_approve_vault`（approve）转告用户去补，**不要自行重试**。
 2. **找服务** `catalog` / `call.py catalog` —— 确认 service_id 与定价，只选目录内服务。
 3. **看价** `service_quote {service_id}` / `call.py quote SVC`
-   —— 核对：定价、收款方必须是 PayVault、自己的余额/授权/L0 预算余量。
-   返回含 advice 建议：verb=switch 时改调 recommend 并向用户说明理由
-   （advice 为 `{"error": "unavailable"}` 时按报价本体继续，不算失败）。
+   —— 核对：定价、收款方必须是 PayVault、自己的余额/授权/L0 预算余量；
+   响应自带 `summary` 字段（多行人话摘要，可直接转述给用户）。
+   返回含 advice 建议（信息面）：
+   - `verb`：recommend/keep/switch/indifferent/insufficient_data——switch 时改调
+     `recommend` 指向的服务并向用户说明理由；insufficient_data 不阻塞（分区无履约
+     数据，按报价本体决策）；`{"error": "unavailable"}` 时按报价本体继续，不算失败。
+   - `signals`：推荐服务的量化履约依据——成功率/p95 延迟/成功与失败笔数（近窗）、
+     链上计费笔数/独立付费者/累计收入、最后活跃时间。回答选型问题时引用这些数字。
+   - `security`：平台安全评估——链上身份（ERC-8004）/收款地址绑定/链上计费真相/
+     履约数据锚定/服务状态；`notes` 会诚实列出未覆盖维度（如上游投毒扫描），
+     向用户转述时保留这份披露，不要说成"已全面扫描"。
 4. **问人（仅当越界时）**：价格超单笔限额、服务不在白名单、或预算余量不足 →
    停下，把报价单转给用户并**等待明确指示**，不要先斩后奏。
 5. **调用** `paid_service_call {service_id, params}` / `call.py call SVC '{"k":v}'`
@@ -45,6 +53,13 @@ export COINCALL_ALLOWED_SERVICES=svc_rad_ai # 服务白名单（逗号分隔；�
 2. **预算触底立即停止**——L0 拒绝信息出现即本轮消费结束，报告剩余额度，等用户。
 3. **每笔付费调用都要能报出收据**——买了什么 / 花了多少（USDT 与 raw）/ receipt_id；
    账本 `~/.coincall/ledger.jsonl`（intent→receipt→onchain）只追加、可对账。
+4. **账本语义（勿误读）**——spend_report 的 policy 数字是**跨会话持久账本**，含此前
+   所有会话的历史支出与旧收据；本次会话真实支出只看 `spent_in_session_raw`。
+   付费调用失败（402/5xx/超时）**不会写入任何账本记录**——不要把历史收据归因于
+   本次失败的调用。链上 Charged 事件是计费唯一真相。
+5. **报价闸门是平台内置的**——coincall-mcp 进程内没有 service_quote 过的服务，
+   paid_service_call 会被直接拒绝（"流程闸门"人话）。这不是 bug：先看价再花钱。
+   报价"尝试过"即计入（quote 返回 hints/advice 后由你判断是否继续）。
 
 ## 密钥纪律
 

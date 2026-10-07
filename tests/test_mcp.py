@@ -116,6 +116,13 @@ def test_tool_catalog_returns_services() -> None:
 @pytest.mark.unit
 def test_tool_paid_service_call_success_with_receipt() -> None:
     server = _server()
+    # 新纪律：MCP 内置报价闸门——先 quote（记录尝试）才放行付费
+    _result(
+        server.handle_request(
+            _request("tools/call", name="service_quote", arguments={"service_id": "svc_e2e_demo"})
+        )
+        or {}
+    )
     result = _result(
         server.handle_request(
             _request(
@@ -131,6 +138,7 @@ def test_tool_paid_service_call_success_with_receipt() -> None:
     assert payload["body"] == {"echo": "hi"}
     assert payload["receipt_id"] == "rcp_abc123"
     assert payload["charged_raw"] == "10000"
+    assert "summary" in payload and "收据 rcp_abc123" in payload["summary"]
 
 
 @pytest.mark.unit
@@ -161,6 +169,10 @@ def test_tool_paid_service_call_402_becomes_iserror_with_guidance() -> None:
         )
 
     server = CoinCallMcpServer(factory)
+    # 新纪律：先 quote（记录尝试）——否则会被内置闸门挡下而非走到 402
+    server.handle_request(
+        _request("tools/call", name="service_quote", arguments={"service_id": "svc_e2e_demo"})
+    )
     result = _result(
         server.handle_request(
             _request(
@@ -484,3 +496,38 @@ def test_subprocess_stdio_list_tools() -> None:
     tools_frame = next(line for line in lines if line.get("id") == 2)
     names = [tool["name"] for tool in tools_frame["result"]["tools"]]
     assert names == FIVE_TOOLS
+
+
+@pytest.mark.unit
+def test_quote_gate_blocks_paid_without_prior_quote() -> None:
+    """MCP 内置报价闸门：没 service_quote 过的服务禁止付费（纪律下沉平台层）。
+
+    2026-10-07 分层重构：闸门原先硬编码在 consumer_agent CLI（宿主各自实现易漂移），
+    现下沉到 MCP server 进程内存——任何宿主零成本获得。
+    """
+    server = _server()
+    result = _result(
+        server.handle_request(
+            _request(
+                "tools/call",
+                name="paid_service_call",
+                arguments={"service_id": "svc_e2e_demo", "params": {"text": "hi"}},
+            )
+        )
+        or {}
+    )
+    assert result["isError"] is True
+    assert "流程闸门" in result["content"][0]["text"]
+    assert "service_quote" in result["content"][0]["text"]
+
+
+@pytest.mark.unit
+def test_tool_catalog_summary_field() -> None:
+    """summary 层：工具响应自带一行人话摘要（宿主直接转述，无需自写解析）。"""
+    server = _server()
+    result = _result(
+        server.handle_request(_request("tools/call", name="catalog", arguments={})) or {}
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert "summary" in payload and "svc_e2e_demo" in payload["summary"]

@@ -170,7 +170,10 @@ def test_hook_non_paid_tool_passes_through_silently() -> None:
 def test_skill_documents_advice_discipline_and_hook_mount() -> None:
     """SKILL.md 第 3 步含 switch 纪律句；hooks/README 提供宿主挂载说明。"""
     skill = SKILL_MD.read_text(encoding="utf-8")
-    assert "verb=switch 时改调 recommend" in skill
+    # switch 纪律（2026-10 措辞扩展为信号+安全）
+    assert "switch 时改调" in skill and "recommend" in skill
+    assert "signals" in skill and "security" in skill  # advice 信息面（量化依据+安全评估）已入纪律
+    assert "spent_in_session_raw" in skill  # 账本语义（防历史支出误读）
     readme = HOOKS_README.read_text(encoding="utf-8")
     assert "PreToolUse" in readme and "settings.json" in readme
     assert "additionalContext" in readme  # ZCode 兜底通道注明

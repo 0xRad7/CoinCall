@@ -10,6 +10,7 @@ call(service_id, params) 内部：
 httpx 一律 trust_env=False（C-07：系统代理不得劫持 localhost 服务）。
 """
 
+import os
 import secrets
 import time
 import uuid
@@ -67,6 +68,41 @@ def _default_idempotency_key(service_id: str, params: Any) -> str:  # noqa: ANN4
     消费端却显示已付费）。需要重试去重（同一逻辑请求网络重发）时显式传 idempotency_key。
     """
     return f"ik-{uuid.uuid4().hex}"
+
+
+DEFAULT_APIKEY_FILE = Path.home() / ".coincall" / "apikey"  # 0600，明文只进这里
+
+
+def ensure_api_key(
+    wallet: LocalWallet,
+    *,
+    core_url: str = DEFAULT_CORE_URL,
+    key_file: Path | None = None,
+    http: httpx.Client | None = None,
+) -> str:
+    """平台 api key 接入引导（宿主一行调用，替代各自手抄的 bootstrap）。
+
+    顺序：env 已设 → 直接用；0600 文件已存在 → 读入；否则向 core 签发
+    （请求只带公开地址，不带任何秘密），明文落盘 0600 一次并写回 os.environ
+    （后续 MCP 子进程等继承方拿得到）。等价控制台"明文只回显一次"。
+    """
+    path = key_file or DEFAULT_APIKEY_FILE
+    if os.environ.get("COINCALL_API_KEY"):
+        return os.environ["COINCALL_API_KEY"]
+    if path.exists():
+        key = path.read_text().strip()
+        if key:
+            os.environ["COINCALL_API_KEY"] = key
+            return key
+    client = http or httpx.Client(trust_env=False, timeout=10)
+    resp = client.post(f"{core_url}/apikeys", json={"consumer_wallet": wallet.address})
+    resp.raise_for_status()
+    key = str(resp.json()["api_key"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(key)
+    path.chmod(0o600)
+    os.environ["COINCALL_API_KEY"] = key
+    return key
 
 
 class Client:

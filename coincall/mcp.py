@@ -175,7 +175,7 @@ class _ToolOutcome:
 # ---- 新三只读工具的载荷构造（决策闭环：看价 / 自查 / 汇报；实现参考 agent_loop.py） ----
 
 #: advice 通道短超时（consumer-agent-interface advice 通道）：core 慢不拖报价本体
-ADVICE_TIMEOUT_S = 3.0
+ADVICE_TIMEOUT_S = 5.0  # core 冷启动（重启后首轮 DuckDB 扫描）实测可超 3s → unavailable
 
 
 def _advice_view(
@@ -359,12 +359,119 @@ def spend_report_payload(client: Client, recent: int = 10) -> dict[str, Any]:
     }
 
 
+def _usdt(raw: object) -> str:
+    try:
+        return f"{int(str(raw)) / 1e6:g}" if raw is not None else "?"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _summarize_catalog(catalog: dict[str, Any]) -> str:
+    """目录一行摘要：宿主 Agent 直接转述，无需自写解析。"""
+    svcs = catalog.get("services", [])
+    items = "；".join(
+        f"{s.get('service_id', '?')}（"
+        f"{(s.get('manifest') or {}).get('name', '-')} · "
+        f"{(s.get('manifest') or {}).get('category', '-')} · "
+        f"{((s.get('manifest') or {}).get('pricing') or {}).get('amount', '?')} USDT/次）"
+        for s in svcs[:5]
+    )
+    return f"{len(svcs)} 个服务：{items}"
+
+
+def _summarize_quote(q: dict[str, Any]) -> str:
+    """报价多行摘要：定价/可付性 + 平台建议（三信号量化依据 + 安全评估）+ hints。"""
+    advice = q.get("advice") or {}
+    hints = q.get("hints") or []
+    lines = [
+        f"{q.get('name')} · {q['pricing']['amount']} USDT/次 ｜ "
+        f"余额可付={q.get('affordable_by_wallet')} 预算可付={q.get('affordable_by_budget')}"
+        + (f" ｜ ⚠ hints：{'；'.join(hints[:2])}" if hints else "")
+    ]
+    verb = advice.get("verb") or advice.get("error") or "-"
+    conf = advice.get("confidence")
+    reason = advice.get("reason", "")
+    lines.append(
+        f"平台建议 advice={verb}"
+        + (
+            f"（置信 {conf:.2f}，理由：{reason}）"
+            if isinstance(conf, (int, float)) and reason
+            else (f"（{reason}）" if reason else "")
+        )
+    )
+    sig = advice.get("signals")
+    if isinstance(sig, dict):
+        f = sig.get("fulfillment") or {}
+        r = sig.get("revenue") or {}
+        fr = sig.get("freshness") or {}
+        sr = f.get("success_rate")
+        sr_txt = f"{sr * 100:.0f}%" if isinstance(sr, (int, float)) else "无数据"
+        age = fr.get("age_h")
+        age_txt = f"{age:.1f}h 前" if isinstance(age, (int, float)) else "无活动"
+        lines.append(
+            f"├ 履约历史（近{f.get('window_hours')}h）：成功率 {sr_txt}"
+            + (
+                f" · 成功 {f.get('calls_success')} 笔 / 失败 {f.get('calls_aborted')} 笔"
+                if f.get("calls_success") is not None
+                else ""
+            )
+            + (
+                f" · p95 延迟 {f['p95_ms'] / 1000:.1f}s"
+                if isinstance(f.get("p95_ms"), (int, float))
+                else ""
+            )
+        )
+        lines.append(
+            f"├ 市场信号：链上计费 {r.get('charged_count', 0)} 笔 · "
+            f"独立付费者 {r.get('distinct_payers')} · 累计收入 {r.get('total')} USDT · "
+            f"最后活跃 {age_txt}"
+        )
+    sec = advice.get("security")
+    if isinstance(sec, dict):
+        lines.append(f"├ 安全评估：{sec.get('provider_identity')} · {sec.get('payee_binding')}")
+        lines.append(
+            f"│   {sec.get('billing_truth')} · {sec.get('fulfillment_anchor')} · "
+            f"状态 {sec.get('service_status')}"
+        )
+        for note in (sec.get("notes") or [])[:2]:
+            lines.append(f"└ {note}")
+    if advice.get("alternatives"):
+        alts = "；".join(
+            f"{a.get('id')}（{str(a.get('why', ''))[:30]}）" for a in advice["alternatives"][:2]
+        )
+        lines.append(f"备选：{alts}")
+    return "\n".join(lines)
+
+
+def _summarize_call(payload: dict[str, Any]) -> str:
+    receipt = str(payload.get("receipt_id") or "-")
+    return (
+        f"✅ status={payload.get('status_code')} ｜ 扣款 {_usdt(payload.get('charged_raw'))} USDT"
+        f" ｜ 收据 {receipt}（Ed25519 回执签名已验）"
+    )
+
+
+def _summarize_wallet(status: dict[str, Any]) -> str:
+    return (
+        f"地址 {status.get('address')} ｜ USDT 余额 {_usdt(status.get('usdt_balance_raw'))}"
+        f" ｜ PayVault 授权 {_usdt(status.get('vault_allowance_raw'))}"
+    )
+
+
+def _summarize_report(report: dict[str, Any]) -> str:
+    spent = _usdt(report.get("spent_in_session_raw"))
+    return f"本次会话已花 {spent} USDT ｜ L0 账本明细见 recent 字段"
+
+
 class CoinCallMcpServer:
     """极简 MCP stdio server：initialize / tools/list / tools/call / ping。"""
 
     def __init__(self, client_factory: Callable[[], Client]) -> None:
         self._client_factory = client_factory
         self._client: Client | None = None
+        # 会话级报价闸门：本 MCP 进程内没 service_quote 过的服务禁止付费调用——
+        # 纪律下沉到平台层，任何宿主（ZCode/Claude/CLI）零成本获得，不依赖 Agent 自觉
+        self._quoted: set[str] = set()
 
     def client(self) -> Client:
         if self._client is None:
@@ -421,34 +528,25 @@ class CoinCallMcpServer:
         """五工具分发；CoinCallError 一律转 isError 文本（含 402 人话指引）。"""
         try:
             if name == "catalog":
-                return _ToolOutcome(
-                    json.dumps(self.client().catalog(), ensure_ascii=False, default=str)
-                )
+                catalog = self.client().catalog()
+                catalog["summary"] = _summarize_catalog(catalog)
+                return _ToolOutcome(json.dumps(catalog, ensure_ascii=False, default=str))
             if name == "service_quote":
                 service_id = str(arguments.get("service_id", ""))
                 if not service_id:
                     return _ToolOutcome("参数错误：需要 service_id (str)", is_error=True)
-                return _ToolOutcome(
-                    json.dumps(
-                        service_quote_payload(self.client(), service_id),
-                        ensure_ascii=False,
-                        default=str,
-                    )
-                )
+                self._quoted.add(service_id)  # 闸门按"尝试过报价"计（纪律=先看价再花钱）
+                quote = service_quote_payload(self.client(), service_id)
+                quote["summary"] = _summarize_quote(quote)
+                return _ToolOutcome(json.dumps(quote, ensure_ascii=False, default=str))
             if name == "wallet_status":
-                return _ToolOutcome(
-                    json.dumps(
-                        wallet_status_payload(self.client()), ensure_ascii=False, default=str
-                    )
-                )
+                status = wallet_status_payload(self.client())
+                status["summary"] = _summarize_wallet(status)
+                return _ToolOutcome(json.dumps(status, ensure_ascii=False, default=str))
             if name == "spend_report":
-                return _ToolOutcome(
-                    json.dumps(
-                        spend_report_payload(self.client(), arguments.get("recent", 10)),
-                        ensure_ascii=False,
-                        default=str,
-                    )
-                )
+                report = spend_report_payload(self.client(), arguments.get("recent", 10))
+                report["summary"] = _summarize_report(report)
+                return _ToolOutcome(json.dumps(report, ensure_ascii=False, default=str))
             if name == "paid_service_call":
                 service_id = str(arguments.get("service_id", ""))
                 params = arguments.get("params")
@@ -456,21 +554,24 @@ class CoinCallMcpServer:
                     return _ToolOutcome(
                         "参数错误：需要 service_id (str) 与 params (object)", is_error=True
                     )
-                result: CallResult = self.client().call(service_id, params)
-                return _ToolOutcome(
-                    json.dumps(
-                        {
-                            "service_id": result.service_id,
-                            "status_code": result.status_code,
-                            "body": result.body,
-                            "receipt_id": result.receipt_id,
-                            "charged_raw": result.charged_raw,
-                            "receipt_sig": result.receipt_sig,
-                        },
-                        ensure_ascii=False,
-                        default=str,
+                if service_id not in self._quoted:
+                    return _ToolOutcome(
+                        f"流程闸门（MCP 内置）：付费前必须先 "
+                        f'service_quote(service_id="{service_id}") '
+                        "获取报价与平台建议（advice/signals/security），确认后再付费调用。",
+                        is_error=True,
                     )
-                )
+                result: CallResult = self.client().call(service_id, params)
+                payload = {
+                    "service_id": result.service_id,
+                    "status_code": result.status_code,
+                    "body": result.body,
+                    "receipt_id": result.receipt_id,
+                    "charged_raw": result.charged_raw,
+                    "receipt_sig": result.receipt_sig,
+                }
+                payload["summary"] = _summarize_call(payload)
+                return _ToolOutcome(json.dumps(payload, ensure_ascii=False, default=str))
             return _ToolOutcome(
                 f"未知工具: {name}（可用: {' / '.join(TOOL_NAMES_ORDERED)}）", is_error=True
             )
