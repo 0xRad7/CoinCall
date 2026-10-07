@@ -1202,12 +1202,7 @@ export function WithdrawStep() {
         <div className="stat-grid" style={{ marginTop: 4 }}>
           <StatCard
             k="该地址在 PayVault 的未提现收入"
-            value={
-              <>
-                {fromRaw(credits)}
-                <span className="unit">USDT</span>
-              </>
-            }
+            value={`${fromRaw(credits)} USDT`}
             sub={`raw=${credits.toString()}`}
           />
           <StatCard
