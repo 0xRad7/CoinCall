@@ -1,13 +1,14 @@
 /**
  * 落地页 /welcome（登录 + 选身份单页流，两态）：
  * - 未连接 = 登录态（=落地页）：暗色情报站风格叙事面——登录入口在右上角顶栏（连接钱包按钮 + 「先逛逛目录」次级链接），
- *   页面自上而下：Hero（eyebrow 徽标 + 大标题打字光标▌ + 主张 + 次级锚链接平滑滚动）→ Core Capabilities 四能力卡 →
+ *   页面自上而下：Hero（「双向流光」渐变大标题 + 正下方 mono 打字机副标题▌ + 次级锚链接平滑滚动）→
+ *   Core Capabilities Bento 网格（2×2 主推大卡 + 1×1×2 普通卡 + 通栏宽卡；旋转描边 + 聚光/微倾双动效）→
  *   平台指标三大数字（EvidencePair 链上自证外链）→ 护栏三行小字；入场 fade-in-up 依次延迟、hero 底部径向光晕（纯 CSS）；
  * - 已连接 = 选身份态：工具面亮色——两张大模式卡 I'm a provider / I'm a consumer（英文主标签 +
  *   中文副语，身份色首次出现），选择后进对应工作台并 localStorage 粘滞；
  * - 已连接且已选过身份（非手动返回）→ 直接进对应工作台。
  */
-import { type MouseEvent } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { coreApi } from "../api/core";
 import { ConnectWalletButton } from "../components/ConnectWalletButton";
@@ -29,16 +30,71 @@ export default function Welcome() {
 }
 
 /* ============ 登录态（暗色情报站落地页，登录入口在右上角顶栏） ============ */
-const CAPABILITIES: Array<{ no: string; title: string; tag: string; desc: string }> = [
-  { no: "01", title: "AI Agents 一把钥匙", tag: "Single API Key, Pay-per-Request", desc: "一个 API Key 接入平台全部服务，按次付费，无需为每个服务单独注册与议价。" },
+const CAPABILITIES: Array<{ no: string; title: string; tag: string; desc: string; size?: "lg" | "wide" }> = [
+  { no: "01", title: "AI Agents 一把钥匙", tag: "Single API Key, Pay-per-Request", desc: "一个 API Key 接入平台全部服务，按次付费，无需为每个服务单独注册与议价。", size: "lg" },
   { no: "02", title: "综合决策建议", tag: "平台公共服务", desc: "为 Agent 提供服务方的履约历史、安全评估、投毒检测等综合决策建议，报价内嵌 advice，选型有据可依。" },
   { no: "03", title: "链上信任底座", tag: "BOT Chain 生态", desc: "服务方身份注册（ERC-8004）、PayVault 支付托管合约交互，身份与资金流全程链上可核验。" },
-  { no: "04", title: "失败不扣款", tag: "后付费结算", desc: "Provider 未履约不结算，链上 Charged 事件是唯一计费真相，收据 Ed25519 签名可离线验证。" },
+  { no: "04", title: "失败不扣款", tag: "后付费结算", desc: "Provider 未履约不结算，链上 Charged 事件是唯一计费真相，收据 Ed25519 签名可离线验证。", size: "wide" },
 ];
+
+/** 副标题打字机文案（注入 data-text，便于以后配置化） */
+const SUB_TITLE = "AI Agent Integration Platform on BOT Chain";
 
 function LoginFace() {
   const overview = useAsync(() => coreApi.overview().catch(() => null), []);
   const o = overview.data;
+  const subRef = useRef<HTMLSpanElement>(null);
+
+  // 副标题打字机（JS 定时器链，文案读自身 data-text）：打出 70ms/字 → 停 2.4s → 倒删 35ms/字 → 歇 700ms → 重打，无限循环；
+  // prefers-reduced-motion 时不打字、静态全显（▌光标常亮由 CSS 关动画实现）。effect 清理取消定时器，StrictMode 双挂载不叠加。
+  useEffect(() => {
+    const el = subRef.current;
+    if (!el) return;
+    const full = el.dataset.text ?? "";
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      el.textContent = full;
+      return;
+    }
+    el.textContent = "";
+    let pos = 0;
+    let dir: 1 | -1 = 1; // 1=打出 -1=倒删
+    let timer = 0;
+    const step = () => {
+      pos += dir;
+      el.textContent = full.slice(0, Math.max(pos, 0));
+      let delay: number;
+      if (dir === 1 && pos >= full.length) {
+        dir = -1;
+        delay = 2400; // 打满停顿
+      } else if (dir === -1 && pos <= 0) {
+        dir = 1;
+        delay = 700; // 删空歇
+      } else {
+        delay = dir === 1 ? 70 : 35;
+      }
+      timer = window.setTimeout(step, delay);
+    };
+    timer = window.setTimeout(step, 700); // 等标题入场落定后再起打
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Bento 动效 B：鼠标跟随聚光灯 + 3D 微倾——JS 只写 CSS 变量（聚光坐标 --mx/--my、倾角 --rx/--ry），样式全在 CSS；
+  // prefers-reduced-motion 的微倾禁用同样由 CSS 层兜底（transform: none），聚光灯保留。
+  const onCardMove = (e: MouseEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const r = el.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    el.style.setProperty("--mx", `${x.toFixed(1)}px`);
+    el.style.setProperty("--my", `${y.toFixed(1)}px`);
+    el.style.setProperty("--ry", `${((x / r.width - 0.5) * 10).toFixed(2)}deg`);
+    el.style.setProperty("--rx", `${((0.5 - y / r.height) * 8).toFixed(2)}deg`);
+  };
+  const onCardLeave = (e: MouseEvent<HTMLDivElement>) => {
+    e.currentTarget.style.setProperty("--rx", "0deg");
+    e.currentTarget.style.setProperty("--ry", "0deg");
+  };
+
   // 次级锚链接：平滑滚动到能力区（href 兜底可跳）
   const jumpToCaps = (e: MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
@@ -64,14 +120,15 @@ function LoginFace() {
         </div>
       </header>
       <main className="welcome-login">
-        {/* Hero：eyebrow 徽标 + 大标题（打字光标▌）+ 副主张 + lede + 次级锚链接；底部微弱径向光晕 */}
+        {/* Hero：双向流光渐变大标题 + 正下方 mono 打字机副标题（▌常驻）+ 次级锚链接；底部微弱径向光晕 */}
         <section className="wl-hero">
-          <div className="wl-eyebrow wl-fade d1">PAY-PER-REQUEST · AI AGENT SERVICES ON BOT CHAIN</div>
           <h1 className="wl-fade d2">
-            CoinCall<span className="wl-caret" aria-hidden="true">▌</span>
-            <span className="wl-sub wl-fade d3">让 Agent 能力按次收费，让 Agent 调用按次付费</span>
+            <span className="wl-title">CoinCall</span>
           </h1>
-          <p className="welcome-lede wl-fade d3">AI Agent 服务层：单一 API Key 接入全部服务，按次付费、链上结算、失败不扣款。</p>
+          <div className="wl-sub-type wl-fade d3" aria-label={SUB_TITLE}>
+            <span className="wl-sub-text" ref={subRef} data-text={SUB_TITLE} aria-hidden="true" />
+            <span className="wl-sub-caret" aria-hidden="true">▌</span>
+          </div>
           <div className="wl-cta-row wl-fade d4">
             <a className="wl-cta" href="#welcome-caps" onClick={jumpToCaps}>
               查看核心能力 <span aria-hidden="true">↓</span>
@@ -79,12 +136,18 @@ function LoginFace() {
           </div>
         </section>
 
-        {/* Core Capabilities：4→2→1 能力卡（编号 + 粗标题 + 副标 + 一两行描述，hover 上浮发光） */}
+        {/* Core Capabilities：Bento 网格（01 主推 2×2 大卡 / 02 03 普通 1×1 / 04 通栏宽卡）；
+            动效 A 旋转描边（conic + @property --a）+ 动效 B 聚光灯/3D 微倾（mousemove 只写 CSS 变量） */}
         <section className="wl-caps wl-fade d5" id="welcome-caps">
           <h2 className="wl-sec-title">Core Capabilities</h2>
-          <div className="wl-cap-grid">
+          <div className="bento-grid">
             {CAPABILITIES.map((c) => (
-              <div className="wl-cap" key={c.no}>
+              <div
+                key={c.no}
+                className={`bento-card${c.size === "lg" ? " bento-lg" : c.size === "wide" ? " bento-wide" : ""}`}
+                onMouseMove={onCardMove}
+                onMouseLeave={onCardLeave}
+              >
                 <div className="wc-no">{c.no}</div>
                 <h3>{c.title}</h3>
                 <div className="wc-tag">{c.tag}</div>
