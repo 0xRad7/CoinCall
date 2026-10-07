@@ -161,9 +161,9 @@ class HttpJsonProvider:
                         exc,
                     )
                     continue
-                raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
+                raise ProviderError(f"provider 超时/网络错误: {type(exc).__name__}: {exc}") from exc
             except httpx.HTTPError as exc:
-                raise ProviderError(f"provider 超时/网络错误: {exc}") from exc
+                raise ProviderError(f"provider 超时/网络错误: {type(exc).__name__}: {exc}") from exc
         del started  # 延迟统计在路由层统一做
         if resp.status_code // 100 != PROVIDER_2XX_BASE:
             raise ProviderError(f"provider 返回 {resp.status_code}")
