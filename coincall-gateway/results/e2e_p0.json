@@ -1,0 +1,50 @@
+{
+  "started": "2026-10-05T14:04:47.039433+00:00",
+  "manifest_hash": "sha256:3fa6d1f0298f2d05cc4f33a7f5e7d36c30400c4f1b0e0570dcb01b70cbcf792d",
+  "key_id": "key_3a221ea5223d",
+  "tx_mint": "f39dabed437a8406a5913b9ec1a9b616fb55f516b2fc4e6eca81be9ba5076f4c",
+  "tx_approve": "8cc3cdbac0e5ae5287592126df0137fdd55e0ded50b9911057c7979994131a14",
+  "receipt_id": "rcp_7d2bcc9486fd",
+  "charged_raw": "10000",
+  "call_body": {
+    "service_id": "svc_e2e_demo",
+    "provider_agent_id": 162,
+    "echo": {
+      "text": "hello coincall p0"
+    }
+  },
+  "keeper_status": {
+    "enabled": true,
+    "running": true,
+    "batch_size": 3,
+    "flush_interval_s": 30.0,
+    "queue": {
+      "pending": 0,
+      "done": 1,
+      "failed": 0,
+      "expired": 0
+    },
+    "last_batch": {
+      "flushed": true,
+      "expired": 0,
+      "recovered": 0,
+      "unresolved": 0,
+      "tx_hash": "0xddd5c042b795d23f7e203df703684c72f4f50111dbb3b8e432d90278ff76f8dd",
+      "submitted": 1,
+      "charged": 1,
+      "charged_raw": 10000,
+      "failed": 0,
+      "retried": 0
+    },
+    "cumulative_charged_count": 1,
+    "cumulative_charged_raw": "10000",
+    "blacklisted_consumers": [],
+    "last_error": null
+  },
+  "charged_event": {
+    "tx": "ddd5c042b795d23f7e203df703684c72f4f50111dbb3b8e432d90278ff76f8dd",
+    "block": 25799538,
+    "value": 10000,
+    "provider": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+  }
+}
