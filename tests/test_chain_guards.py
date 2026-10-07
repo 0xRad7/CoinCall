@@ -1,4 +1,4 @@
-"""chain.py 守卫逻辑单测：域白名单 / chainId 断言 / 20 gwei 交易模板 / 密钥纪律。"""
+"""chain.py 守卫逻辑单测：域白名单 / chainId 断言 / 20 gwei 交易模板 / 密钥纪律 / 代理会话。"""
 
 import pytest
 from eth_account import Account
@@ -9,16 +9,33 @@ from payvault.chain import (
     account_from_key,
     assert_chain_id,
     build_tx,
+    connect,
     connect_local_tester,
     connect_testnet,
     direct_session,
+    proxied_session,
+    session_for,
 )
 
 
 def test_connect_testnet_rejects_non_bohr_domain() -> None:
-    """链上访问只允许 *.bohr.life：其他域直接拒绝。"""
+    """链上访问只允许 bohr.life/botchain.ai：其他域直接拒绝。"""
     with pytest.raises(ValueError, match=r"bohr\.life"):
         connect_testnet("https://rpc.example.com/")
+
+
+def test_connect_rejects_domain_lookalikes() -> None:
+    """白名单是域后缀语义：bohr.life.example.com 这类伪装域必须拒绝。"""
+    with pytest.raises(ValueError, match="botchain"):
+        connect("https://rpc.example.com/")
+    with pytest.raises(ValueError, match="bohr"):
+        connect("https://evil-bohr.life.example.com/")
+
+
+def test_connect_accepts_both_network_domains() -> None:
+    """双网络域均可建连（HTTPProvider 惰性连接，构造不发请求）。"""
+    assert connect("https://rpc.bohr.life/") is not None
+    assert connect("https://rpc.botchain.ai/") is not None
 
 
 def test_direct_session_bypasses_env_proxy() -> None:
@@ -26,6 +43,19 @@ def test_direct_session_bypasses_env_proxy() -> None:
     session = direct_session()
     assert session.trust_env is False  # 忽略 http(s)_proxy 环境变量
     assert session.headers.get("User-Agent", "").startswith("Mozilla/")
+
+
+def test_proxied_session_trusts_env_proxy() -> None:
+    """botchain.ai 信任系统代理：trust_env=True + UA 伪装（污染环境 export HTTPS_PROXY 即可达）。"""
+    session = proxied_session()
+    assert session.trust_env is True
+    assert session.headers.get("User-Agent", "").startswith("Mozilla/")
+
+
+def test_session_for_routes_by_domain() -> None:
+    """按域选会话：bohr.life 直连，botchain.ai 走系统代理（代码不硬编码代理）。"""
+    assert session_for("https://rpc.bohr.life/").trust_env is False
+    assert session_for("https://rpc.botchain.ai/").trust_env is True
 
 
 def test_assert_chain_id_guard() -> None:

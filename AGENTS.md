@@ -15,7 +15,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy   # 静态三
 
 - 测试布局：`tests/test_payvault_behavior.py`（T4~T7 + 补充分支）、`tests/test_eip712_golden.py`（T8 黄金向量三层断言）、`tests/test_compile_artifacts.py`（产物防漂移）、`tests/test_chain_guards.py`（链上守卫）。
 - 需要重编译合约：`uv run python -c "from payvault.compile import compile_all; compile_all()"`，产物自动写 `artifacts/`（`test_artifacts_fresh` 会拦截漂移，改完源码必须重编译再提交）。
-- 真实部署/冒烟（消耗测试网 BOT）：`uv run python script/deploy_testnet.py`，结果覆盖写 `deployments/testnet-968.json`。
+- 真实部署/冒烟（消耗测试网 BOT）：`uv run python script/deploy_testnet.py`（= `--network testnet`），结果覆盖写 `deployments/testnet-968.json`。主网模式 `--network mainnet` 默认只 dry-run（签名前 guard 退出）；真部署需 `--yes-i-will-deploy` 且**只能由发起人手动执行**（mainnet-readiness.md §0 红线：AI 助手不得自主发起任何主网链上写操作），产物 `deployments/mainnet-677.json`。
 
 ## 绑定校验说明（其他仓如何对齐本仓）
 
@@ -29,7 +29,10 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy   # 静态三
 
 ## 私钥纪律
 
-私钥只从环境变量 `BOT_CHAIN_TEST_PRIVATE_KEY` 读（缺省解析 `coincall-bot-chain-api/.env`），任何日志/输出不得出现私钥，只允许地址与交易哈希。
+私钥只从环境变量读，任何日志/输出不得出现私钥，只允许地址与交易哈希：
+- 测试网：`BOT_CHAIN_TEST_PRIVATE_KEY`（缺省解析 `coincall-bot-chain-api/.env`）。
+- 主网：仅 `DEPLOYER_PRIVATE_KEY`（`0x` hex 或 0600 权限私钥文件路径；权限不符直接拒绝）——
+  绝不回退测试 .env、绝不用 anvil 助记词路径。
 
 ## 提交纪律
 

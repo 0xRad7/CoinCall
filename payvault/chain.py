@@ -2,8 +2,10 @@
 
 - BOT Chain 为 POA 链：必须注入 ExtraDataToPOAMiddleware，否则 get_block 全系失败；
 - gas 恒定 20 gwei（baseFee=0，不做动态费用），legacy(type-0) 交易；
-- *.bohr.life 域强制直连（trust_env=False 忽略环境代理），其他域拒绝访问；
-- 签名前断言 chainId == 968（防 RPC 指错网络）。
+- 域白名单双网络：*.bohr.life（测试网 968）强制直连（trust_env=False 忽略环境代理），
+  *.botchain.ai（主网 677）信任系统代理（trust_env=True，DNS 污染环境 export HTTPS_PROXY
+  即可，代码不硬编码代理），其余域一律拒绝访问；
+- 签名前断言 chainId == 目标网络链 ID（968/677，防 RPC 指错网络）。
 
 同一 send/deploy 助手也服务于 eth-tester 本地测试（无网络）。
 """
@@ -27,7 +29,11 @@ from payvault.compile import load_artifact
 
 TESTNET_RPC_URL = "https://rpc.bohr.life/"
 TESTNET_CHAIN_ID = 968
-ALLOWED_DOMAIN_SUFFIX = "bohr.life"  # 链上访问只允许该域（其余一律拒绝）
+MAINNET_RPC_URL = "https://rpc.botchain.ai/"
+MAINNET_CHAIN_ID = 677
+# 链上访问只允许这两个域后缀（其余一律拒绝）；bohr.life 直连，botchain.ai 走系统代理
+ALLOWED_DOMAIN_SUFFIXES = ("bohr.life", "botchain.ai")
+DIRECT_DOMAIN_SUFFIX = "bohr.life"  # 该域强制直连（忽略环境代理）；botchain.ai 信任 env 代理
 
 GAS_PRICE_WEI = 20 * 10**9  # 恒定 20 gwei
 GAS_MARGIN_RATIO = 1.2
@@ -48,20 +54,47 @@ def direct_session() -> Session:
     return session
 
 
-def connect_testnet(rpc_url: str = TESTNET_RPC_URL) -> Web3:
-    """连接 BOT Chain 测试网：域白名单 + UA 伪装 + 忽略环境代理（bohr.life 直连）+ POA 适配。"""
+def proxied_session() -> Session:
+    """botchain.ai 专用代理会话：trust_env=True 信任系统代理 + 同款 UA 伪装。
+
+    rpc.botchain.ai 在 DNS 污染环境不可直连（mainnet-readiness.md §1）：requests 信任
+    HTTPS_PROXY/https_proxy/ALL_PROXY 环境变量即可，代码不硬编码代理；部署机可直连时
+    无需任何配置。
+    """
+    session = Session()
+    session.trust_env = True
+    session.headers.update({"User-Agent": DEFAULT_UA, "Accept": "application/json"})
+    return session
+
+
+def session_for(rpc_url: str) -> Session:
+    """按域选择会话：*.bohr.life 直连，其余白名单域（botchain.ai）信任系统代理。"""
     host = (urlsplit(rpc_url).hostname or "").lower()
-    if not host.endswith(ALLOWED_DOMAIN_SUFFIX):
-        msg = f"链上访问只允许 *.{ALLOWED_DOMAIN_SUFFIX} 域: {rpc_url}"
+    return direct_session() if host.endswith(DIRECT_DOMAIN_SUFFIX) else proxied_session()
+
+
+def connect(rpc_url: str) -> Web3:
+    """连接 BOT Chain（测试网/主网通用）：域白名单 + 按域选择直连或系统代理 + POA 适配。
+
+    白名单外的域直接 ValueError（防 RPC 拼写错误指向陌生链）。
+    """
+    host = (urlsplit(rpc_url).hostname or "").lower()
+    if not any(host.endswith(suffix) for suffix in ALLOWED_DOMAIN_SUFFIXES):
+        msg = f"链上访问只允许 {ALLOWED_DOMAIN_SUFFIXES} 域: {rpc_url}"
         raise ValueError(msg)
     provider = HTTPProvider(
         endpoint_uri=rpc_url,
         request_kwargs={"timeout": 15.0},
-        session=direct_session(),
+        session=session_for(rpc_url),
     )
     w3 = Web3(provider)
     w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     return w3
+
+
+def connect_testnet(rpc_url: str = TESTNET_RPC_URL) -> Web3:
+    """连接 BOT Chain 测试网（bohr.life 直连 + UA 伪装 + POA 适配）。"""
+    return connect(rpc_url)
 
 
 def connect_local_tester() -> Web3:
@@ -74,7 +107,7 @@ def connect_local_tester() -> Web3:
 
 
 def assert_chain_id(w3: Web3, expected: int = TESTNET_CHAIN_ID) -> None:
-    """签名前断言链 ID（防 RPC 指错网络）。"""
+    """签名前断言链 ID（防 RPC 指错网络；主网传 expected=MAINNET_CHAIN_ID）。"""
     actual = w3.eth.chain_id
     if actual != expected:
         msg = f"chainId 不符: 期望 {expected}, 实际 {actual}（拒绝签名）"
@@ -195,6 +228,8 @@ def account_from_key(private_key: str) -> LocalAccount:
 
 
 __all__ = [
+    "MAINNET_CHAIN_ID",
+    "MAINNET_RPC_URL",
     "TESTNET_CHAIN_ID",
     "TESTNET_RPC_URL",
     "account_from_key",
@@ -202,8 +237,10 @@ __all__ = [
     "build_tx",
     "call_contract",
     "calldata",
+    "connect",
     "connect_local_tester",
     "connect_testnet",
     "deploy_contract",
+    "proxied_session",
     "sign_send_wait",
 ]
