@@ -83,7 +83,7 @@ export function humanizeError(e: unknown): HumanError {
 }
 
 function defaultHint(status: number, error: string, code: string): string {
-  if (status === 0) return "确认后端服务已启动、控制台经 npm run dev（5173 端口同源代理）访问。";
+  if (status === 0) return "确认后端服务已启动、控制台经 npm run dev（80 端口同源代理）访问。";
   if (status === 401) return "API key 无效或已吊销。到「消费端工作台 → API key」重新签发。";
   if (status === 404) return "服务不存在或已下架(paused)。刷新目录确认 service_id 与状态。";
   if (status === 409) return "幂等键冲突：同一 Idempotency-Key 换了不同参数。稍后重试或换个参数。";
