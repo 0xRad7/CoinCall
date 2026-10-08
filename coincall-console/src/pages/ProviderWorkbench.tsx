@@ -1264,24 +1264,31 @@ export interface RevenueSummary {
   wallets: string[];
 }
 
-/** 拉取收入三数：mine → Promise.all(teams detail) → Σ revenue；服务收款钱包去重 → Promise.all(credits) → Σ。 */
+/** 拉取收入三数：mine → 团队详情建去重钱包集 → 排行榜按钱包聚合 Charged → credits 逐钱包。
+ * Charged 的记账键是钱包而非团队：一个服务收款钱包可挂多团队（如同一钱包发 RadAI+RadTeam），
+ * Σ 团队详情的 revenue 会把同一批事件数 N 遍——总收入/笔数必须按钱包集聚合（与排行榜/proof 同口径）。 */
 async function fetchRevenueSummary(wallet: string): Promise<RevenueSummary> {
   const mine = await teamsApi.mine(wallet);
   const details = await Promise.all(mine.teams.map((t) => teamsApi.detail(t.agent_id).catch(() => null)));
-  let totalRaw = 0n;
-  let creditsRaw = 0n;
-  let chargedCount = 0;
   const walletSet = new Set<string>(); // 小写归一去重（revenue.wallets 与 manifest.wallet 大小写不一）
   for (const d of details) {
     if (!d) continue;
-    totalRaw += BigInt(d.revenue.total_raw);
-    chargedCount += d.revenue.charged_count;
     for (const w of d.revenue.wallets) walletSet.add(w.toLowerCase());
     for (const s of d.services) if (s.manifest.provider.wallet) walletSet.add(s.manifest.provider.wallet.toLowerCase());
   }
   const wallets = [...walletSet];
+  let totalRaw = 0n;
+  let chargedCount = 0;
+  if (wallets.length) {
+    const board = await coreApi.leaderboardProviders().catch(() => null); // 排行榜不可达 → 收入按 0，不崩
+    for (const row of board?.providers ?? []) {
+      if (!walletSet.has(row.wallet.toLowerCase())) continue;
+      totalRaw += BigInt(row.revenue_raw);
+      chargedCount += row.charged_count;
+    }
+  }
   const creditsArr = await Promise.all(wallets.map((w) => fetchProviderCredits(w).catch(() => 0n)));
-  creditsRaw = creditsArr.reduce((a, b) => a + b, 0n);
+  const creditsRaw = creditsArr.reduce((a, b) => a + b, 0n);
   // 已提现 = 总收入 − 当前 credits（口径：credits 是 Charged 后尚未 providerWithdraw 的部分）
   const withdrawnRaw = totalRaw > creditsRaw ? totalRaw - creditsRaw : 0n;
   return { totalRaw, creditsRaw, withdrawnRaw, teamsCount: mine.teams.length, chargedCount, wallets };
