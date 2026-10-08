@@ -75,9 +75,11 @@ function navGroups(adminEnabled: boolean, isAdmin: boolean): Array<{
   {
     label: "工作台",
     items: [
+      // 管理员：总览置顶（管理员的主视图）；非管理员：总览沉底（目录与比价参考）
+      ...(adminEnabled && !isAdmin ? [] : [{ to: "/" as const, end: true as const, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" }]),
       { to: "/provider", name: "Provider", sub: "团队与服务", identity: "provider" },
       { to: "/consumer", name: "Consumer", sub: "钱包与调用", identity: "consumer" },
-      ...(adminEnabled && !isAdmin ? [] : [{ to: "/" as const, end: true as const, name: "总览", sub: adminEnabled ? "管理员视图" : "目录与比价" }]),
+      ...(adminEnabled && !isAdmin ? [{ to: "/" as const, end: true as const, name: "总览", sub: "目录与比价" }] : []),
     ],
   },
   {
