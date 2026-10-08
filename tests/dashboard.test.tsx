@@ -69,6 +69,15 @@ function installFetch() {
     }
     if (url === "/api/core/teams/170") return jsonResponse(DETAIL_A);
     if (url === "/api/core/teams/171") return jsonResponse(DETAIL_B);
+    if (url === "/api/core/leaderboard/providers") {
+      return jsonResponse({
+        order: "revenue",
+        providers: [
+          { wallet: MY, display_name: "RadAI", agent_id: 170, revenue_raw: 30000, revenue: "0.03", charged_count: 2 },
+          { wallet: OTHER_WALLET, display_name: "Beta", agent_id: 171, revenue_raw: 20000, revenue: "0.02", charged_count: 2 },
+        ],
+      });
+    }
     return jsonResponse({ error: "not_mocked", detail: url }, 500);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -132,7 +141,7 @@ describe("收入 Grid", () => {
 
     // 总收入 = 30000+20000 = 50000 (0.05)
     expect(await screen.findByText("0.05 USDT")).toBeTruthy();
-    expect(screen.getByText(/raw=50000 · 4 笔/)).toBeTruthy(); // 2 teams × 2 笔
+    expect(screen.getByText(/raw=50000 · 4 笔/)).toBeTruthy(); // 排行榜口径：两钱包各 2 笔
     // 未提现 = 10000+5000 = 15000 (0.015)
     expect(screen.getByText("0.015 USDT")).toBeTruthy();
     expect(screen.getByText(/raw=15000 · PayVault credits/)).toBeTruthy();
@@ -143,6 +152,53 @@ describe("收入 Grid", () => {
     expect(creditsMock).toHaveBeenCalledWith(MY.toLowerCase());
     expect(creditsMock).toHaveBeenCalledWith(OTHER_WALLET.toLowerCase());
     expect(new Set(creditsMock.mock.calls.map((c) => c[0])).size).toBe(2); // 无重复
+  });
+
+  it("同一收款钱包挂多团队：Charged 按钱包只计一次（双计回归）", async () => {
+    // 线上 2026-10-08 实况复刻：170/171 两团队收款钱包同为 MY，各团队详情都报 50000/5 笔
+    // （团队按钱包聚合的重复视图）；排行榜按钱包记账只有一份 50000/5。
+    const sharedA = teamDetail(170, "RadAI", 50000, [MY]);
+    const sharedB = teamDetail(171, "RadTeam", 50000, [MY]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+        const url = String(input);
+        if (url.startsWith("/api/core/providers/mine?wallet=")) {
+          return jsonResponse({
+            wallet: MY,
+            teams: [
+              { agent_id: 170, display_name: "RadAI", claim_wallet: MY, service_count: 1, created_at: "t" },
+              { agent_id: 171, display_name: "RadTeam", claim_wallet: MY, service_count: 1, created_at: "t" },
+            ],
+          });
+        }
+        if (url === "/api/core/teams/170") return jsonResponse(sharedA);
+        if (url === "/api/core/teams/171") return jsonResponse(sharedB);
+        if (url === "/api/core/leaderboard/providers") {
+          return jsonResponse({
+            order: "revenue",
+            providers: [
+              { wallet: MY, display_name: "RadAI", agent_id: 170, revenue_raw: 50000, revenue: "0.05", charged_count: 5 },
+            ],
+          });
+        }
+        return jsonResponse({ error: "not_mocked", detail: url }, 500);
+      })
+    );
+    creditsMock.mockResolvedValue(0n); // 已全额提现（线上实况：credits=0）
+
+    render(
+      <WalletProvider>
+        <RevenueGrid />
+        <ConnectProbe />
+      </WalletProvider>
+    );
+    announce();
+    fireEvent.click(screen.getByTestId("probe-connect"));
+
+    expect(await screen.findByText("0.05 USDT")).toBeTruthy(); // 而非 0.1（双计）
+    expect(screen.getByText(/raw=50000 · 5 笔/)).toBeTruthy(); // 而非 10 笔
+    expect(document.body.textContent).not.toContain("0.1 USDT");
   });
 
   it("credits=0 时提现按钮禁用（无收入可提）", async () => {
