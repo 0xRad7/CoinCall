@@ -18,7 +18,7 @@ npm install          # 直连 registry；失败时走代理：HTTPS_PROXY=http:/
 ## 开发
 
 ```bash
-npm run dev          # http://127.0.0.1:5173  （host 127.0.0.1，端口固定 5173）
+npm run dev          # http://127.0.0.1  （host 0.0.0.0，端口固定 80——局域网免带端口）
 ```
 
 dev server 内置**同源代理**（避免后端跨域问题）：
@@ -34,7 +34,7 @@ dev server 内置**同源代理**（避免后端跨域问题）：
 
 ```bash
 npm run build        # tsc --noEmit + vite build → dist/
-npm run preview      # 同样走 5173，带同一套代理，可直接验收构建产物
+npm run preview      # 同样走 80 端口，带同一套代理，可直接验收构建产物
 ```
 
 ## 常用脚本与测试
@@ -75,7 +75,7 @@ COINCALL_E2E=1 npx vitest run tests/e2e.live.test.ts
 
 | 端口 | 用途 |
 |---|---|
-| 5173 | 本控制台（dev 与 preview 一致） |
+| 80 | 本控制台（dev 与 preview 一致；局域网访问免端口号） |
 | 8010 / 8020 / 8030 | 三个后端服务（只读依赖，由控制台代理访问） |
 
 > 注意：若直接以 `file://` 或其它静态服务器打开 `dist/`（无同源代理），对 8010/8020/8030 的请求会因跨域失败——请始终通过 `npm run dev` / `npm run preview` 访问。

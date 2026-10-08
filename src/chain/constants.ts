@@ -64,7 +64,7 @@ export const BOTCHAIN_BASE = "/api/chain";
 /**
  * 网关对外基址（单一来源，展示与 SDK 指引共用）：
  * - 默认 = window.location.origin + "/api/gw"（同源代理——三服务只绑 127.0.0.1，局域网唯一可达路径；
- *   本机是 http://127.0.0.1:5173/api/gw，局域网访客自动是其访问 origin，将来域名/反代部署零配置）；
+ *   本机是 http://127.0.0.1/api/gw，局域网访客自动是其访问 origin，将来域名/反代部署零配置）；
  * - 对外部署时用 .env 的 VITE_GATEWAY_PUBLIC_URL 覆盖（如 https://api.coincall.example），
  *   此时调用端点 = {覆盖值}/call/{id}。
  */

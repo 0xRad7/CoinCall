@@ -42,7 +42,7 @@ function networkError(e: unknown, base: string): ApiError {
   return new ApiError({
     status: 0,
     error: "network_error",
-    detail: `连不上后端（${base}）。请确认服务已启动且本控制台经 vite 代理访问（npm run dev 起在 5173）。`,
+    detail: `连不上后端（${base}）。请确认服务已启动且本控制台经 vite 代理访问（npm run dev 起在 80 端口）。`,
     code: "",
     traceId: "",
     fieldErrors: {},
