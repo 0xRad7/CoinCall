@@ -10,7 +10,6 @@ import { gatewayCallUrl, fromRaw, EXPLORER_HOST, EXPLORER_TX, EXPLORER_URL } fro
 export default function Overview() {
   const overview = useAsync(() => coreApi.overview(), []);
   const providers = useAsync(() => coreApi.leaderboardProviders(), []);
-  const catalog = useAsync(() => coreApi.catalog(), []);
   const [poll, setPoll] = useState(true);
   const keeper = useAsync(() => gatewayApi.keeperStatus(), [], { pollMs: poll ? 10_000 : 0 });
   // 决策徽章数据（一次拉取映射到目录卡）
@@ -91,61 +90,6 @@ export default function Overview() {
       <div className="card">
         <h3>服务目录</h3>
         <CatalogTeamsSplit decisionMap={decisionMap} />
-        <AsyncSection state={catalog} empty="目录为空——去 Provider 工作台发布第一个服务">
-          {(c) => (
-            <div className="svc-grid">
-              {c.services.map((s) => (
-                <div className="svc-card" key={s.service_id}>
-                  <div className="flex" style={{ justifyContent: "space-between" }}>
-                    <span className="svc-name">{s.manifest.name}</span>
-                    <Badge kind={s.status === "active" ? "ok" : "warn"}>{s.status}</Badge>
-                  </div>
-                  <div className="mono dim">{s.service_id}</div>
-                  <div style={{ margin: "8px 0" }}>
-                    <span className="svc-price">
-                      {s.manifest.pricing.amount} {s.manifest.pricing.token}
-                    </span>
-                    <span className="dim"> / 次 · raw={s.manifest.pricing.amount_raw}</span>
-                  </div>
-                  <div className="dim" style={{ marginBottom: 6 }}>
-                    {s.manifest.endpoint.type === "http_json" ? `上游请求方式 ${s.manifest.endpoint.method ?? "POST"}` : "internal（平台内置实现）"} · Provider {s.manifest.provider.display_name}
-                  </div>
-                  {(() => {
-                    const dr = decisionMap.get(s.service_id);
-                    if (!dr) return null;
-                    const anchor = typeof dr.components.fulfillment.proof === "object" ? dr.components.fulfillment.proof : null;
-                    return (
-                      <div className="flex" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }} title="决策层履约信号（付费窗口内实测）">
-                        <span className="badge ok">✓ {pct(dr.components.fulfillment.success_rate)}</span>
-                        {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
-                        <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
-                        {anchor && (
-                          <a className="badge muted" style={{ textDecoration: "none" }} href={EXPLORER_TX(anchor.anchor_tx)} target="_blank" rel="noreferrer" title={`锚定 ${anchor.digest.slice(0, 16)}…`}>
-                            🔗 {anchor.digest.slice(7, 15)}
-                          </a>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  <div className="call-endpoint-box">
-                    <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
-                    <div className="flex" style={{ gap: 6 }}>
-                      <span className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
-                        POST {gatewayCallUrl(s.service_id)}
-                        {s.manifest.endpoint.type === "http_json" && (s.manifest.endpoint.method ?? "POST") === "GET" && (
-                          <span className="badge muted" style={{ marginLeft: 6 }}>GET 上游</span>
-                        )}
-                      </span>
-                      <CopyButton text={`POST ${gatewayCallUrl(s.service_id)}`} label="复制" />
-                    </div>
-                    <div className="dim" style={{ fontSize: 11 }}>真实上游由平台中转，消费者只看到 CoinCall 端点</div>
-                  </div>
-                  {s.manifest.description && <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-2)" }}>{s.manifest.description}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-        </AsyncSection>
       </div>
 
       {/* keeper 结算观测 */}
@@ -443,7 +387,7 @@ function CatalogTeamsSplit({ decisionMap }: { decisionMap: Map<string, DecisionR
                     </div>
                     <span className="badge ok" title="团队聚合收入（链上 Charged）">{fromRaw(teamRev)} USDT</span>
                   </div>
-                  <div className="svc-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
+                  <div className="svc-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
                     {g.services.map((s) => {
                       const dr = decisionMap.get(s.service_id);
                       return (
@@ -457,18 +401,29 @@ function CatalogTeamsSplit({ decisionMap }: { decisionMap: Map<string, DecisionR
                             <span className="svc-price">{s.manifest.pricing.amount} {s.manifest.pricing.token}</span>
                             <span className="dim"> / 次</span>
                           </div>
-                          {dr && (
-                            <div className="flex" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }} title="决策层履约信号">
-                              <span className="badge ok">✓ {pct(dr.components.fulfillment.success_rate)}</span>
-                              {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
-                              <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
-                            </div>
-                          )}
+                          {dr && (() => {
+                            const anchor = typeof dr.components.fulfillment.proof === "object" ? dr.components.fulfillment.proof : null;
+                            return (
+                              <div className="flex" style={{ gap: 4, rowGap: 6, flexWrap: "wrap", marginBottom: 10 }} title="决策层履约信号">
+                                <span className="badge ok">✓ {pct(dr.components.fulfillment.success_rate)}</span>
+                                {dr.components.fulfillment.p95_ms != null && <span className="badge muted">p95 {dr.components.fulfillment.p95_ms}ms</span>}
+                                <span className="badge muted">🕐 {timeAgo(dr.components.freshness.last_activity_at)}</span>
+                                {anchor && (
+                                  <a className="badge muted" style={{ textDecoration: "none" }} href={EXPLORER_TX(anchor.anchor_tx)} target="_blank" rel="noreferrer" title={`锚定 ${anchor.digest.slice(0, 16)}…`}>
+                                    🔗 {anchor.digest.slice(7, 15)}
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })()}
                           <div className="call-endpoint-box">
                             <div className="dim" style={{ fontSize: 11 }}>CoinCall 调用端点</div>
-                            <div className="flex" style={{ gap: 6 }}>
-                              <span className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>POST {gatewayCallUrl(s.service_id)}</span>
-                              <CopyButton text={`POST ${gatewayCallUrl(s.service_id)}`} label="复制" />
+                            {/* URL 独占整行换行，复制按钮单独一行——长域名 break-all 与按钮同行会互相穿插重叠 */}
+                            <div className="mono" style={{ fontSize: 11, wordBreak: "break-all", lineHeight: 1.6, margin: "4px 0" }}>
+                              POST {gatewayCallUrl(s.service_id)}
+                            </div>
+                            <div style={{ marginTop: 2 }}>
+                              <CopyButton text={`POST ${gatewayCallUrl(s.service_id)}`} label="复制调用端点" />
                             </div>
                           </div>
                         </div>
