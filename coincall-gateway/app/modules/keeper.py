@@ -620,8 +620,12 @@ class Keeper:
                 raise
             except Exception as exc:
                 self.metrics.last_error = f"{type(exc).__name__}: {exc}"
+                # exc_info：周期级异常偶发（如 10-07 23:46 / 10-08 11:02 的 TypeError），
+                # 无栈回溯无法定位——全栈落日志是定位此类问题的唯一途径
                 logger.warning(
-                    "keeper 周期失败（行保持 pending，将重试）: %s", self.metrics.last_error
+                    "keeper 周期失败（行保持 pending，将重试）: %s",
+                    self.metrics.last_error,
+                    exc_info=exc,
                 )
             await asyncio.sleep(self._poll_interval)
 
