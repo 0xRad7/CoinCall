@@ -7,7 +7,8 @@
 - pricing.amount_raw 是**权威**十进制字符串（最小单位），amount 仅展示；
   两者按 token 精度（V1: USDT=6）做一致性校验；
 - endpoint.type V1 仅 http_json | internal（02 §6：Provider 超时硬顶 60s）；
-- chain.network V1 恒 968（BOT Chain 测试网），字段为多链迁移预留（P1-2）；
+- chain.network 限 BOT Chain 测试网 968 / 主网 677（P1-2 多链预留字段首次启用；事实源
+  ../coincall-contracts/deployments/{testnet-968,mainnet-677}.json）；
 - input/output_schema 必须是含 "type" 关键字的 JSON Schema（网关转发前校验依据）。
 """
 
@@ -32,6 +33,10 @@ ENDPOINT_TIMEOUT_HARD_CAP_MS = 60_000
 DEFAULT_ENDPOINT_TIMEOUT_MS = 30_000
 
 CHAIN_ID_BOT_TESTNET = 968
+CHAIN_ID_BOT_MAINNET = 677
+
+#: chain.network 白名单（事实源：../coincall-contracts/deployments/{testnet-968,mainnet-677}.json）
+CHAIN_IDS_ALLOWED = {CHAIN_ID_BOT_TESTNET, CHAIN_ID_BOT_MAINNET}
 
 
 class EndpointType(StrEnum):
@@ -176,7 +181,7 @@ class ManifestPricing(BaseModel):
 
 
 class ManifestChain(BaseModel):
-    """chain 段：V1 恒 968；接口为多链（Base Sepolia 等）预留。"""
+    """chain 段：BOT Chain 测试网 968 / 主网 677；接口为更多链（Base Sepolia 等）预留。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -184,9 +189,9 @@ class ManifestChain(BaseModel):
 
     @field_validator("network")
     @classmethod
-    def _v1_only_968(cls, v: int) -> int:
-        if v != CHAIN_ID_BOT_TESTNET:
-            raise ValueError("V1 仅支持 chain.network=968（BOT Chain 测试网）")
+    def _bot_chain_only(cls, v: int) -> int:
+        if v not in CHAIN_IDS_ALLOWED:
+            raise ValueError(f"chain.network 仅支持 BOT Chain: {sorted(CHAIN_IDS_ALLOWED)}")
         return v
 
 

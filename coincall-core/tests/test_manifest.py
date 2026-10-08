@@ -154,7 +154,16 @@ def test_reject_schema_without_type_keyword(client: TestClient) -> None:
     assert _post(client, bad).status_code == 422
 
 
-def test_reject_chain_other_than_968(client: TestClient) -> None:
+def test_accept_chain_mainnet_677(client: TestClient) -> None:
+    """主网放行（主网化遗漏回归）：chain.network=677 与 968 同为合法值。"""
+    good = copy.deepcopy(VALID_MANIFEST)
+    good["chain"] = {"network": 677}
+    resp = _post(client, good)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["manifest"]["chain"] == {"network": 677}
+
+
+def test_reject_chain_outside_bot_chain(client: TestClient) -> None:
     bad = copy.deepcopy(VALID_MANIFEST)
     bad["chain"] = {"network": 1}
     assert _post(client, bad).status_code == 422
