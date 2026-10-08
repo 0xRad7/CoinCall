@@ -1335,9 +1335,9 @@ export function RevenueGrid({ onWithdrawn }: { onWithdrawn?: () => void }) {
       {rev.data && (
         <div className="stat-grid">
           <StatCard
-            k="总收入（链上 Charged）"
-            value={`${fromRaw(rev.data.totalRaw)} USDT`}
-            sub={`raw=${rev.data.totalRaw.toString()} · ${rev.data.chargedCount} 笔`}
+            k="总收入（已提现到账）"
+            value={`${fromRaw(rev.data.withdrawnRaw)} USDT`}
+            sub={`raw=${rev.data.withdrawnRaw.toString()} · 每次提现后增加；链上 Charged 累计 ${fromRaw(rev.data.totalRaw)}`}
             evidence={<EvidencePair hash={`Σ teams revenue_raw=${rev.data.totalRaw.toString()}`} href={EXPLORER_URL} label="链上 Charged 口径，去 scan 核对" />}
           />
           <div className="stat-card">
