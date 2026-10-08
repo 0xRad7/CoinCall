@@ -62,7 +62,7 @@ CoinCall 是运行在 BOT Chain 上的 AI Agent 按次付费服务层：Agent �
 
 **前置条件**：
 
-- 端口空闲：`8010`（bot-chain-api）/ `8020`（core）/ `8030`（gateway）/ `5173`（console）
+- 端口空闲：`8010`（bot-chain-api）/ `8020`（core）/ `8030`（gateway）/ `80`（console，局域网访问免端口号）
 - 各服务 `.env` 从对应 `.env.example` 复制起改（console `VITE_*` 链参数、gateway `COINCALL_*`、core `COINCALL_CORE_*` 前缀、bot-chain-api `BOT_CHAIN_*`）；`.env` 不入仓
 - 直连 `rpc.botchain.ai` 受限（DNS 污染）时需本地 HTTP 代理：`HTTPS_PROXY=http://127.0.0.1:7890`（up.sh 已为 core 注入，其余直连本机不受影响）
 - 可选：`consumer_agent` 演示需 DashScope API key；主网 operator 签名依赖 bot-chain-api 托管 keystore（不入仓，克隆副本不含，缺它则仅测试网/只读操作可用）
@@ -70,11 +70,11 @@ CoinCall 是运行在 BOT Chain 上的 AI Agent 按次付费服务层：Agent �
 ## 快速开始（测试网）
 
 ```bash
-./up.sh status    # 四服务健康检查（8010/8020/8030/5173）
+./up.sh status    # 四服务健康检查（8010/8020/8030/80）
 ./up.sh start     # 一键拉起（keeper 5s 批结算，core 带外网代理）
 ```
 
-浏览器打开 `http://127.0.0.1:5173/#/welcome` → 连接钱包 → 选择身份。
+浏览器打开 `http://127.0.0.1/#/welcome` → 连接钱包 → 选择身份。
 
 消费端 Agent 接入（详见 `coincall-docs/agent-onboarding.md`）：
 
@@ -136,7 +136,7 @@ Agent → service_quote（报价+平台建议+安全评估，免费）
 | bot-chain-api :8010 | `BOT_CHAIN_NETWORK=mainnet` + `BOT_CHAIN_ALLOW_MAINNET=1` + `PROXY`（主网模式自动拒载裸私钥，签名走 keystore） |
 | gateway :8030 | `COINCALL_PAY_VAULT_ADDRESS` / `COINCALL_PAYMENT_TOKEN_ADDRESS` / `COINCALL_CHAIN_ID=677` / `COINCALL_CHAIN_RPC_URL` / `COINCALL_KEEPER_OPERATOR_ADDRESS` / `COINCALL_KEEPER_CHAIN_MODE=api`（结算经 8010 keystore 签名，规避 DNS 污染） / `COINCALL_IDENTITY_REGISTRY_ADDRESS` |
 | core :8020 | **前缀是 `COINCALL_CORE_`**（≠gateway 前缀，易踩坑）：`_PAY_VAULT_ADDRESS` / `_PAY_VAULT_DEPLOY_BLOCK=25878130`（Charged 索引起点） / `_PLATFORM_CUSTODIAN_ADDRESS`；出网探测需 `HTTPS_PROXY` + `NO_PROXY=127.0.0.1,localhost` |
-| console :5173 | `VITE_CHAIN_ID=677` / `VITE_CHAIN_NAME` / `VITE_RPC_URL` / `VITE_EXPLORER_URL=scan.botchain.ai` / `VITE_PAY_VAULT` / `VITE_USDT`（改后重启 dev + 浏览器硬刷新） |
+| console :80 | `VITE_CHAIN_ID=677` / `VITE_CHAIN_NAME` / `VITE_RPC_URL` / `VITE_EXPLORER_URL=scan.botchain.ai` / `VITE_PAY_VAULT` / `VITE_USDT`（改后重启 dev + 浏览器硬刷新） |
 | SDK / Agent | `COINCALL_NETWORK=mainnet`（网络表自动取 677/主网 RPC/主网 USDT） + `LocalWallet(pay_vault=0x39f9…)` 显式传入新金库 |
 
 已知混合状态：core DuckDB 保留测试网历史行（GMV/charged_count 为两网合计，主网新事件从 25878130 起计）；EIP-712 域已变——测试网时代的收据/授权全部失效，消费者需对新金库重新 approve。
