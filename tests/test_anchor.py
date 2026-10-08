@@ -116,6 +116,32 @@ async def test_anchor_submit_failure_keeps_for_retry_without_report() -> None:
 
 
 @respx.mock
+async def test_anchor_permanent_failure_stops_retrying() -> None:
+    """身份不在当前链（0x7e273289 选择器，主网实测）→ 永久失败停试：下一轮不再打链。
+
+    背景：主网切换后存量服务的 agent_id 是测试网铸造的 ERC-8004 身份，
+    setMetadata 打主网 registry 永远 revert——重试不可自愈，只应停试并透出。
+    """
+    respx.get(f"{CORE}/internal/decision/anchor-pending").respond(json=PENDING_BODY)
+    send_route = respx.post(f"{CHAIN}/api/v1/contracts/send").respond(
+        status_code=500,
+        text='{"error":"tx_reverted","detail":"tokenId 170 不存在或未注册: '
+        "(\\'0x7e273289000000000000000000000000000000000000000000000000000000000000aa\\', "
+        "\\'0x7e273289000000000000000000000000000000000000000000000000000000000000aa\\')\"}",
+    )
+
+    task = _task()
+    r1 = await task.run_cycle()
+    assert r1["failed"] == 2 and r1["submitted"] == 0
+    calls_after_first = send_route.call_count
+
+    r2 = await task.run_cycle()  # 停试：不再向链发请求
+    assert send_route.call_count == calls_after_first
+    assert r2["failed"] == 2
+    assert task.status_snapshot()["permanent_failed"]  # 状态透出，运维可查
+
+
+@respx.mock
 async def test_anchor_receipt_status_failed_raises_for_retry() -> None:
     """/contracts/send 返回 status=0（上链 revert）→ 同失败路径，不回执。"""
     respx.get(f"{CORE}/internal/decision/anchor-pending").respond(json=PENDING_BODY)
