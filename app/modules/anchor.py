@@ -46,6 +46,16 @@ HTTP_OK = 200
 class AnchorChainError(Exception):
     """锚定提交失败（条目保持待锚定，下轮重试）。"""
 
+    #: 永久性失败特征：IdentityRegistry 对不存在 tokenId 的自定义错误选择器
+    #: （主网实测 0x7e273289…<tokenId>，8010 以 500 文本携带）。身份不在当前链上，
+    #: 重试不可能自愈（需在该链重铸身份），应停试并透出，而不是每 30 分钟空转打 500。
+    PERMANENT_MARKERS = ("0x7e273289", "不存在或未注册")
+
+    @property
+    def permanent(self) -> bool:
+        text = str(self)
+        return any(m in text for m in self.PERMANENT_MARKERS)
+
 
 class AnchorCoreError(Exception):
     """core 依赖不可达（本周期降级为告警，不阻塞）。"""
@@ -186,6 +196,9 @@ class AnchorTask:
         self.metrics = AnchorMetrics()
         self._now = now
         self._task: asyncio.Task[None] | None = None
+        #: 永久性失败停试表（anchor_id）：身份不在当前链等重试不可自愈的条件。
+        #: 进程级记忆——重铸身份后重启网关即可重新尝试。
+        self._permanent_failed: set[str] = set()
 
     # ---- 常驻任务 ----
 
@@ -237,19 +250,33 @@ class AnchorTask:
 
         report["pending"] = len(pending)
         for item in pending:
+            if item.anchor_id in self._permanent_failed:
+                report["failed"] += 1  # 停试条目计入 failed 但不再打链
+                continue
             value = item.value()
             try:
                 tx_hash = await self.chain.submit_anchor(item.token_id, item.key, value)
             except AnchorChainError as exc:
                 report["failed"] += 1
                 self.metrics.last_error = str(exc)
-                logger.warning(
-                    "锚定提交失败（下轮重试，幂等靠 core anchor_records）: "
-                    "anchor=%s token=%s err=%s",
-                    item.anchor_id,
-                    item.token_id,
-                    exc,
-                )
+                if exc.permanent:
+                    self._permanent_failed.add(item.anchor_id)
+                    logger.error(
+                        "锚定永久失败（停试，重启网关才会重试）: anchor=%s token=%s "
+                        "——该 ERC-8004 身份不在当前链（主网切换前于测试网铸造），"
+                        "需在当前链重铸身份后重新发布服务: %s",
+                        item.anchor_id,
+                        item.token_id,
+                        exc,
+                    )
+                else:
+                    logger.warning(
+                        "锚定提交失败（下轮重试，幂等靠 core anchor_records）: "
+                        "anchor=%s token=%s err=%s",
+                        item.anchor_id,
+                        item.token_id,
+                        exc,
+                    )
                 continue
             report["submitted"] += 1
             try:
@@ -286,6 +313,7 @@ class AnchorTask:
             "interval_s": self.interval_s,
             "key": ANCHOR_KEY,
             "anchored_count": self.metrics.anchored_count,
+            "permanent_failed": sorted(self._permanent_failed),
             "last_run_at": (
                 int(self.metrics.last_run_at) if self.metrics.last_run_at is not None else None
             ),
