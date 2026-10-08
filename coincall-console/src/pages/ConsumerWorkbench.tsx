@@ -5,7 +5,7 @@
  * 控制台不接触任何私钥；无扩展的演示机可展开「一次性演示钱包」兜底（关页即焚）。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { hashSha256HexStringish } from "../lib/idempotency";
+import { randomIdemKey } from "../lib/idempotency";
 import { ApiError } from "../api/client";
 import { coreApi } from "../api/core";
 import { gatewayApi, type Gateway402Challenge } from "../api/gateway";
@@ -583,7 +583,7 @@ export function TrialCallSection() {
       setWaitingSign(false);
       // ② X-PAYMENT（v 已归一 27|28）+ 幂等键（参数哈希，同参重试同键防双扣）
       const payment = buildPaymentHeader(auth, sig);
-      const idem = await hashSha256HexStringish(`${svc.service_id}:${JSON.stringify(parsedParams)}`);
+      const idem = randomIdemKey(); // 每次点击新键：幂等只防同一次调用的重试，不防语义重复（确定性键曾致缓存假成功）
       const headers = { "X-Api-Key": apiKey ?? "", "X-PAYMENT": payment, "X-Idempotency-Key": idem };
       // ③ 调用（402 在 apiFetch 里抛 ApiError，这里接住转质询）
       const outcome = await gatewayApi.call(svc.service_id, parsedParams, headers);

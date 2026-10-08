@@ -19,9 +19,9 @@ export default defineConfig({
   // host: true = 监听 0.0.0.0，局域网机器可访问（后端三服务仍仅本机，经此代理转发）
   // hmr:false=关闭热更新（发起人 2026-10-07）：编辑不再实时推送，改完统一重启前端
   server: { port: 5173, host: true, hmr: false, proxy,
-    // ngrok 免费版会带 ngrok-skip-browser-warning 头且 Host 为隧道域名——vite>=5.1 需显式放行
-    allowedHosts: [".ngrok-free.dev", ".ngrok.io"] },
-  preview: { port: 5173, host: true, proxy },
+    // 演示期隧道域名常换（ngrok / 51vip 等）——放行任意 Host（本机演示服务，风险可接受）
+    allowedHosts: true },
+  preview: { port: 5173, host: true, proxy, allowedHosts: true },
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",

@@ -76,3 +76,17 @@ export function sha256Hex(input: string): string {
 export async function hashSha256HexStringish(input: string): Promise<string> {
   return sha256Hex(input);
 }
+
+/**
+ * 每次调用唯一的幂等键（随机 32 hex）。
+ *
+ * 教训（2026-10-08 主网实测）：确定性键 SHA(service_id+params) 会让"同参数再次调用"命中
+ * 网关幂等缓存——返回旧结果、不执行、不扣款、不入结算队列，provider 收不到钱且页面
+ * 看起来是成功（与 SDK 旧 bug 同源，SDK 已改 uuid）。幂等键的语义是"同一次逻辑调用的
+ * 重试去重"，不是"同参数终身去重"，因此每次点击都应生成新键。
+ * 用 crypto.getRandomValues（非安全上下文 http 局域网也可用；subtle/randomUUID 不行）。
+ */
+export function randomIdemKey(): string {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
